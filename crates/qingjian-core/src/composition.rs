@@ -2,11 +2,16 @@
 //!
 //! 只维护「用户已经敲了什么、光标在哪」，不理解拼音，也不知道候选。
 //! 缓冲区只含 ASCII 小写字母和 `'`（表达式模式下还有数字与运算符，见 `shortcut`；微软 / 搜狗双拼下还有 `;`），所以字节下标即字符下标。
+//! 中文模式下 Shift+字母按**小写**进缓冲区参与匹配（`Cpan` 与 `cpan` 一样出 C盘），
+//! 敲的是大写记在 `shifted` 里，原样上屏时用 [`Composition::typed_text`] 还原。
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Composition {
-    /// 用户已敲入、尚未上屏的拼音，统一小写。
+    /// 用户已敲入、尚未上屏的拼音，匹配用的小写形式。
     buffer: String,
+
+    /// 与 `buffer` 的字符一一对应：该位是按住 Shift 敲的大写字母。
+    shifted: Vec<bool>,
 
     /// 光标位置（字节下标，`0..=buffer.len()`），插入和退格都相对它。
     cursor: usize,
@@ -40,10 +45,59 @@ impl Composition {
         &self.buffer[self.scope().len()..]
     }
 
-    /// 在光标处插入一个字符。
+    /// 字节位置 `byte`（须落在字符边界上）对应的字符下标。
+    fn char_index(&self, byte: usize) -> usize {
+        self.buffer[..byte].chars().count()
+    }
+
+    /// 在光标处插入一个字符，大小写原样保留。
     pub fn push(&mut self, c: char) {
+        let index = self.char_index(self.cursor);
         self.buffer.insert(self.cursor, c);
-        self.cursor += 1;
+        self.shifted.insert(index, false);
+        self.cursor += c.len_utf8();
+    }
+
+    /// 中文模式下按住 Shift 敲的字母：按小写进缓冲区参与匹配，原样上屏时还原大写。
+    pub fn push_shifted(&mut self, c: char) {
+        let index = self.char_index(self.cursor);
+        self.push(c.to_ascii_lowercase());
+        if let Some(shifted) = self.shifted.get_mut(index) {
+            *shifted = true;
+        }
+    }
+
+    /// 缓冲区里有没有 Shift 敲的大写字母。
+    pub fn has_shifted(&self) -> bool {
+        self.shifted.iter().any(|shifted| *shifted)
+    }
+
+    /// 缓冲区原样（`shifted` 的位置还原大写），回车原样上屏用。
+    pub fn typed_text(&self) -> String {
+        self.typed(self.buffer.len())
+    }
+
+    /// [`Self::scope`] 的原样形式。
+    pub fn typed_scope(&self) -> String {
+        self.typed(self.scope().len())
+    }
+
+    /// 前 `len` 字节的原样形式。
+    fn typed(&self, len: usize) -> String {
+        if !self.has_shifted() {
+            return self.buffer[..len].to_owned();
+        }
+        self.buffer[..len]
+            .chars()
+            .enumerate()
+            .map(|(index, c)| {
+                if self.shifted.get(index) == Some(&true) {
+                    c.to_ascii_uppercase()
+                } else {
+                    c
+                }
+            })
+            .collect()
     }
 
     /// 删掉光标前一个字符。光标在开头时返回 `false`。
@@ -51,8 +105,10 @@ impl Composition {
         if self.cursor == 0 {
             return false;
         }
+        let index = self.char_index(self.cursor) - 1;
         self.cursor -= 1;
         self.buffer.remove(self.cursor);
+        self.shifted.remove(index);
         true
     }
 
@@ -61,7 +117,9 @@ impl Composition {
         if self.cursor >= self.buffer.len() {
             return false;
         }
+        let index = self.char_index(self.cursor);
         self.buffer.remove(self.cursor);
+        self.shifted.remove(index);
         true
     }
 
@@ -89,7 +147,10 @@ impl Composition {
         if len == 0 {
             return false;
         }
+        let from = self.char_index(self.cursor - len);
+        let to = self.char_index(self.cursor);
         self.buffer.drain(self.cursor - len..self.cursor);
+        self.shifted.drain(from..to);
         self.cursor -= len;
         true
     }
@@ -104,6 +165,7 @@ impl Composition {
 
     pub fn clear(&mut self) {
         self.buffer.clear();
+        self.shifted.clear();
         self.cursor = 0;
     }
 
@@ -111,7 +173,9 @@ impl Composition {
     /// 被吃掉的部分盖过了光标（`ni|hao` 上屏了 你）时光标落到末尾，接着组句就是往后打。
     pub fn drain_prefix(&mut self, len: usize) {
         let len = len.min(self.buffer.len());
+        let removed = self.char_index(len);
         self.buffer.drain(..len);
+        self.shifted.drain(..removed);
         self.cursor = if self.cursor > len {
             self.cursor - len
         } else {
@@ -150,6 +214,31 @@ mod tests {
         assert!(composition.backspace());
         assert!(!composition.backspace());
         assert!(composition.is_empty());
+    }
+
+    #[test]
+    fn shifted_letters_match_lowercase_and_restore_case_on_raw_commit() {
+        let mut composition = Composition::default();
+        composition.push_shifted('C');
+        composition.push('p');
+        composition.push('a');
+        composition.push('n');
+        // 匹配用的小写形式
+        assert_eq!(composition.text(), "cpan");
+        assert_eq!(composition.scope(), "cpan");
+        // 原样上屏用的大小写
+        assert_eq!(composition.typed_text(), "Cpan");
+        assert_eq!(composition.typed_scope(), "Cpan");
+        // 退格把后面的小写删掉，大写那一位还留着
+        for _ in 0..3 {
+            composition.backspace();
+        }
+        composition.push('b');
+        assert_eq!(composition.text(), "cb");
+        assert_eq!(composition.typed_text(), "Cb");
+        composition.clear();
+        assert_eq!(composition.typed_text(), "");
+        assert!(!composition.has_shifted());
     }
 
     #[test]

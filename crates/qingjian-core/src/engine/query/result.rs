@@ -17,6 +17,30 @@ pub(crate) fn join_marked(segmentations: &[Segmentation], tail: &str) -> String 
     text
 }
 
+/// 与 [`join_marked`] 相同的分段，但用原样大小写的输入（`Cpan`）：切分是按小写算的，
+/// 大小写只影响显示，逐段按同样的字节长度取回原样文本。
+pub(crate) fn join_marked_typed(typed: &str, segmentations: &[Segmentation], tail: &str) -> String {
+    let mut text = String::new();
+    let mut offset = 0;
+    if let Some(first) = segmentations.first() {
+        for (index, syllable) in first.syllables.iter().enumerate() {
+            if index > 0 {
+                text.push('\'');
+            }
+            let end = (offset + syllable.text.len()).min(typed.len());
+            text.push_str(&typed[offset..end]);
+            offset = end;
+        }
+    }
+    if !tail.is_empty() {
+        if !text.is_empty() {
+            text.push('\'');
+        }
+        text.push_str(&typed[offset.min(typed.len())..]);
+    }
+    text
+}
+
 use crate::engine::timings::Timings;
 use crate::engine::{MarkedKind, MarkedSegment};
 

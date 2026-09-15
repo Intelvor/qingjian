@@ -1,6 +1,7 @@
 //! 快捷候选（搜狗「v 模式」的那一套）：不查词库、由输入本身直接算出来的候选。
 //!
 //! - `rq` / `sj` / `xq`：今天的日期、现在的时间、星期几，插在本地候选第二位起。
+//! - `mp`：`mp3` / `mp4`，在 emoji 之后钉进第 3、4 项（见 [`media_format_forms`]）。
 //! - 表达式键（缺省 `v`）开头进表达式模式：`v1+2` 出 `3` 与 `1+2=3`，`v123` 出中文数字（小写与大写）。
 //!   表达式模式下缓冲区允许数字与运算符，候选不走拼音解析。
 //! - 问字键（缺省 `u`）后跟十六进制码点出那个字符：`u4e00` → 一，`u+1f600` → 😀。模式键本身在 `engine::ModeKeys`。
@@ -78,6 +79,28 @@ pub fn candidates(input: &str, expression: char, now: &Zoned) -> Vec<Candidate> 
         .collect()
 }
 
+/// `mp` → mp3 / mp4：从列表第 3 项起插入（前两项留给英文 / 词库与 emoji）。
+/// 不走 [`candidates`]，因为要在 emoji 插完之后再钉位置。
+pub fn media_format_forms(input: &str) -> Vec<Candidate> {
+    let texts: &[&str] = match input {
+        "mp" => &["mp3", "mp4"],
+        _ => return Vec::new(),
+    };
+    texts
+        .iter()
+        .map(|text| Candidate {
+            text: (*text).to_owned(),
+            kind: CandidateKind::Shortcut,
+            syllables: Vec::new(),
+            reading: None,
+            translation: None,
+        })
+        .collect()
+}
+
+/// 媒体格式快捷候选从第几项起插入（0 起，即第 3、4 项）。
+pub const MEDIA_FORMAT_INSERT_AT: usize = 2;
+
 /// 表达式键之后的部分：纯数字出中文数字，四则运算出结果与「算式=结果」。
 fn expression_forms(body: &str) -> Vec<String> {
     if body.is_empty() {
@@ -140,6 +163,20 @@ mod tests {
         assert_eq!(texts("sj"), ["19:06", "19:06:23", "19点06分"]);
         assert_eq!(texts("xq"), ["星期四", "周四"]);
         assert!(texts("rqi").is_empty());
+    }
+
+    #[test]
+    fn media_format_shortcuts() {
+        let forms = |input: &str| {
+            media_format_forms(input)
+                .into_iter()
+                .map(|c| c.text)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(forms("mp"), ["mp3", "mp4"]);
+        assert_eq!(MEDIA_FORMAT_INSERT_AT, 2);
+        assert!(forms("mp3").is_empty());
+        assert!(forms("rq").is_empty());
     }
 
     #[test]
