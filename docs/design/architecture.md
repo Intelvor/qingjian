@@ -393,10 +393,20 @@ CC-CEDICT 表（`dict-convert cedict`）保留为备用来源，覆盖面广但�
   失焦 / 停用时 DLL 发 `Commit`，Server 回 `Committed { text }`（缓冲区原样交出，对应 macOS 的 `commitComposition`），
   DLL 用最近收键记下的 `ITfContext` 经编辑会话落进文档；应用强行终止组句（`OnCompositionTerminated`）时拼音已被框架定成普通文本，
   DLL 只记「Server 缓冲过期」，下次说话前先 `Commit` 并丢掉交出的文本，不再插一次。
-  中英模式：**Windows 与 macOS 机制不同**。macOS 用 Caps Lock 当中英切换键；Windows 按本地习惯，单击 Shift 在中 / 英间翻转。
-  单击 Shift 的判定在**击键 sink** 里（`com/key/shift.rs`，喂 `OnTestKeyDown` / `OnTestKeyUp`：按下 Shift 到抬起之间没有别的键插进来就是一次单击；
+  中英模式：**Windows 与 macOS 机制不同**。macOS 用 Caps Lock 当中英切换键；Windows 按本地习惯，单击切换键在中 / 英间翻转，
+  切换键由 `[shortcut] switch_mode` 定（`shift` 缺省 / `control` / `none` 不切换），`[general] english_mode` 关掉则整个内置英文模式停用（issue #81）。
+  单击判定在**击键 sink** 里（`com/key/tap.rs`，喂 `OnTestKeyDown` / `OnTestKeyUp`：按下切换键到抬起之间没有别的键插进来就是一次单击；
   微软 SampleIME 的 `OnTestKeyDown` 同样处理 VK_SHIFT，sink 收得到独立修饰键）。之前用线程级 `WH_KEYBOARD` 钩子判定，但钩子**看不到被 TSF 吃掉的键**
   （msctf 在队列层把它们改成 WM_NULL），Shift + 数字（删候选 / 第二译词）会被误判成单击而切换模式，2026-09-11 真机确认 sink 收得到 Shift 后钩子已删。
+  切换键、英文模式开关与翻译快捷键一样，由 DLL 自己读 `com/settings.rs`（`%APPDATA%\Qingjian\config.toml`）：激活时读一次，
+  之后由轮询定时器按 mtime 热加载（每 ~320 ms 看一次，见 `com/poll/`），**设置窗口改完立刻生效**，不必切走再切回输入法。
+  切换键选 `ctrl+space` 时它是组合键、属系统键不经击键 sink，与翻译快捷键一样登记成 TSF 保留键
+  （`com/key/preserved.rs` 的 `GUID_SWITCH_MODE`）；但 Windows 缺省把「输入法/非输入法切换」
+  （`IME_CHOTKEY_IME_NONIME_TOGGLE`，注册表 `Hot Keys\00000010`）也绑在它上面，系统会先截走，而且系统那条路
+  会把转换模式翻成「非原生」、我们又按 compartment 同步成英文——两边各切一次互相抵消。所以注册前先读那个热键，
+  被占着就不登记自己的、把切换交给系统那条路（`service/mode.rs::sync_switch_preserved_key`）。
+  **四条切换入口**——单击切换键、语言栏按钮、悬浮状态条、任务栏转换模式 compartment——都汇到 `com/service/mode.rs::set_english_mode`，
+  内置英文模式关着时在那里一并拦住（Server 侧状态条点击按同一项拦，免得两边显示不一致），此时连语言栏的「中 / 英」按钮都不登记。
   「翻译选中文字」的快捷键（缺省 Ctrl+Alt+T）**登记成 TSF 保留键**（`com/key/preserved.rs`，`ITfKeystrokeMgr::PreserveKey` → `OnPreservedKey`）：
   带 Alt 的组合是系统键、不经击键 sink（真机 `OnTestKeyDown` 里从没出现过），保留键由 TSF 在应用之前匹配，UWP 里也一样；组合激活时从
   `config.toml` 读一次（AppContainer 读不到用户目录时用缺省），命中后当作那个组合键转发给 Server 走原有的 `RequestSelection` 流程。
@@ -404,11 +414,19 @@ CC-CEDICT 表（`dict-convert cedict`）保留为备用来源，覆盖面广但�
   （`com/mode/button.rs`，图标现画「中」/「英」，第三方 TIP 单写转换模式 compartment 不出这个指示器），另外顺带写一份转换模式 compartment
   （`GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION` 的 `TF_CONVERSIONMODE_NATIVE` 位，`com/mode/mod.rs`）。这条 compartment 还**反向同步**：激活时对它挂
   `ITfCompartmentEventSink`（`com/mode/conversion.rs`），用户点任务栏中 / 英（或别的输入指示器途径）改了转换模式时 `OnChange` 读回 `NATIVE` 位、与当前
-  `english_mode` 不同才翻转（相同即我们自己写的那次，忽略以防回环），翻转顺带走 `update_mode_indicator` → 悬浮状态条也一起同步；Caps Lock 只管大小写，
+  `english_mode` 不同才翻转（相同即我们自己写的那次，忽略以防回环），翻转顺带走 `update_mode_indicator` → 悬浮状态条也一起同步；
+  **激活后的最初一瞬除外**（`service/mode.rs` 的 `CONVERSION_RESTORE_GUARD`，约 1.2 s）：msctf 会在 TIP 激活后 200–300 ms 把 profile 存的
+  转换模式（缺省「非原生」= 关掉输入法）写回 compartment，采纳它会让每个应用一激活就是英文模式——表现是「Ctrl + Space 好像不能用」，
+  其实只是每次都被打回英文。Caps Lock 只管大小写，
   亮着无论中英模式都直接出大写英文（微软拼音式）。`KeyModifiers` 因此带 `caps`（大小写）与 `english_mode`（持久模式）两个非物理位，
   字母大小写按 `shift XOR caps`。Router（`dispatch/key/input.rs`）里 `english = caps || english_mode`、候选只在 `english_mode && !caps && 应用允许` 时给，
   `[general] english_candidates` 关着就是纯直通。macOS 的「先上屏、再把这个键交给应用」在 Windows 上会乱序
-  （放行是同步的、上屏走异步编辑会话），所以组句中的空格 / 标点 / Shift 大写字母改成吃掉，连同上屏文本一起插入；
+  （放行是同步的、上屏走异步编辑会话），所以组句中的空格 / 标点改成吃掉、连同上屏文本一起插入；Shift 大写字母交 [`Engine::push`] 进缓冲区
+  （Core 按小写匹配、原样上屏时还原大写，见 [`Composition`]），不再走「先上屏再放行」；
+  组句外没有全角映射的字符里，`-` `=` 也改由壳自己插入（`dispatch/key/input.rs::apply_punctuation`）：
+  放行要等宿主把键交回应用，实测在部分宿主（Edge / QQ 等）里这个键到不了，用户看到的是「按了没反应」；
+  其余（`@` 数字等）继续放行，宿主连不上 Server 时也只吃「可能是在打拼音」的字母（`service/key_sink.rs`），
+  免得断连窗口里标点 / 数字跟着一起没反应；
   `[apps] english_candidates_off` 按应用关闭：应用标识在 Windows 上是宿主进程的 exe 文件名（DLL 加载在应用进程里，`GetModuleFileNameW(NULL)`
   取到就随 `OpenSession { app }` 报一次，Server 每会话记下，收键时按当前会话查），缺省名单分平台（`AppsConfig` 的两份常量与配置模板的 `[apps]` 一节都按 `cfg(windows)` 选），
   经典控制台的窗口属于 `conhost.exe`、Windows Terminal 是 `WindowsTerminal.exe`；

@@ -162,6 +162,9 @@
   - [x] Server 进程 + TSF DLL 骨架、命名管道 IPC、多会话分派、端到端上屏
   - [x] preedit 内联下划线、候选窗（词性 + 译文 + 分页 + 阴影）、云联想、失焦上屏、中英切换、设置界面、Inno 安装器
   - [x] 候选窗渲染搬进 Server 进程 + `uiAccess` + 自签，覆盖微软商店 / 任务栏搜索等高 z-band 宿主
+  - [x] 中英切换可配置（2026-09-15，issue #81）：`[shortcut] switch_mode` 选单击 Shift / 单击 Ctrl / 不切换，
+    `[general] english_mode` 关掉则内置英文模式整体停用（固定中文、不再登记语言栏按钮、状态条也不切）；
+    四项都在「设置 → 通用」，DLL 激活时读一次配置
   - [ ] 发版：Certum 开源代码签名证书、`windows-v<版本>` 标签与 CI
 - [ ] Linux IBus / Fcitx
 - [ ] 配置同步
