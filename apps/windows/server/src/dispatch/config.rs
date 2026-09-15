@@ -23,6 +23,10 @@ pub struct RouterConfig {
     /// 英文模式给不给英文候选（`[general] english_candidates`）。
     pub english_candidates: bool,
 
+    /// 内置英文模式总开关（`[general] english_mode`）：关掉后状态条上的「中 / 英」不再切模式
+    /// （切换键与语言栏按钮由 DLL 按同一项拦住，见 `com::service::mode`）。
+    pub english_mode: bool,
+
     /// 中文模式下不在组句时的标点转全角（`[general] full_width_punctuation`）；状态条可切。
     pub full_width: bool,
 
@@ -70,6 +74,7 @@ impl From<&Config> for RouterConfig {
             theme: config.general.theme,
             page_keys: config.general.page_keys(),
             english_candidates: config.general.english_candidates,
+            english_mode: config.general.english_mode,
             full_width: config.general.full_width_punctuation,
             english_full_width: config.general.english_full_width_punctuation,
             zhuyin: config.general.zhuyin,

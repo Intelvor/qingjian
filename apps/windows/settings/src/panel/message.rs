@@ -16,6 +16,10 @@ pub(crate) enum Message {
     EnglishFullWidthPunctuation(bool),
     /// 开=写入平台默认名单，关=清空。
     EnglishOffInApps(bool),
+    /// 中英切换键（[`qingjian_platform::SwitchKey`] 的下标）。
+    SwitchMode(Option<usize>),
+    /// 内置英文模式总开关。
+    EnglishMode(bool),
 
     // 候选窗口页
     Theme(Option<usize>),

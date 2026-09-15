@@ -1,6 +1,6 @@
 //! 「通用」页：学习语言、每页候选数、双拼、英文模式候选。
 
-use qingjian_platform::MAX_PAGE_SIZE;
+use qingjian_platform::{MAX_PAGE_SIZE, SwitchKey};
 use windows_reactor::*;
 
 use crate::panel::controls::{field, index_of, page};
@@ -17,6 +17,14 @@ pub(crate) const SHUANGPIN: [(&str, &str); 5] = [
     ("自然码", "ziranma"),
     ("微软双拼", "microsoft"),
     ("搜狗双拼", "sogou"),
+];
+
+/// 中英切换键：界面名 + 配置写法，与 [`SwitchKey::ALL`] 同序（有测试钉住）。
+pub(crate) const SWITCH_KEYS: [(&str, &str); 4] = [
+    (SwitchKey::Shift.label(), SwitchKey::Shift.key()),
+    (SwitchKey::Control.label(), SwitchKey::Control.key()),
+    (SwitchKey::CtrlSpace.label(), SwitchKey::CtrlSpace.key()),
+    (SwitchKey::None.label(), SwitchKey::None.key()),
 ];
 
 fn string_combo(
@@ -97,6 +105,36 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
                 .is_enabled(g.english_candidates)
                 .on_toggled(context.callback(Message::EnglishOffInApps)),
         ),
+        field(
+            "中英切换键",
+            "单击选中的键（或按 Ctrl + Space）在中英之间切换，改完立刻生效。打字时容易误触 Shift 的话改成「单击 Ctrl」；「不切换」时只剩任务栏 / 悬浮状态条上的「中」「英」按钮。注意 Ctrl + Space 常被编辑器用作代码补全等快捷键，选了它会把这些应用里的该组合键抢过来。",
+            string_combo(
+                &SWITCH_KEYS,
+                settings.config.shortcut.switch_mode.key(),
+                context.callback(Message::SwitchMode),
+            ),
+        ),
+        field(
+            "启用内置英文模式",
+            "关掉后青简固定中文模式：切换键与任务栏、悬浮状态条上的「中」「英」按钮都不再切到英文，需要英文时用系统快捷键（Win + Space）切到别的输入法。",
+            ToggleSwitch::new()
+                .is_on(g.english_mode)
+                .on_toggled(context.callback(Message::EnglishMode)),
+        ),
     ];
     page("通用", StackPanel::new().spacing(16.0).children(rows))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 下拉的项与配置枚举一一对应，顺序也一样（下标就是 `SwitchKey::ALL` 的下标）。
+    #[test]
+    fn switch_key_options_follow_the_config_enum() {
+        assert_eq!(SWITCH_KEYS.len(), SwitchKey::ALL.len());
+        for (index, key) in SwitchKey::ALL.into_iter().enumerate() {
+            assert_eq!(SWITCH_KEYS[index], (key.label(), key.key()));
+        }
+    }
 }

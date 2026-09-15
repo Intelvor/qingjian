@@ -1,6 +1,8 @@
 //! `ITfTextInputProcessor`：激活时挂击键 sink、登记翻译保留键、连 Server、起轮询定时器、挂 profile /
 //! 转换模式回调、登记语言栏按钮；停用按相反顺序撤掉，敲了一半的拼音先原样落定。
 
+use std::time::Instant;
+
 use windows::Win32::UI::TextServices::{
     ITfKeyEventSink, ITfKeystrokeMgr, ITfTextInputProcessor_Impl, ITfThreadMgr,
 };
@@ -8,11 +10,13 @@ use windows::core::{IUnknownImpl, Interface, Ref, Result};
 
 use qingjian_platform::protocol::SessionId;
 
+use super::mode::CONVERSION_RESTORE_GUARD;
 use super::{ACTIVE, TextService_Impl};
 use crate::com::key::preserved;
 use crate::com::log::log;
 use crate::com::poll::PollTimer;
 use crate::com::profile;
+use crate::com::settings;
 
 impl ITfTextInputProcessor_Impl for TextService_Impl {
     fn Activate(&self, ptim: Ref<ITfThreadMgr>, tid: u32) -> Result<()> {
@@ -44,11 +48,29 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             }
         }
         *self.thread_mgr.borrow_mut() = Some(thread_mgr);
+        // 中英模式的两个设置（切换键、内置英文模式开关）在按键到达之前就要有：激活时读一次，
+        // 之后由轮询按 mtime 热加载（`reload_settings_if_changed`），设置窗口改完不用切走再切回。
+        let config = settings::load();
+        self.config_stamp.set(settings::modified());
+        self.apply_mode_settings(config.general.english_mode, config.shortcut.switch_mode);
+        // 一小段时间内不理系统写回的转换模式（见 `sync_from_conversion_mode`），
+        // 否则 msctf 会在激活后把 profile 存的「非原生」写回来，每个应用一激活就是英文模式。
+        self.conversion_guard_until
+            .set(Some(Instant::now() + CONVERSION_RESTORE_GUARD));
+        log(&format!(
+            "中英切换键 {}，内置英文模式 {}",
+            config.shortcut.switch_mode.key(),
+            config.general.english_mode
+        ));
         self.mode_state.set_english(false);
-        self.add_lang_bar_item();
         self.refresh_mode_indicator();
-        // 放在初始写指示器之后，别被自己那次写触发。
-        self.advise_conversion_sink();
+        if self.mode_state.enabled() {
+            self.add_lang_bar_item();
+            // 放在初始写指示器之后，别被自己那次写触发。
+            self.advise_conversion_sink();
+        } else {
+            log("配置关掉了内置英文模式：不登记中 / 英按钮，固定中文模式");
+        }
         ACTIVE.with(|active| *active.borrow_mut() = Some(self.to_object()));
         log(&format!("青简 TSF 已激活 tid={tid}"));
         Ok(())
@@ -65,6 +87,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         if let Some(thread_mgr) = self.thread_mgr.borrow_mut().take()
             && let Ok(keystroke) = thread_mgr.cast::<ITfKeystrokeMgr>()
         {
+            self.drop_switch_preserved_key(&keystroke);
             if let Some(combo) = self.translate_combo.take() {
                 preserved::unregister(&keystroke, combo);
             }

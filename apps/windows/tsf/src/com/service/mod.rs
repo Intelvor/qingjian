@@ -23,7 +23,7 @@ use windows::core::{ComObject, implement};
 use qingjian_platform::KeyCombo;
 
 use super::composition::Shared;
-use super::key::ShiftTap;
+use super::key::KeyTap;
 use super::mode::ModeState;
 use super::poll::PollTimer;
 use crate::client::EngineClient;
@@ -56,7 +56,7 @@ pub struct TextService {
     /// 上次连 Server 失败的时间，按 [`RECONNECT_INTERVAL`] 退避。
     last_connect_failure: Cell<Option<Instant>>,
 
-    /// 中 / 英模式（单击 Shift 翻转），与语言栏按钮共用。
+    /// 中 / 英模式（单击切换键翻转，见 `[shortcut] switch_mode`），与语言栏按钮共用。
     mode_state: Rc<ModeState>,
 
     /// 登记在系统语言栏上的中 / 英按钮；停用时反注册。
@@ -65,14 +65,23 @@ pub struct TextService {
     /// 「转换模式」compartment 的事件回调（source + cookie），反向同步任务栏点选；停用时撤掉。
     conversion_sink: RefCell<Option<(ITfSource, u32)>>,
 
-    /// 单击 Shift 切中英的判定。
-    shift_tap: ShiftTap,
+    /// 单击中英切换键切中英的判定。
+    key_tap: KeyTap,
 
     /// 语言 profile 通知挂上后的 cookie；挂一次就够（见 [`super::profile`]）。
     profile_cookie: Cell<Option<u32>>,
 
     /// 登记成保留键的「翻译选中文字」组合；停用时撤掉（见 [`preserved`](crate::com::key::preserved)）。
     translate_combo: Cell<Option<KeyCombo>>,
+
+    /// Ctrl+Space 切换键当前是否已登记为保留键（`[shortcut] switch_mode = "ctrl+space"` 时才有）。
+    switch_preserved: Cell<bool>,
+
+    /// 配置文件的 mtime，变了就重读中英模式的两个设置（设置窗口改完立刻生效）。
+    config_stamp: Cell<Option<std::time::SystemTime>>,
+
+    /// 激活后一小段时间内忽略转换模式 compartment 的变化，见 [`TextService_Impl::sync_from_conversion_mode`]。
+    conversion_guard_until: Cell<Option<Instant>>,
 }
 
 thread_local! {
@@ -106,6 +115,11 @@ pub(super) fn on_mode_sync(english: bool) {
     });
 }
 
+/// 轮询定时器到点：配置文件改了就地重读（见 [`TextService_Impl::reload_settings_if_changed`]）。
+pub(super) fn reload_settings() {
+    with_active(TextService_Impl::reload_settings_if_changed);
+}
+
 impl TextService {
     #[allow(clippy::new_without_default)] // 有 lock_module 副作用
     pub fn new() -> Self {
@@ -121,9 +135,12 @@ impl TextService {
             mode_state: ModeState::new(),
             mode_button: RefCell::new(None),
             conversion_sink: RefCell::new(None),
-            shift_tap: ShiftTap::default(),
+            key_tap: KeyTap::default(),
             profile_cookie: Cell::new(None),
             translate_combo: Cell::new(None),
+            switch_preserved: Cell::new(false),
+            config_stamp: Cell::new(None),
+            conversion_guard_until: Cell::new(None),
         }
     }
 }

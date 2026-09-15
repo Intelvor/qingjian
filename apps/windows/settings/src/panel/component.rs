@@ -60,6 +60,10 @@ impl Component for Settings {
                 };
                 self.save_array("apps", "english_candidates_off", &list);
             }
+            Message::SwitchMode(Some(i)) if i < general::SWITCH_KEYS.len() => {
+                self.save("shortcut", "switch_mode", general::SWITCH_KEYS[i].1);
+            }
+            Message::EnglishMode(on) => self.save("general", "english_mode", on),
 
             // 候选窗口页
             Message::Theme(Some(i)) if i < ThemeMode::ALL.len() => {

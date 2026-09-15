@@ -544,23 +544,20 @@ fn switching_to_chinese_mid_word_flushes_english_letters() {
 }
 
 #[test]
-fn shift_uppercase_while_composing_commits_raw_first() {
+fn shift_uppercase_while_composing_goes_into_the_buffer() {
     let mut router = router();
     type_letters(&mut router, "ni");
-    // 中文模式按住 Shift 打大写字母：拼音原样上屏，字母跟在后面一起插。
+    // 中文模式按住 Shift 打大写字母：进缓冲区（不再直接交给应用），拼音行照敲的样子显示。
     let shifted = KeyModifiers {
         shift: true,
         ..KeyModifiers::default()
     };
     let (outcome, commit, frame) = press(&mut router, letter_with('A', shifted));
-    assert_eq!(
-        (outcome, commit.as_deref()),
-        (KeyOutcome::Consumed, Some("niA"))
-    );
-    assert!(frame.is_empty());
-    // 没在组句时大写字母交给应用。
-    let (outcome, commit, _) = press(&mut router, letter_with('A', shifted));
-    assert_eq!((outcome, commit), (KeyOutcome::Passthrough, None));
+    assert_eq!((outcome, commit.as_deref()), (KeyOutcome::Consumed, None));
+    assert_eq!(preedit(&frame), "niA");
+    // 回车原样上屏，大写还原。
+    let (_, commit, _) = press(&mut router, function_key(0x0D));
+    assert_eq!(commit.as_deref(), Some("niA"));
 }
 
 #[test]
@@ -719,6 +716,34 @@ fn status_bar_mode_click_is_handed_to_dll_via_sync_mode() {
 }
 
 #[test]
+fn status_bar_mode_click_is_ignored_when_builtin_english_is_off() {
+    let config = RouterConfig {
+        status_enabled: true,
+        english_mode: false,
+        ..RouterConfig::default()
+    };
+    let mut router = router_with(config);
+    let recorder = RecordingStatus::default();
+    router.set_status_sink(Box::new(recorder.clone()));
+    router.handle(ClientMessage::ModeChanged {
+        session: SESSION,
+        english: false,
+    });
+    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+
+    // 关掉内置英文模式：点「中」不翻成「英」，也不给 DLL 递目标模式（DLL 那边同样会拦）
+    router.handle_status_event(StatusEvent::ToggleMode);
+    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    assert_eq!(
+        router.handle(ClientMessage::SyncMode { session: SESSION }),
+        Some(ServerMessage::ModeSync {
+            session: SESSION,
+            english: None,
+        })
+    );
+}
+
+#[test]
 fn chinese_punctuation_is_full_width_only_when_not_composing() {
     let mut router = router();
     // 没在组句：逗号转全角；数字后的点保持半角。
@@ -746,6 +771,34 @@ fn chinese_punctuation_is_full_width_only_when_not_composing() {
     router.handle(ClientMessage::Commit { session: SESSION });
     router.handle_status_event(StatusEvent::TogglePunctuation);
     assert_eq!(press(&mut router, comma).0, KeyOutcome::Passthrough);
+}
+
+#[test]
+fn hyphen_and_equals_are_inserted_by_us_instead_of_passed_through() {
+    let mut router = router();
+    // `-` `=` 没有全角映射，但由我们插入：放行那条路在部分宿主里到不了应用（中文模式按 - 没反应）
+    let hyphen = KeyEvent::new(0xBD, Some('-'), Default::default());
+    assert_eq!(
+        press(&mut router, hyphen),
+        (KeyOutcome::Consumed, Some("-".to_owned()), Frame::default())
+    );
+    let equals = KeyEvent::new(0xBB, Some('='), Default::default());
+    assert_eq!(
+        press(&mut router, equals),
+        (KeyOutcome::Consumed, Some("=".to_owned()), Frame::default())
+    );
+    // 其他没有全角映射的键（`@`）仍原样交给应用
+    let at = KeyEvent::new(0x32, Some('@'), SHIFT);
+    assert_eq!(press(&mut router, at).0, KeyOutcome::Passthrough);
+    // 组句中的 `-` 仍进英文直输段，不插字符
+    type_letters(&mut router, "ni");
+    let (outcome, commit, frame) = press(&mut router, hyphen);
+    assert_eq!((outcome, commit), (KeyOutcome::Consumed, None));
+    assert!(
+        preedit(&frame).contains('-'),
+        "应进直输段: {:?}",
+        preedit(&frame)
+    );
 }
 
 #[test]
