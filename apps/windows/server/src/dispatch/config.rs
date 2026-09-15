@@ -1,6 +1,6 @@
 use qingjian_core::ShuangpinScheme;
 use qingjian_platform::protocol::KeyModifiers;
-use qingjian_platform::{AppsConfig, Config, KeyCombo, LayoutMode, ThemeMode};
+use qingjian_platform::{AppsConfig, Config, KeyCombo, LayoutMode, PreeditMode, ThemeMode};
 
 /// Router 要用的配置项，与 macOS 壳的 `Host` 字段对齐。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,6 +16,9 @@ pub struct RouterConfig {
 
     /// 候选窗口外观（`[general] theme`）。
     pub theme: ThemeMode,
+
+    /// 拼音显示位置（`[general] preedit`）。
+    pub preedit: PreeditMode,
 
     /// 翻页键对（`[general] page_keys`，上一页 / 下一页）。
     pub page_keys: (char, char),
@@ -72,6 +75,7 @@ impl From<&Config> for RouterConfig {
             cloud_slots: config.predict.slots,
             layout: config.general.layout,
             theme: config.general.theme,
+            preedit: config.general.preedit,
             page_keys: config.general.page_keys(),
             english_candidates: config.general.english_candidates,
             english_mode: config.general.english_mode,

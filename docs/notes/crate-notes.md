@@ -141,6 +141,9 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
 （它的转换模式变化由 conversion compartment 回调同步成中 / 英），避免两边各切一次互相抵消。四条切换入口都汇到
 `service/mode.rs::set_english_mode` 一处拦住；状态条点击在 Server 侧（`dispatch/status/mod.rs`）按同一项拦，
 设置界面在 `settings/src/panel/pages/general.rs`。
+拼音显示位置（`[general] preedit`）在 Windows 上分两处落地：Server 把它读进 `RouterConfig.preedit` 并随 `Frame.preedit_mode`
+下发给 DLL，DLL（`com/service/key_sink.rs`）按 `inline()` 决定要不要放行内拼音，Server（`ui/candidates/render_data.rs::window_preedit`）
+按 `in_window()` 决定候选窗口顶部画不画拼音行；`window` 模式没有组句范围，光标矩形改从 `com/edit/anchor.rs::caret_rect`（当前选区）量。
 
 ## assets
 

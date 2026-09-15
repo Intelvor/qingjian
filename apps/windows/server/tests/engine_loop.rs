@@ -9,7 +9,7 @@ use qingjian_platform::protocol::{
     ClientMessage, Frame, KeyEvent, KeyModifiers, KeyOutcome, PROTOCOL_VERSION, ServerMessage,
     SessionId,
 };
-use qingjian_platform::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS};
+use qingjian_platform::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, PreeditMode};
 use qingjian_windows_server::dispatch::{StatusEvent, StatusSink, StatusView};
 use qingjian_windows_server::{AssemblySpec, Router, RouterConfig, assembly};
 
@@ -241,6 +241,26 @@ fn typing_pinyin_shows_candidates() {
         texts.contains(&"你好"),
         "候选里应有「你好」，实际：{texts:?}"
     );
+}
+
+/// 拼音显示位置随帧下发给 DLL：DLL 按 `inline()` 决定要不要往应用里放行内拼音，
+/// 窗口顶部画不画拼音行由 Server 自己按 `in_window()` 定，所以帧始终带着拼音行。
+#[test]
+fn frame_carries_the_preedit_mode() {
+    for mode in PreeditMode::ALL {
+        let mut router = router_with(RouterConfig {
+            preedit: mode,
+            ..RouterConfig::default()
+        });
+        let (_, _, frame) = type_letters(&mut router, "nihao");
+
+        assert_eq!(frame.preedit_mode, mode);
+        assert_eq!(
+            preedit(&frame),
+            "ni'hao",
+            "{mode:?} 下帧也要带拼音行，画不画是窗口的事"
+        );
+    }
 }
 
 #[test]
