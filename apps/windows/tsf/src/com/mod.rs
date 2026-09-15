@@ -1,10 +1,11 @@
 //! `cfg(windows)`：TSF 文本服务的 COM 外壳。DLL 入口在这里，类厂在 [`factory`]，文本服务对象在 [`service`]，
 //! 注册表 / TSF profile 在 [`registry`]。
 //!
-//! - [`key`]：按键翻译、单击 Shift 判定、翻译快捷键的保留键。
+//! - [`key`]：按键翻译、单击中英切换键判定、翻译快捷键的保留键。
 //! - [`mode`]：中 / 英模式的指示（转换模式 compartment、语言栏按钮）与反向同步。
 //! - [`edit`]：编辑会话（写组句 / 读选区 / 读前文与输入范围）与候选窗口锚点；[`context`]：上下文的键盘禁用开关（密码框）。
 //! - [`composition`]：组句 preedit；[`display_attribute`]：组句内联下划线；[`poll`]：轮询定时器。
+//! - [`settings`]：DLL 自己读的用户配置（中英切换键、内置英文模式开关）。
 #![allow(non_snake_case)] // 导出的 Dll* 入口按 COM 约定命名
 
 pub(crate) mod composition;
@@ -19,6 +20,7 @@ pub(crate) mod poll;
 pub(crate) mod profile;
 pub(crate) mod registry;
 pub(crate) mod service;
+pub(crate) mod settings;
 pub(crate) mod window_class;
 
 use core::ffi::c_void;

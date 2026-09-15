@@ -34,6 +34,11 @@ impl Router {
     pub fn handle_status_event(&mut self, event: StatusEvent) {
         match event {
             StatusEvent::ToggleMode => {
+                // 关掉内置英文模式后这一格不切模式：DLL 那边也会拦（配置改了没切走再切回时两边都挡住）
+                if !self.config.english_mode {
+                    tracing::debug!("内置英文模式已关闭，状态条不切模式");
+                    return;
+                }
                 let Some(english) = self.status_mode else {
                     return;
                 };

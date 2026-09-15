@@ -32,6 +32,9 @@ const INTERVAL_MS: u32 = 80;
 /// 没在组句时每几拍问一次状态条的切模式请求（320 ms 一次，点了状态条肉眼看不出延迟）。
 const MODE_SYNC_EVERY: u32 = 4;
 
+/// 每几拍看一眼配置文件有没有改（320 ms 一次；设置窗口改完立刻生效，不必切走再切回输入法）。
+const RELOAD_SETTINGS_EVERY: u32 = 4;
+
 thread_local! {
     /// 本线程活着的定时器：消息窗口 → 回调上下文。查不到（已析构）就忽略这一拍。
     static TIMERS: RefCell<HashMap<isize, Rc<PollContext>>> = RefCell::new(HashMap::new());
@@ -110,10 +113,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
 
 /// 组句中或翻译评审中拉云结果；否则前台时隔几拍问一次切模式。引擎正被按键处理借用时跳过这一拍；连接坏了断开。
 fn poll_once(context: &PollContext) {
+    let tick = context.ticks.get().wrapping_add(1);
+    context.ticks.set(tick);
+    // 配置热加载与是否在组句无关：改完设置马上生效。
+    if tick.is_multiple_of(RELOAD_SETTINGS_EVERY) {
+        super::service::reload_settings();
+    }
     let translating = context.shared.translating();
     if !context.shared.composing() && !translating {
-        let tick = context.ticks.get().wrapping_add(1);
-        context.ticks.set(tick);
         if context.shared.foreground() && tick.is_multiple_of(MODE_SYNC_EVERY) {
             sync_mode(context);
         }
