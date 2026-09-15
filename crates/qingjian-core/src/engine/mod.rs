@@ -238,6 +238,13 @@ pub struct Engine {
 /// 英文补全最多几条（`compa` → company / compare / …）。
 const ENGLISH_COMPLETIONS: usize = 3;
 
+/// 拼音不像话时，英文精确词要压过中文所需的最低 Zipf（词频表存 Zipf×1000）。
+/// hello / key / world 这类够格；MP（议员）、BM 不够，让位给 门票 / 编码。
+const ENGLISH_FIRST_MIN_ZIPF: f64 = 4.5;
+
+/// 英文前缀补全的最低 Zipf：挡掉 bimbo / bimonthly 这类冷僻词，免得挤掉避免。
+const ENGLISH_COMPLETION_MIN_ZIPF: f64 = 3.5;
+
 /// 原样上屏的字母串至少几个字母才当英文词学：单字母（`a`、`I`）不值得记。
 const MIN_ENGLISH_WORD_LETTERS: usize = 2;
 

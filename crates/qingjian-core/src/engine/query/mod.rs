@@ -9,6 +9,7 @@ mod snapshot;
 pub(crate) use english_tail::EnglishTail;
 pub use result::Query;
 pub(super) use result::join_marked;
+pub(super) use result::join_marked_typed;
 pub(super) use snapshot::QuerySnapshot;
 
 impl Engine {
@@ -246,6 +247,7 @@ impl Engine {
             head_wins,
         );
         self.insert_emoji(&mut items);
+        self.insert_media_formats(&mut items, keys);
         let rank = start.elapsed();
 
         // 按头段算时英文尾段不参与拼音候选，显示上跟在切分后面：`wo'xiang'xue'hao'rust`
@@ -253,7 +255,11 @@ impl Engine {
             .as_ref()
             .filter(|_| head_wins)
             .map_or(tail, |t| &keys[t.head_len..]);
-        let typed_display = decoded.as_ref().map(|d| d.marked());
+        let typed_display = decoded.as_ref().map(|d| d.marked()).or_else(|| {
+            // 中文模式下 Shift 敲的大写：匹配按小写算，拼音行仍按敲的样子显示（`Cpan`）
+            (correction.is_none() && self.composition.has_shifted())
+                .then(|| join_marked_typed(&self.composition.typed_scope(), &segmentations, tail))
+        });
         Ok(Query {
             segmentations,
             candidates: CandidateList { items },

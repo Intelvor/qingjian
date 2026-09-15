@@ -247,6 +247,45 @@ fn shortcuts_follow_the_first_local_candidate() {
 }
 
 #[test]
+fn shifted_uppercase_enters_the_buffer_and_matches_lowercase() {
+    let dictionary = Dictionary::parse("C盘\tc pan\t8000\n磁盘\tci pan\t249\n").unwrap();
+    let mut engine = Engine::new(dictionary);
+    // 中文模式下按住 Shift 敲 C，再打 pan
+    engine.push('C');
+    for c in "pan".chars() {
+        engine.push(c);
+    }
+    let query = engine.query().unwrap();
+    // 匹配按小写算：C盘 出得来
+    assert_eq!(query.candidates.items[0].text, "C盘");
+    // 拼音行按敲的样子显示大写
+    assert_eq!(query.marked_text(), "C'pan");
+    // 回车原样上屏时保留大写
+    assert_eq!(engine.take_raw(), "Cpan");
+    assert!(engine.composition().is_empty());
+}
+
+#[test]
+fn media_format_shortcuts_sit_at_third_and_fourth() {
+    let dict = Dictionary::parse(concat!(
+        "门票\tmen piao\t5000\n",
+        "买票\tmai piao\t3000\n",
+        "马匹\tma pi\t2000\n",
+    ))
+    .unwrap();
+    let mut engine = Engine::new(dict);
+    engine.set_input("mp");
+    let all = engine.query().unwrap().candidates.items;
+    assert!(all.len() >= 4, "{all:?}");
+    assert_eq!(all[0].kind, CandidateKind::Chinese);
+    assert_eq!(all[1].kind, CandidateKind::Chinese);
+    assert_eq!(all[2].text, "mp3");
+    assert_eq!(all[2].kind, CandidateKind::Shortcut);
+    assert_eq!(all[3].text, "mp4");
+    assert_eq!(all[3].kind, CandidateKind::Shortcut);
+}
+
+#[test]
 fn expression_mode_skips_pinyin_and_evaluates() {
     let mut engine = self::engine();
     assert!(!engine.expression_mode());
@@ -269,7 +308,7 @@ fn expression_mode_skips_pinyin_and_evaluates() {
     assert_eq!(query.marked_text(), "v");
 
     // v 开头的英文词仍能混输
-    let words = WordList::parse("very\n").unwrap();
+    let words = WordList::parse("very\tvery\t4800\n").unwrap();
     let mut engine = self::engine().with_english(words);
     engine.set_input("very");
     let query = engine.query().unwrap();

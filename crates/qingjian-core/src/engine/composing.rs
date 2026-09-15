@@ -147,7 +147,13 @@ impl Engine {
             self.page_turns = 0;
             self.retype_snapshot = None;
         }
-        self.composition.push(c);
+        // 中文模式下 Shift+字母：按小写进缓冲区参与匹配（`Cpan` 与 `cpan` 一样出 C盘），
+        // 原样上屏（回车 / 无候选）时再还原大写。英文模式与英文直输段（`no-Way`）保留原样。
+        if c.is_ascii_uppercase() && !self.english_mode && !self.raw_mode() {
+            self.composition.push_shifted(c);
+        } else {
+            self.composition.push(c);
+        }
     }
 
     pub fn backspace(&mut self) -> bool {
@@ -284,7 +290,7 @@ impl Engine {
     pub fn set_input(&mut self, input: &str) {
         self.composition.clear();
         for c in input.chars() {
-            self.composition.push(c);
+            self.push(c);
         }
     }
 
@@ -300,9 +306,10 @@ impl Engine {
         let raw = if self.is_zhuyin_mode() && !self.english_mode {
             self.decode(self.composition.text())
                 .map(|d| d.marked())
-                .unwrap_or_else(|| self.composition.text().to_owned())
+                .unwrap_or_else(|| self.composition.typed_text())
         } else {
-            self.composition.text().to_owned()
+            // 中文模式下 Shift 敲的大写在这里还原，敲的是什么就上屏什么
+            self.composition.typed_text()
         };
         if raw.is_empty() {
             // 壳在回车 / 失焦时不管有没有在组句都会来一趟：空的不记日志、不计统计
