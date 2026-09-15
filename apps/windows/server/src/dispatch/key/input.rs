@@ -147,15 +147,10 @@ impl Router {
         }
     }
 
-    /// 中文模式：小写字母进拼音；Shift 大写字母是临时打英文，组句中先把拼音原样上屏；
+    /// 中文模式：字母进拼音缓冲区，大小写都收（Shift 大写由 Core 按小写匹配、原样上屏时还原）；
     /// 没在组句时的其他字符走全角标点（与 macOS 壳一致，组句中的标点仍进英文直输段）。
     fn apply_chinese(&mut self, c: char, event: &KeyEvent) -> Effect {
-        if c.is_ascii_uppercase() {
-            let raw = self.composing().then(|| self.engine.take_raw());
-            self.engine.note_passthrough(c);
-            return with_prefix(raw, Effect::Passthrough, c);
-        }
-        if c.is_ascii_lowercase() {
+        if c.is_ascii_alphabetic() {
             self.engine.push(c);
             return Effect::Changed(None);
         }
@@ -166,6 +161,9 @@ impl Router {
     }
 
     /// 当前模式开着全角就让 Core 转（数字后的 `.` 保持半角）；转不了的原样交给应用并告知 Core。
+    ///
+    /// `-` `=` 例外：没有全角映射，但**不放行、由我们插入**——放行要等宿主把键交给应用，实测在部分宿主里
+    /// 这个键到不了（用户报告「中文模式按 `-` 没反应」）。插入与全角标点同一条路，一定出得来，仍是半角。
     fn apply_punctuation(&mut self, c: char, event: &KeyEvent) -> Effect {
         let english = event.modifiers.caps || event.modifiers.english_mode;
         if self.full_width_for(english)
@@ -174,6 +172,9 @@ impl Router {
             return Effect::Changed(Some(text.to_owned()));
         }
         self.engine.note_passthrough(c);
+        if matches!(c, '-' | '=') {
+            return Effect::Changed(Some(c.to_string()));
+        }
         Effect::Passthrough
     }
 
