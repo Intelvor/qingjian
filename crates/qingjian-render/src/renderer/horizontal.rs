@@ -1,7 +1,7 @@
 //! 横排：候选排成一行，高亮那个下面单独一行译文，页码在行尾。
 
 use super::item::Item;
-use super::{HIGHLIGHT_INSET, INDEX_GAP, Metrics, Rect, Renderer};
+use super::{HIGHLIGHT_INSET, INDEX_GAP, ITEM_GAP, Metrics, Rect, Renderer};
 use crate::canvas::Canvas;
 use crate::frame::{Frame, Hover, Row};
 
@@ -15,7 +15,7 @@ impl Renderer {
             .iter()
             .map(|item| item.index_width + m.px(INDEX_GAP) + item.text_width)
             .sum::<f32>()
-            + m.column_gap() * items.len().saturating_sub(1) as f32
+            + m.px(ITEM_GAP) * items.len().saturating_sub(1) as f32
             + m.px(HIGHLIGHT_INSET) * 2.0;
         if let Some(footer) = frame.footer.as_deref() {
             width += m.column_gap() + self.measure(footer, &m.index_style()).width;
@@ -128,7 +128,7 @@ impl Renderer {
                 top,
                 text_height,
             );
-            x += item_width + m.column_gap();
+            x += item_width + m.px(ITEM_GAP);
         }
         if let Some(footer) = frame.footer.as_deref() {
             let style = m.index_style();

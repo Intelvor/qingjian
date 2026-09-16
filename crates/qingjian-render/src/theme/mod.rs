@@ -1,6 +1,7 @@
 //! 主题：字体、颜色、间距。所有可视参数都在这里，单位是点；将来从 TOML 读。
 //!
-//! 视觉层级（产品决定）：候选词最深，译文稍浅，词性最浅，序号弱化。数值对齐 macOS 壳的 AppKit 实现。
+//! 视觉层级（产品决定）：候选词最深，译文稍浅，词性最浅，序号弱化。数值对齐 macOS 壳的 AppKit 实现；
+//! 只有行内上下留白（`row_padding`）按 Windows 端的观感调宽过一档——候选行挨太紧不好认。
 
 mod font_spec;
 mod palette;
@@ -61,7 +62,7 @@ impl Theme {
             index_font: FontSpec::new(11.0, 14.0),
             colors,
             padding: 8.0,
-            row_padding: 4.0,
+            row_padding: 5.0,
             column_gap: 8.0,
             corner_radius: 8.0,
             max_rows: 9,

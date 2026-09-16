@@ -39,6 +39,10 @@ const SENTENCE_GAP: f32 = 16.0;
 /// 横排时序号与候选词之间的间距（点）。
 const INDEX_GAP: f32 = 3.0;
 
+/// 横排时相邻两个候选之间的间距（点）。竖排三列用的是 `theme.column_gap`，横排这一档单独给，
+/// 免得为了一项之间的距离把「序号 ↔ 候选词 ↔ 译文」也撑开。
+const ITEM_GAP: f32 = 12.0;
+
 /// 横排时高亮底色在候选两侧多出的宽度（点）。
 const HIGHLIGHT_INSET: f32 = 5.0;
 
