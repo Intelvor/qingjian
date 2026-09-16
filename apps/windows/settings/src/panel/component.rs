@@ -88,6 +88,9 @@ impl Component for Settings {
                 self.save("predict", "slots", slots);
             }
             Message::CloudSentence(on) => self.save("predict", "sentence", on),
+            Message::CloudSentenceTrigger(Some(i)) if i < cloud::SENTENCE_TRIGGERS.len() => {
+                self.save("predict", "sentence_trigger", cloud::SENTENCE_TRIGGERS[i].1);
+            }
             Message::TestConnection => {
                 if matches!(self.cloud_status, CloudStatus::Testing) {
                     return;

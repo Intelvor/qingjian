@@ -1,10 +1,11 @@
 //! 按键怎么作用到 Engine / 高亮上。分流规则与 macOS 壳的 `handle_text` / `handle_command` 对齐。
 
-use qingjian_core::{QUESTION_PREFIX, shortcut};
+use qingjian_core::{Candidate, QUESTION_PREFIX, shortcut};
 use qingjian_platform::protocol::KeyEvent;
 
 use super::{Effect, codes, with_prefix};
 use crate::dispatch::Router;
+use crate::dispatch::composed::Composed;
 
 impl Router {
     /// 功能键靠键码，其余靠字符。组句中修饰键 + 数字是快捷键；带 Ctrl / Alt / Win 而没配到快捷键的键归应用。
@@ -106,9 +107,11 @@ impl Router {
             codes::TAB if self.engine.english_mode() => {
                 Effect::Changed(Some(self.commit_highlighted()))
             }
-            // 中文模式 Tab：有整句补全就接受，否则交还应用（缩进 / 跳焦点）。
+            // 中文模式 Tab：有整句补全就接受；配成「按 Tab 才联想整句」时，没有就先请云端算一次
+            //（这一下吃掉，组句中的 Tab 本来也不是缩进）；其余交还应用（缩进 / 跳焦点）。
             codes::TAB => match self.sentence.take() {
                 Some(sentence) => Effect::Changed(Some(self.engine.accept_prediction(&sentence))),
+                None if self.request_sentence() => Effect::Navigated,
                 None => Effect::Passthrough,
             },
             codes::DOWN => {
@@ -251,6 +254,42 @@ impl Router {
             Some(text) => text,
             None => self.engine.take_raw(),
         }
+    }
+
+    /// 手动模式（`[predict] sentence_trigger = "tab"`）下按 Tab：请云端现在算一次整句补全。
+    /// 返回这个键吃掉没有——没请出去（配的不是手动模式、没在组句、拼音太短）就把键交还应用。
+    fn request_sentence(&mut self) -> bool {
+        if !self.config.sentence_on_tab || !self.composing() {
+            return false;
+        }
+        // 整句补全关着、或云联想没开：按了也不会有结果，这不是「等一会儿就好」，
+        // 说一句再把这个键吃掉（留在应用里就是个缩进，用户看不出为什么没反应）。
+        let hint = if !self.config.sentence_enabled {
+            Some("整句补全已关闭（设置 → 云服务）")
+        } else if !self.engine.prediction_enabled() {
+            Some("云联想未开启，整句补全会用到它")
+        } else {
+            None
+        };
+        if let Some(hint) = hint {
+            tracing::debug!(hint, "候选窗：Tab 请整句被挡下");
+            self.notice = Some(hint.to_owned());
+            return true;
+        }
+        let local: &[Candidate] = match &self.composed {
+            Some(Composed::Candidates { layout, .. }) => layout.local(),
+            _ => &[],
+        };
+        self.engine.request_sentence_once();
+        let sent = self
+            .engine
+            .request_prediction(self.surrounding.clone(), local)
+            .is_some();
+        if sent {
+            // 候选窗先显示「联想中」，结果到了再换成整句。
+            self.note_sentence_pending();
+        }
+        sent
     }
 
     fn composing(&self) -> bool {

@@ -47,6 +47,9 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 - `CloudPredictor`：`Predictor` trait 的网络实现（async-openai，OpenAI 兼容接口，默认 DeepSeek），后台线程防抖 / 缓存 / 超时，`submit` / `poll` 非阻塞。
   `PredictConfig` 是配置的 `[predict]` 分节。只在组句中联想，一次请求给云端词（容错校验后补进候选第一页末尾 `[predict] slots` 格，缺省 2，不预留不占位，
   前面的本地候选不挪；排布在 Core `CandidateLayout`）和整句补全（preedit 右侧，Tab）；上屏后不联想，本地历史不进请求。
+  整句什么时候要由 `[predict] sentence_trigger` 定：`idle`（缺省）跟云端词同一拍、停键 `debounce_ms` 后自动联想；
+  `tab` 只问词，整句由壳按 Tab 现请一次（`PredictConfig::sentence_on_tab` → `policy().sentence` 为假，
+  壳再 `Engine::request_sentence_once` 把这一次补上）——**云端词两条路都照常自动**，不受这项影响。
 - `CloudGlossFiller`：释义兜底（Core `GlossFiller` trait，与 Predictor 分开的线程与通道，攒 1.5 秒 / 8 个词发一次，问过不再问）：
   随包释义表没有的词库词 / 云端词上屏后入队，结果壳每秒 `Engine::poll_glosses` 经 `Translator::learn` 写进 `qingjian-translate::PersonalGlossary`
   （`user-glossary-<语言>.tsv`，`LayeredTranslator` 个人表优先）；随云联想开关一起开。
@@ -152,6 +155,31 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
 状态条第四格「☁」是在线联想的隐私开关（`StatusEvent::ToggleCloud` → `dispatch/status`）：翻转 `Router.predict.enabled`、写回
 `[predict] enabled`，并**立刻** `attach_cloud` 换掉 Predictor（关着时连释义兜底一起停），不等热加载；热加载时 `apply_config` 也把
 `Router.predict` 跟着配置文件走，两边不会各说各话。
+候选窗支持鼠标点选（`ui/candidates/hits.rs`）：窗口过程收 `WM_MOUSEMOVE` / `WM_LBUTTONDOWN`（`WM_MOUSEACTIVATE` 回
+`MA_NOACTIVATE`，点它不抢宿主焦点、组句不断），按绘制时算好的命中范围（`ui/candidates/view.rs::hit_bands`：候选行竖排看 y、横排看 x，
+整句补全是顶部行右侧的一块矩形）定位，上报 `CandidateEvent::Pick(页内行号)` / `PickSentence` → `Work::Candidate` →
+`dispatch/candidates`。Router 那侧只**立刻**把词选掉（`commit_index`，Engine 状态前进、后续按键接在正确状态上）并把上屏文本攒进
+`Router.pending_commit`——文本得由 DLL 写进宿主文档，而传输一问一答、Server 不能主动推，所以攒到 DLL 下一次 `Poll`（组句期间
+80 ms 一拍）由 `ServerMessage::Update.commit` 带回，DLL 侧（`com/poll` → `com/service/document.rs::commit_picked`）再走一次编辑会话
+落定，与失焦上屏同一条路；拼音没吃完时 `apply` 会先结束旧组句落定这个词、再按新 preedit 起一段。整句补全走
+`Engine::accept_prediction`（与 Tab 同一条路）。放行的键（Passthrough）不带走 `pending_commit`（DLL 不碰文档，带了也丢），
+留给下一次轮询。`Frame` 不带 `page_size`，所以事件报页内行号、由 Router 换算全局下标；协议版本随之升到 5。
+鼠标悬停用比键盘高亮淡一档的底色（`Palette::hover`），候选行与整句补全都铺；状态条四格同样铺（`ui/status/mod.rs`，绘制 / 摆放 /
+命中合并成一份 `Bar`，窗口过程按 HWND 查到它才能重画）。状态条的命中带与那块悬停底色是同一块（左右各内缩半个 padding、
+上下也留出边距，`Bar::cell_at` 横竖都判）：看得见高亮的地方才点得着，鼠标挪到条子边缘那圈留白上高亮就收掉。
+整句「按 Tab 才联想」（`[predict] sentence_trigger = "tab"`）在 Windows 上的落地：`RouterConfig.sentence_on_tab` 跟着热加载走，
+`dispatch/key/input.rs` 的 Tab 分支在没有整句可接受时先 `Engine::request_sentence_once()` 现请一次云端（这一下吃掉，组句中的 Tab
+本来也不是缩进），结果到了画在候选窗右侧，再按一次 Tab 才采用；没配这一项时行为不变（无整句就把 Tab 交还应用做缩进 / 跳焦点）。
+整句请求在路上时候选窗有等待提示：`Router.sentence_pending`（发出时记时刻，结果到了 / 组句结束 / 等超
+`SENTENCE_PENDING_TIMEOUT` 就清，`tick` 里清超时那份）经 `Frame.sentence_pending` 下发，候选窗在整句那块位置画 `☁ …`
+（`ui/candidates/view.rs`，宽度与量尺寸共用 `tail_width`），结果到了原地换成整句。协议版本随之升到 6。
+手动模式按 Tab 而这次联想根本发不出去（整句开关关着 / 云联想没开）时，吃掉这个键并借 `Router.notice`
+（画在拼音行下方那行小字）说一句为什么——「按了没反应」和「悄悄上个缩进」都不如直接讲清楚。
+云联想关掉 / 换掉 Predictor 时（状态条「☁」格、配置热加载两条路）一并 `Router::drop_sentence`：手里那段整句是上一个
+Predictor 给的，留着会被 Tab 当成新的上屏（关掉云联想之后再按 Tab 反而出来一段旧句子）。
+设置程序是单例：Server 点齿轮（`ui/status/mod.rs::open_settings`）先枚举顶层窗、按所属进程的 exe 名找已经开着的设置窗，找到就
+`SetForegroundWindow` 叫到前台——这一步必须由 Server 做，点齿轮的那一下输入落在它身上，Windows 的前台锁才不拦；找不到才起新进程。
+设置程序自己也拿一个 `Local\QingjianSettings` 命名互斥体兜底（开始菜单等入口重复启动时直接退出）。
 
 ## assets
 

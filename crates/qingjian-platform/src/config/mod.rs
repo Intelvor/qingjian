@@ -259,6 +259,9 @@ lookahead = 32
 slots = 2
 # 组句中除了词候选还要不要整句补全（preedit 右侧，Tab 接受）
 sentence = true
+# 整句补全什么时候要：idle 停止输入后自动联想（与云端词同一拍，看上面的 debounce_ms），tab 只在按 Tab 时联想一次
+# 按 Tab 那一路：按一下开始算，结果到了再按一下采用；云端词不受这项影响，两种设置下都照常自动联想
+sentence_trigger = "idle"
 
 [status_bar]
 # 桌面上常驻、可拖动的悬浮状态条（Windows）：「中 / 英」格点一下切换模式（开着双拼时还显示方案名）、「，。」格切全角 / 半角标点、齿轮打开设置。

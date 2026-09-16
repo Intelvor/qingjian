@@ -27,7 +27,8 @@ pub(crate) const SWITCH_KEYS: [(&str, &str); 4] = [
     (SwitchKey::None.label(), SwitchKey::None.key()),
 ];
 
-fn string_combo(
+/// 多选一的字符串配置：界面名 + 配置写法一组，选中后回报下标（其他页也用它）。
+pub(crate) fn string_combo(
     options: &'static [(&str, &str)],
     current: &str,
     callback: Callback<Option<usize>>,

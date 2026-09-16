@@ -5,14 +5,16 @@ use std::sync::{Arc, Mutex};
 
 use qingjian_core::sentence::SentenceScorer;
 use qingjian_core::{
-    Language, ModeKeys, PredictionPolicy, PredictionRequest, Predictor, ShuangpinScheme,
+    Language, ModeKeys, NoPredictor, Prediction, PredictionPolicy, PredictionRequest, Predictor,
+    ShuangpinScheme,
 };
 use qingjian_platform::protocol::{
     ClientMessage, Frame, KeyEvent, KeyModifiers, KeyOutcome, PROTOCOL_VERSION, ServerMessage,
     SessionId,
 };
 use qingjian_platform::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, PreeditMode};
-use qingjian_windows_server::dispatch::{StatusEvent, StatusSink, StatusView};
+use qingjian_predict::PredictConfig;
+use qingjian_windows_server::dispatch::{CandidateEvent, StatusEvent, StatusSink, StatusView};
 use qingjian_windows_server::{AssemblySpec, Router, RouterConfig, assembly};
 
 const SESSION: SessionId = SessionId(1);
@@ -286,6 +288,332 @@ fn selecting_by_digit_commits_and_clears() {
         after.is_empty(),
         "上屏后应收起候选，实际 preedit={:?}",
         preedit(&after)
+    );
+}
+
+/// 鼠标点候选窗里的一行：选中的词攒着，等 DLL 轮询取走（Server 不主动推，传输一问一答）。
+#[test]
+fn picking_a_candidate_waits_for_the_next_poll() {
+    let mut router = router();
+    let (_, _, frame) = type_letters(&mut router, "nihao");
+    let row = frame
+        .candidates
+        .items
+        .iter()
+        .position(|c| c.text == "你好")
+        .expect("「你好」在候选页内");
+
+    router.handle_candidate_event(CandidateEvent::Pick(row));
+
+    match router.handle(ClientMessage::Poll { session: SESSION }) {
+        Some(ServerMessage::Update { commit, frame, .. }) => {
+            assert_eq!(commit.as_deref(), Some("你好"), "点选的词由轮询带回");
+            assert!(frame.is_empty(), "整段拼音吃完，组句结束");
+        }
+        other => panic!("expected update, got {other:?}"),
+    }
+    // 取走就清了：下一拍没有东西可上屏。
+    match router.handle(ClientMessage::Poll { session: SESSION }) {
+        Some(ServerMessage::Update { commit, .. }) => assert_eq!(commit, None),
+        other => panic!("expected update, got {other:?}"),
+    }
+}
+
+/// 点选的词还没被取走时来了个放行的键（Ctrl+C 归应用）：词不能被吞掉，留下一次轮询。
+#[test]
+fn a_passthrough_key_keeps_the_picked_word_for_later() {
+    let mut router = router();
+    let (_, _, frame) = type_letters(&mut router, "nihao");
+    let row = frame
+        .candidates
+        .items
+        .iter()
+        .position(|c| c.text == "你好")
+        .expect("「你好」在候选页内");
+    router.handle_candidate_event(CandidateEvent::Pick(row));
+
+    let ctrl_c = KeyEvent::new(
+        0x43,
+        Some('c'),
+        KeyModifiers {
+            ctrl: true,
+            ..KeyModifiers::default()
+        },
+    );
+    let (outcome, commit, _) = press(&mut router, ctrl_c);
+    assert_eq!(outcome, KeyOutcome::Passthrough);
+    assert_eq!(commit, None, "放行的键自己不带上屏文本");
+
+    match router.handle(ClientMessage::Poll { session: SESSION }) {
+        Some(ServerMessage::Update { commit, .. }) => {
+            assert_eq!(commit.as_deref(), Some("你好"), "留下的词由下一次轮询带回");
+        }
+        other => panic!("expected update, got {other:?}"),
+    }
+}
+
+/// 假联想：被问过之后回一条整句补全（结果取走就没了，别让 Engine 一直拉）。
+struct SentencePredictor {
+    /// 要回的整句。
+    sentence: String,
+
+    /// 自动请求要不要整句——对应真实配置里 `sentence_trigger = "idle"`（`PredictConfig::policy`）。
+    want: bool,
+
+    /// 还没被取走的结果。
+    pending: Option<String>,
+
+    /// 最近一次请求的序号；回结果得对上，对不上 Engine 当过期丢掉。
+    sequence: u64,
+}
+
+impl Predictor for SentencePredictor {
+    fn policy(&self) -> PredictionPolicy {
+        PredictionPolicy {
+            before: 64,
+            after: 32,
+            slots: 0,
+            max_items: 0,
+            sentence: self.want,
+        }
+    }
+
+    fn submit(&mut self, request: PredictionRequest) {
+        self.sequence = request.sequence;
+        // 真实实现按 `want_sentence` 决定要不要问整句（false 时 prompt 要 null），这里照做。
+        self.pending = request.want_sentence.then(|| self.sentence.clone());
+    }
+
+    fn poll(&mut self) -> Option<Prediction> {
+        let sentence = self.pending.take()?;
+        Some(Prediction {
+            sequence: self.sequence,
+            words: Vec::new(),
+            sentence: Some(sentence),
+        })
+    }
+}
+
+/// 接了会回整句的假联想的 Router；`on_tab` 对应 `[predict] sentence_trigger = "tab"`
+///（真实环境里这一项同时决定 Router 的 Tab 行为与策略里的 `sentence`，这里也一并设上）。
+fn router_with_sentence(sentence: &str, on_tab: bool) -> Router {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let mut engine = assembly::assemble(&AssemblySpec::new(root.join("assets/sample/dict.tsv")))
+        .expect("assemble engine from sample data");
+    engine.set_predictor(Box::new(SentencePredictor {
+        sentence: sentence.to_owned(),
+        want: !on_tab,
+        pending: None,
+        sequence: 0,
+    }));
+    let config = RouterConfig {
+        sentence_on_tab: on_tab,
+        ..RouterConfig::default()
+    };
+    let mut router = Router::new(engine, config);
+    router.handle(ClientMessage::OpenSession {
+        session: SESSION,
+        app: None,
+        protocol: PROTOCOL_VERSION,
+    });
+    router
+}
+
+/// 发一次轮询，取出回给 DLL 的帧。
+fn poll_frame(router: &mut Router) -> Frame {
+    match router.handle(ClientMessage::Poll { session: SESSION }) {
+        Some(ServerMessage::Update { frame, .. }) => frame,
+        other => panic!("expected update, got {other:?}"),
+    }
+}
+
+/// 鼠标点顶部的整句补全：接受它上屏（与 Tab 同一条路），文本同样由轮询带回。
+#[test]
+fn picking_the_sentence_prediction_commits_it() {
+    let mut router = router_with_sentence("你好世界", false);
+    type_letters(&mut router, "nihao");
+    // 平时是 DLL 的 80 ms 轮询把云结果拉进帧，这里手动拉一次。
+    let frame = poll_frame(&mut router);
+    assert_eq!(
+        frame.sentence.as_deref(),
+        Some("你好世界"),
+        "整句补全该进帧"
+    );
+
+    router.handle_candidate_event(CandidateEvent::PickSentence);
+
+    match router.handle(ClientMessage::Poll { session: SESSION }) {
+        Some(ServerMessage::Update { commit, frame, .. }) => {
+            assert_eq!(commit.as_deref(), Some("你好世界"), "点选的整句由轮询带回");
+            assert!(frame.is_empty(), "整段拼音吃完，组句结束");
+        }
+        other => panic!("expected update, got {other:?}"),
+    }
+}
+
+/// 「按 Tab 才联想整句」（`[predict] sentence_trigger = "tab"`）：自动那一拍只问词；
+/// 按一下 Tab 请一次整句（键吃掉、不上屏），结果到了再按一次 Tab 才采用。
+#[test]
+fn sentence_on_tab_asks_only_when_tab_is_pressed() {
+    let mut router = router_with_sentence("你好世界", true);
+    type_letters(&mut router, "nihao");
+    let frame = poll_frame(&mut router);
+    assert!(
+        frame.sentence.is_none(),
+        "手动模式下不自动要整句，云端词照旧"
+    );
+
+    let tab = KeyEvent::new(0x09, None, KeyModifiers::default());
+    let (outcome, commit, _) = press(&mut router, tab);
+    assert_eq!(outcome, KeyOutcome::Consumed, "Tab 被吃掉，不透传给应用");
+    assert_eq!(commit, None, "只是请了一次，还没上屏");
+
+    // 假联想是同步就绪的（真实云端要等一拍），所以这里不追究帧里有没有。
+    let frame = poll_frame(&mut router);
+    assert_eq!(
+        frame.sentence.as_deref(),
+        Some("你好世界"),
+        "Tab 请来的整句该进帧"
+    );
+
+    let (_, commit, after) = press(&mut router, tab);
+    assert_eq!(commit.as_deref(), Some("你好世界"), "再按一次 Tab 采用");
+    assert!(after.is_empty(), "整段拼音吃完，组句结束");
+}
+
+/// 没配手动模式时，Tab 在没整句可接受的情况下仍交还应用（缩进 / 跳焦点）。
+#[test]
+fn tab_without_sentence_still_goes_to_the_app() {
+    // 假联想从不回结果，等于「整句还没到」。
+    let (mut router, _) = router_with_predictor();
+    type_letters(&mut router, "nihao");
+    let (outcome, commit, _) = press(
+        &mut router,
+        KeyEvent::new(0x09, None, KeyModifiers::default()),
+    );
+    assert_eq!(outcome, KeyOutcome::Passthrough);
+    assert_eq!(commit, None);
+}
+
+/// 请求发出去了、结果还没到：帧里带着「联想中」的标记，候选窗据此在整句那块显示等待提示。
+#[test]
+fn the_sentence_request_shows_a_pending_hint_until_the_result_arrives() {
+    // 假联想从不回结果，等于「一直没到」。
+    let (mut router, _) = router_with_predictor();
+    type_letters(&mut router, "nihao");
+    let frame = poll_frame(&mut router);
+    assert!(frame.sentence_pending, "请求发出去了，该有等待提示");
+    assert!(frame.sentence.is_none(), "结果还没到，没有整句可画");
+}
+
+/// 结果到了（哪怕模型没给整句）就把提示收掉，不留个一直转的记号。
+#[test]
+fn the_pending_hint_clears_when_the_result_arrives() {
+    let mut router = router_with_sentence("你好世界", false);
+    type_letters(&mut router, "nihao");
+    let frame = poll_frame(&mut router);
+    assert!(!frame.sentence_pending, "结果到了就该收掉提示");
+    assert_eq!(frame.sentence.as_deref(), Some("你好世界"));
+}
+
+/// 组句结束（Esc 清空）也把提示收掉，别留着上一段的。
+#[test]
+fn the_pending_hint_goes_away_with_the_composition() {
+    let (mut router, _) = router_with_predictor();
+    type_letters(&mut router, "nihao");
+    press(
+        &mut router,
+        KeyEvent::new(0x1B, None, KeyModifiers::default()),
+    ); // Esc
+    let frame = poll_frame(&mut router);
+    assert!(!frame.sentence_pending);
+}
+
+/// 关掉云联想后，手里那段已经拿到的整句要作废：不然再按 Tab 会把一段旧句子打出去。
+#[test]
+fn turning_off_cloud_drops_the_sentence_already_received() {
+    let mut router = router_with_sentence("你好世界", false);
+    // 状态条上的「☁」是翻转 `[predict] enabled`，先让它开着才有关掉这一下。
+    router.configure_predict(PredictConfig {
+        enabled: true,
+        ..PredictConfig::default()
+    });
+    type_letters(&mut router, "nihao");
+    assert_eq!(
+        poll_frame(&mut router).sentence.as_deref(),
+        Some("你好世界"),
+        "开着的时候先拿到一段整句"
+    );
+
+    router.handle_status_event(StatusEvent::ToggleCloud);
+
+    let frame = poll_frame(&mut router);
+    assert!(frame.sentence.is_none(), "关掉云联想，手里这段该作废");
+    let (_, commit, _) = press(
+        &mut router,
+        KeyEvent::new(0x09, None, KeyModifiers::default()),
+    );
+    assert_eq!(commit, None, "不该上屏那段旧整句");
+}
+
+/// 手动模式下云联想没开：按 Tab 说明为什么，而不是什么都不发生（也别让应用顺手来个缩进）。
+#[test]
+fn tab_without_cloud_says_so_instead_of_doing_nothing() {
+    let mut router = router_with_sentence("你好世界", true);
+    // 没接联想的 Engine：`prediction_enabled()` 为假（真实环境里就是 `[predict] enabled = false`）。
+    router.engine_mut().set_predictor(Box::new(NoPredictor));
+    type_letters(&mut router, "nihao");
+
+    let (outcome, commit, frame) = press(
+        &mut router,
+        KeyEvent::new(0x09, None, KeyModifiers::default()),
+    );
+    assert_eq!(outcome, KeyOutcome::Consumed, "吃掉，别透传成缩进");
+    assert_eq!(commit, None);
+    assert!(
+        frame
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("云联想")),
+        "该说清为什么没联想，实际 notice={:?}",
+        frame.notice
+    );
+}
+
+/// 整句补全这个开关关着时，手动模式按 Tab 也说一句（云联想开着也不问）。
+#[test]
+fn tab_with_sentence_feature_off_says_it_is_off() {
+    let mut router = router_in(
+        RouterConfig {
+            sentence_on_tab: true,
+            sentence_enabled: false,
+            ..RouterConfig::default()
+        },
+        None,
+    );
+    router
+        .engine_mut()
+        .set_predictor(Box::new(SentencePredictor {
+            sentence: "你好世界".to_owned(),
+            want: false,
+            pending: None,
+            sequence: 0,
+        }));
+    type_letters(&mut router, "nihao");
+
+    let (outcome, commit, frame) = press(
+        &mut router,
+        KeyEvent::new(0x09, None, KeyModifiers::default()),
+    );
+    assert_eq!(outcome, KeyOutcome::Consumed);
+    assert_eq!(commit, None);
+    assert!(
+        frame
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("整句补全")),
+        "该说清整句补全是关的，实际 notice={:?}",
+        frame.notice
     );
 }
 

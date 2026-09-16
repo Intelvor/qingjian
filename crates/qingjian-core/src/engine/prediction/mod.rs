@@ -40,6 +40,12 @@ impl Engine {
         self.predictor.policy()
     }
 
+    /// 下一次联想请求要带上整句补全（壳里按 Tab 手动触发那一路）。只生效一次：
+    /// 自动模式本来每次都会要（策略里 `sentence` 为真），这一路是给「只在按 Tab 时联想整句」用的。
+    pub fn request_sentence_once(&mut self) {
+        self.sentence_once = true;
+    }
+
     /// 发一次联想请求，返回序号；没接 Predictor、私密输入中或拼音太短时不发，返回 `None`。
     ///
     /// 要的是「当前作用域拼音对应的词」和整句补全；`candidates` 是本地候选，只取前几个当提示。
@@ -121,7 +127,9 @@ impl Engine {
                 .collect(),
             guess,
             max_items: policy.max_items,
-            want_sentence: policy.sentence && !question,
+            // 策略里不要整句（壳配成「按 Tab 才联想整句」）时，只有按过 Tab 请的那一次要。
+            want_sentence: (policy.sentence || std::mem::take(&mut self.sentence_once))
+                && !question,
             text: String::new(),
             target_language: String::new(),
         };
