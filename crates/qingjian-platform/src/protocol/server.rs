@@ -3,10 +3,48 @@ use serde::{Deserialize, Serialize};
 use super::frame::Frame;
 use super::key::KeyOutcome;
 use super::session::SessionId;
+use crate::config::SwitchKey;
+
+/// Server 下发给 DLL 的「按键行为」设置。
+///
+/// DLL 跑在每个应用的进程里，拿不到 Server 那份 [`Config`](crate::Config)，但这两个值在**按键到达之前**
+/// 就得知道：单击切换键的判定在 `OnTestKeyUp` 里做，内置英文模式开关决定要不要登记语言栏按钮。
+/// 所以由 Server 读配置（它本来就在盯热加载）经协议下发，DLL 不读文件、不查 mtime——
+/// `%APPDATA%\Qingjian` 对 AppContainer 里的商店应用本来也读不到。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputSettings {
+    /// 中英切换键（`[shortcut] switch_mode`）。
+    pub switch_mode: SwitchKey,
+
+    /// 内置英文模式总开关（`[general] english_mode`）。
+    pub english_mode: bool,
+}
+
+impl Default for InputSettings {
+    fn default() -> Self {
+        Self {
+            switch_mode: SwitchKey::default(),
+            english_mode: true,
+        }
+    }
+}
 
 /// Server 发给 DLL 的消息。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ServerMessage {
+    /// 对一次 [`super::ClientMessage::OpenSession`] 的答复：把 DLL 在按键到达之前就要知道的
+    /// 设置带过去一次（之后 [`Self::ModeSync`] 的每一拍也带着，改了配置不用重开会话）。
+    ///
+    /// **只回过协议版本对得上的 DLL**：老的 `open` 是只写不读，多回一条会被它当成下一次
+    /// `Poll` 的应答而报错（见 Server 侧 `handle`）。
+    SessionOpened {
+        /// 会话标识。
+        session: SessionId,
+
+        /// 按键行为设置。
+        input: InputSettings,
+    },
+
     /// 对一次 [`super::ClientMessage::Key`] 的处理结果。
     KeyResult {
         /// 会话标识。
@@ -47,13 +85,18 @@ pub enum ServerMessage {
         commit: Option<String>,
     },
 
-    /// 对一次 [`super::ClientMessage::SyncMode`] 的答复：状态条上点出来、还没被取走的目标模式。
+    /// 对一次 [`super::ClientMessage::SyncMode`] 的答复：状态条上点出来、还没被取走的目标模式，
+    /// 外加当前的按键行为设置（每一拍都带，DLL 那边热加载就靠它）。
     ModeSync {
         /// 会话标识。
         session: SessionId,
 
         /// `Some(true)` 切英文、`Some(false)` 切中文；`None` 没有待处理的切换。
         english: Option<bool>,
+
+        /// 按键行为设置；老 DLL 不认识这个字段，读到时忽略（serde 默认忽略多余字段）。
+        #[serde(default)]
+        input: InputSettings,
     },
 
     /// 收到「翻译选中文字」快捷键：请 DLL 在读编辑会话里取当前选区，用

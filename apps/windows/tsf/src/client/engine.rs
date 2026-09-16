@@ -1,11 +1,11 @@
 use std::io::{Read, Write};
 
 use qingjian_platform::protocol::{
-    ClientMessage, KeyEvent, PROTOCOL_VERSION, ScreenRect, ServerMessage, SessionId, read_message,
-    write_message,
+    ClientMessage, InputSettings, KeyEvent, PROTOCOL_VERSION, ScreenRect, ServerMessage, SessionId,
+    read_message, write_message,
 };
 
-use super::{KeyReply, KeyResponse, PollReply};
+use super::{KeyReply, KeyResponse, ModeSyncReply, PollReply};
 use crate::error::ClientError;
 
 /// 连 Server 的一个会话客户端，开在一条已连好的双工流上（Windows 下是命名管道，测试里是内存流）。
@@ -21,12 +21,13 @@ pub struct EngineClient<S> {
 }
 
 impl<S: Read + Write> EngineClient<S> {
-    /// 开一个会话（Server 不回话）。`app` 是宿主应用的 exe 文件名，Server 据此查按应用的设置。
+    /// 开一个会话；Server 随即回一次按键行为设置（切换键、内置英文模式），带出来交给调用方。
+    /// `app` 是宿主应用的 exe 文件名，Server 据此查按应用的设置。
     pub fn open(
         mut stream: S,
         session: SessionId,
         app: Option<String>,
-    ) -> Result<Self, ClientError> {
+    ) -> Result<(Self, InputSettings), ClientError> {
         write_message(
             &mut stream,
             &ClientMessage::OpenSession {
@@ -35,11 +36,18 @@ impl<S: Read + Write> EngineClient<S> {
                 protocol: PROTOCOL_VERSION,
             },
         )?;
-        Ok(Self {
-            stream,
-            session,
-            private: None,
-        })
+        let input = match read_message(&mut stream)?.ok_or(ClientError::Closed)? {
+            ServerMessage::SessionOpened { input, .. } => input,
+            _ => InputSettings::default(),
+        };
+        Ok((
+            Self {
+                stream,
+                session,
+                private: None,
+            },
+            input,
+        ))
     }
 
     pub fn session(&self) -> SessionId {
@@ -156,12 +164,12 @@ impl<S: Read + Write> EngineClient<S> {
         })
     }
 
-    /// 问 Server 状态条上有没有点出待处理的目标模式（`Some(english)`）。
-    pub fn sync_mode(&mut self) -> Result<Option<bool>, ClientError> {
+    /// 问 Server 有没有待处理的目标模式，顺路取回最新的按键行为设置（每一拍都带）。
+    pub fn sync_mode(&mut self) -> Result<ModeSyncReply, ClientError> {
         match self.call(&ClientMessage::SyncMode {
             session: self.session,
         })? {
-            ServerMessage::ModeSync { english, .. } => Ok(english),
+            ServerMessage::ModeSync { english, input, .. } => Ok(ModeSyncReply { english, input }),
             _ => Err(ClientError::Unexpected("expected mode sync")),
         }
     }

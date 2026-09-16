@@ -22,7 +22,7 @@ use windows::Win32::UI::TextServices::{
 use windows::core::{ComObject, implement};
 
 use qingjian_platform::KeyCombo;
-use qingjian_platform::protocol::Frame;
+use qingjian_platform::protocol::{Frame, InputSettings};
 
 use super::composition::Shared;
 use super::key::KeyTap;
@@ -79,8 +79,9 @@ pub struct TextService {
     /// Ctrl+Space 切换键当前是否已登记为保留键（`[shortcut] switch_mode = "ctrl+space"` 时才有）。
     switch_preserved: Cell<bool>,
 
-    /// 配置文件的 mtime，变了就重读中英模式的两个设置（设置窗口改完立刻生效）。
-    config_stamp: Cell<Option<std::time::SystemTime>>,
+    /// 上一次应用过的按键行为设置；与 Server 下发的一致时就不重复应用
+    /// （每一拍 `SyncMode` 都带着它，见 [`TextService_Impl::apply_input_settings`]）。
+    input_settings: Cell<Option<InputSettings>>,
 
     /// 激活后一小段时间内忽略转换模式 compartment 的变化，见 [`TextService_Impl::sync_from_conversion_mode`]。
     conversion_guard_until: Cell<Option<Instant>>,
@@ -117,6 +118,11 @@ pub(super) fn on_mode_sync(english: bool) {
     });
 }
 
+/// 轮询取回了 Server 下发的按键行为设置（见 [`super::poll`]）：切换键 / 内置英文模式改了就地应用。
+pub(super) fn on_input_settings(input: InputSettings) {
+    with_active(|service| service.apply_input_settings(input));
+}
+
 /// 轮询取到了候选窗上点选的候选（见 [`super::poll`]）：把 Server 选好的词落进文档。
 pub(super) fn on_pick_commit(commit: String, frame: Frame) {
     with_active(|service| service.commit_picked(commit, frame));
@@ -141,7 +147,7 @@ impl TextService {
             profile_cookie: Cell::new(None),
             translate_combo: Cell::new(None),
             switch_preserved: Cell::new(false),
-            config_stamp: Cell::new(None),
+            input_settings: Cell::new(None),
             conversion_guard_until: Cell::new(None),
         }
     }

@@ -16,7 +16,7 @@ mod session;
 
 /// 协议版本，DLL 开会话时带上。加消息 / 改字段语义时 +1；Server 只对不上时记警告（老 DLL 在没重启的
 /// 应用里还会活很久，serde 的缺省字段 / 忽略未知字段让两边仍能对话）。
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 pub mod frame;
 pub mod key;
@@ -26,5 +26,5 @@ pub use codec::{CodecError, DEFAULT_PIPE_NAME, read_message, write_message};
 pub use frame::{Frame, PreeditKind, PreeditSegment};
 pub use key::{KeyEvent, KeyModifiers, KeyOutcome};
 pub use screen_rect::ScreenRect;
-pub use server::ServerMessage;
+pub use server::{InputSettings, ServerMessage};
 pub use session::SessionId;

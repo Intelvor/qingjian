@@ -8,7 +8,8 @@ use windows::Win32::UI::TextServices::{
 };
 use windows::core::{IUnknownImpl, Interface, Ref, Result};
 
-use qingjian_platform::protocol::SessionId;
+use qingjian_platform::SwitchKey;
+use qingjian_platform::protocol::{InputSettings, SessionId};
 
 use super::mode::CONVERSION_RESTORE_GUARD;
 use super::{ACTIVE, TextService_Impl};
@@ -16,7 +17,6 @@ use crate::com::key::preserved;
 use crate::com::log::log;
 use crate::com::poll::PollTimer;
 use crate::com::profile;
-use crate::com::settings;
 
 impl ITfTextInputProcessor_Impl for TextService_Impl {
     fn Activate(&self, ptim: Ref<ITfThreadMgr>, tid: u32) -> Result<()> {
@@ -35,7 +35,6 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
 
         self.client_id.set(tid);
         // 连不上 Server、没定时器都不致命。
-        self.connect();
         match PollTimer::new(self.engine.clone(), self.shared.clone()) {
             Ok(timer) => *self.poll_timer.borrow_mut() = Some(timer),
             Err(error) => log(&format!("挂云联想轮询定时器失败: {error}")),
@@ -48,20 +47,19 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             }
         }
         *self.thread_mgr.borrow_mut() = Some(thread_mgr);
-        // 中英模式的两个设置（切换键、内置英文模式开关）在按键到达之前就要有：激活时读一次，
-        // 之后由轮询按 mtime 热加载（`reload_settings_if_changed`），设置窗口改完不用切走再切回。
-        let config = settings::load();
-        self.config_stamp.set(settings::modified());
-        self.apply_mode_settings(config.general.english_mode, config.shortcut.switch_mode);
-        // 一小段时间内不理系统写回的转换模式（见 `sync_from_conversion_mode`），
-        // 否则 msctf 会在激活后把 profile 存的「非原生」写回来，每个应用一激活就是英文模式。
-        self.conversion_guard_until
-            .set(Some(Instant::now() + CONVERSION_RESTORE_GUARD));
-        log(&format!(
-            "中英切换键 {}，内置英文模式 {}",
-            config.shortcut.switch_mode.key(),
-            config.general.english_mode
-        ));
+        // 连 Server：它随 `OpenSession` 的回包把按键行为设置带下来，就地应用。那两个值在按键到达之前
+        // 就要有，而且应用时要登记 Ctrl+Space 保留键，所以这一步必须排在 `thread_mgr` 就绪之后。
+        self.connect();
+        // 连不上 Server 时用缺省值把模式状态建起来；连上了的话上面已应用过真实值，这里去重跳过。
+        self.apply_input_settings(InputSettings::default());
+        // 只在 Ctrl+Space 这一路开「忽略系统写回」的窗：那个组合常被系统的「输入法/非输入法切换」占着，
+        // 系统那条路会把转换模式翻成「非原生」，我们按 compartment 同步时就成了英文模式
+        // （表现：Ctrl+Space 好像「不能用」，其实每次激活都被打回英文，见 `sync_from_conversion_mode`）。
+        // 别的切换键不借系统那条路，激活时本来就是中文，不需要这段窗口。
+        if self.mode_state.switch_key() == SwitchKey::CtrlSpace {
+            self.conversion_guard_until
+                .set(Some(Instant::now() + CONVERSION_RESTORE_GUARD));
+        }
         self.mode_state.set_english(false);
         self.refresh_mode_indicator();
         if self.mode_state.enabled() {

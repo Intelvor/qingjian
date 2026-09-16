@@ -19,10 +19,12 @@ impl TextService_Impl {
             .map_err(|e| e.to_string())
             .and_then(|stream| EngineClient::open(stream, session, app).map_err(|e| e.to_string()));
         match connected {
-            Ok(client) => {
+            Ok((client, input)) => {
                 *self.engine.borrow_mut() = Some(client);
                 self.last_connect_failure.set(None);
                 log("已连上 Server");
+                // 按键行为设置随 `OpenSession` 的回包一起下来（DLL 不读配置文件，AppContainer 里读不到）。
+                self.apply_input_settings(input);
             }
             Err(error) => {
                 self.last_connect_failure.set(Some(Instant::now()));

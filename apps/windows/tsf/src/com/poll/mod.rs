@@ -30,10 +30,8 @@ const TIMER_ID: usize = 1;
 const INTERVAL_MS: u32 = 80;
 
 /// 没在组句时每几拍问一次状态条的切模式请求（320 ms 一次，点了状态条肉眼看不出延迟）。
+/// 按键行为设置（切换键、内置英文模式）也跟着这一拍取回，所以设置改完同样是约 320 ms 生效。
 const MODE_SYNC_EVERY: u32 = 4;
-
-/// 每几拍看一眼配置文件有没有改（320 ms 一次；设置窗口改完立刻生效，不必切走再切回输入法）。
-const RELOAD_SETTINGS_EVERY: u32 = 4;
 
 thread_local! {
     /// 本线程活着的定时器：消息窗口 → 回调上下文。查不到（已析构）就忽略这一拍。
@@ -111,14 +109,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
-/// 组句中或翻译评审中拉云结果；否则前台时隔几拍问一次切模式。引擎正被按键处理借用时跳过这一拍；连接坏了断开。
+/// 组句中或翻译评审中拉云结果；否则前台时隔几拍问一次切模式（顺路取回按键行为设置）。引擎正被按键处理借用时跳过这一拍；连接坏了断开。
 fn poll_once(context: &PollContext) {
     let tick = context.ticks.get().wrapping_add(1);
     context.ticks.set(tick);
-    // 配置热加载与是否在组句无关：改完设置马上生效。
-    if tick.is_multiple_of(RELOAD_SETTINGS_EVERY) {
-        super::service::reload_settings();
-    }
     let translating = context.shared.translating();
     if !context.shared.composing() && !translating {
         if context.shared.foreground() && tick.is_multiple_of(MODE_SYNC_EVERY) {
@@ -155,7 +149,8 @@ fn poll_once(context: &PollContext) {
     }
 }
 
-/// 取一次状态条上点出的目标模式。切模式会回报 Server、要借引擎，所以先放掉借用再切。
+/// 取一次状态条上点出的目标模式，顺路取回 Server 下发的按键行为设置。切模式会回报 Server、要借引擎，
+/// 所以先放掉借用再切。
 fn sync_mode(context: &PollContext) {
     let Ok(mut guard) = context.engine.try_borrow_mut() else {
         return;
@@ -163,8 +158,8 @@ fn sync_mode(context: &PollContext) {
     let Some(client) = guard.as_mut() else {
         return;
     };
-    let english = match client.sync_mode() {
-        Ok(english) => english,
+    let reply = match client.sync_mode() {
+        Ok(reply) => reply,
         Err(error) => {
             log(&format!("同步中英模式失败，断开，下一键重连: {error}"));
             *guard = None;
@@ -172,7 +167,9 @@ fn sync_mode(context: &PollContext) {
         }
     };
     drop(guard);
-    if let Some(english) = english {
+    // 按键行为设置每一拍都带（DLL 不读配置文件），切换键与内置英文模式开关改完靠它生效。
+    super::service::on_input_settings(reply.input);
+    if let Some(english) = reply.english {
         super::service::on_mode_sync(english);
     }
 }

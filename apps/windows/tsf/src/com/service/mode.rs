@@ -1,6 +1,6 @@
 //! 中 / 英模式：切模式先把组着的内容落定；指示器走语言栏按钮 + 转换模式 compartment，并推给 Server 的状态条；
-//! 用户点任务栏中 / 英时由 compartment 回调反向同步。切换键与内置英文模式开关来自配置，激活时读一次、
-//! 之后按 mtime 热加载（[`TextService_Impl::reload_settings_if_changed`]）。
+//! 用户点任务栏中 / 英时由 compartment 回调反向同步。切换键与内置英文模式开关由 Server 经协议下发
+//! （[`TextService_Impl::apply_input_settings`]），DLL 不读配置文件。
 
 use std::time::Instant;
 
@@ -8,12 +8,12 @@ use windows::Win32::UI::TextServices::{ITfKeystrokeMgr, ITfLangBarItemMgr};
 use windows::core::Interface;
 
 use qingjian_platform::SwitchKey;
+use qingjian_platform::protocol::InputSettings;
 
 use super::TextService_Impl;
 use crate::com::key::preserved;
 use crate::com::log::log;
 use crate::com::mode::{self, ModeButton, conversion};
-use crate::com::settings;
 
 /// 激活后多久内忽略系统写回的转换模式：msctf 在 TIP 激活后约 200–300 ms 会把 profile 存的
 /// 转换模式（缺省「非原生」= 关掉输入法）写回 compartment，不忽略的话每个应用一激活就被翻成英文模式。
@@ -32,22 +32,19 @@ impl TextService_Impl {
         self.sync_switch_preserved_key(switch_key);
     }
 
-    /// 配置文件改了就地重读（mtime 变了才算）：设置窗口改完立刻生效，不用切走再切回输入法。
-    pub(super) fn reload_settings_if_changed(&self) {
-        let Some(stamp) = settings::modified() else {
-            return;
-        };
-        if self.config_stamp.get() == Some(stamp) {
+    /// 应用 Server 下发的按键行为设置：`OpenSession` 的回包给一次，之后每一拍 `SyncMode` 也都带着。
+    /// 值没变就什么都不做，所以设置窗口改完在下一拍（约 320 ms）生效，不用切走再切回输入法。
+    pub(super) fn apply_input_settings(&self, input: InputSettings) {
+        if self.input_settings.get() == Some(input) {
             return;
         }
-        self.config_stamp.set(Some(stamp));
-        let config = settings::load();
+        self.input_settings.set(Some(input));
         log(&format!(
-            "配置已变更：中英切换键 {}，内置英文模式 {}",
-            config.shortcut.switch_mode.key(),
-            config.general.english_mode
+            "按键行为设置：中英切换键 {}，内置英文模式 {}",
+            input.switch_mode.key(),
+            input.english_mode
         ));
-        self.apply_mode_settings(config.general.english_mode, config.shortcut.switch_mode);
+        self.apply_mode_settings(input.english_mode, input.switch_mode);
     }
 
     /// Ctrl+Space 是组合键、走 TSF 保留键（与「翻译选中文字」同一套）；换成别的键就撤掉登记，

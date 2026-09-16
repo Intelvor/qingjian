@@ -38,7 +38,14 @@ impl Router {
                         private: false,
                     },
                 );
-                None
+                // 按键行为设置回一次，让 DLL 不必自己读配置文件。**只回过协议版本对得上的**：
+                // 老 DLL 的 `open` 是只写不读，多回一条会被它当成下一次 `Poll` 的应答而报错，
+                // 那条连接就废了（老 DLL 在没重启的应用里还会活很久）。老 DLL 从 `ModeSync` 那一拍
+                // 也能拿到同一份（新字段它直接忽略），只是慢一拍。
+                (protocol >= PROTOCOL_VERSION).then(|| ServerMessage::SessionOpened {
+                    session,
+                    input: self.input_settings(),
+                })
             }
             ClientMessage::Key { session, event } => Some(self.handle_key(session, event)),
             ClientMessage::Poll { session } => Some(self.handle_poll(session)),
@@ -83,6 +90,7 @@ impl Router {
             ClientMessage::SyncMode { session } => Some(ServerMessage::ModeSync {
                 session,
                 english: self.take_pending_mode(),
+                input: self.input_settings(),
             }),
             ClientMessage::ImeSwitched { session } => {
                 tracing::debug!(?session, "切成了别的输入法");

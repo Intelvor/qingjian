@@ -167,6 +167,13 @@ TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解
 整句补全的时机在 `[predict] sentence_trigger`：`idle` 是停键自动请，`tab` 是按下 Tab 现请一次（`Engine::request_sentence_once` 让这一拍破例要句子）；
 请出去到结果回来的这段由 `Router.sentence_pending` 驱动候选窗摆「☁ …」。云联想关着时按 Tab 交还应用（缩进 / 跳焦点）。
 
+中英切换键（`[shortcut] switch_mode`）与内置英文模式开关（`[general] english_mode`）得在**按键到达之前**就知道
+（单击判定在 `OnTestKeyUp`、是否登记语言栏按钮），但 DLL 跑在每个应用进程里、拿不到 Server 那份配置，
+`%APPDATA%\Qingjian` 对 AppContainer 里的商店应用也读不到（那是给输入日志和 `.env` 用的目录，不该加 ACE）。
+所以由 **Server 读配置、经协议下发**（`InputSettings`：`OpenSession` 回包带一次，之后每拍 `SyncMode` 跟着走），
+DLL 不读文件、不查 mtime。`SessionOpened` 只回过协议版本对得上的 DLL——老的 `open` 是只写不读，
+多回一条会被它当成下一次 `Poll` 的应答而报错，那条连接就废了；老 DLL 从 `ModeSync` 那一拍也能拿到同一份（新字段直接忽略）。
+
 ## assets
 
 - `assets/sample/`：手写样例词库与释义表，不是产品数据。

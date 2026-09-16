@@ -8,8 +8,8 @@ use qingjian_core::{
     Language, ModeKeys, Prediction, PredictionPolicy, PredictionRequest, Predictor, ShuangpinScheme,
 };
 use qingjian_platform::protocol::{
-    ClientMessage, Frame, KeyEvent, KeyModifiers, KeyOutcome, PROTOCOL_VERSION, ServerMessage,
-    SessionId,
+    ClientMessage, Frame, InputSettings, KeyEvent, KeyModifiers, KeyOutcome, PROTOCOL_VERSION,
+    ServerMessage, SessionId,
 };
 use qingjian_platform::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, PreeditMode};
 use qingjian_windows_server::dispatch::{CandidateEvent, StatusEvent, StatusSink, StatusView};
@@ -82,15 +82,21 @@ fn router_in(config: RouterConfig, app: Option<String>) -> Router {
     // 与 main.rs 一样，双拼方案是启动时直接设给 Engine 的。
     engine.set_shuangpin(config.shuangpin);
     let mut router = Router::new(engine, config);
-    assert_eq!(
-        router.handle(ClientMessage::OpenSession {
-            session: SESSION,
-            app,
-            protocol: PROTOCOL_VERSION,
-        }),
-        None
-    );
+    // 协议版本与 Server 一致：开会话时把按键行为设置回一次（DLL 不读配置文件，靠它拿切换键）。
+    open_session(&mut router, SESSION, app);
     router
+}
+
+/// 开一个会话并吃掉 Server 回的按键行为设置。
+fn open_session(router: &mut Router, session: SessionId, app: Option<String>) {
+    match router.handle(ClientMessage::OpenSession {
+        session,
+        app,
+        protocol: PROTOCOL_VERSION,
+    }) {
+        Some(ServerMessage::SessionOpened { .. }) => {}
+        other => panic!("expected SessionOpened, got {other:?}"),
+    }
 }
 
 fn letter(c: char) -> KeyEvent {
@@ -596,8 +602,13 @@ fn switching_to_chinese_mid_word_flushes_english_letters() {
 }
 
 #[test]
-fn shift_uppercase_while_composing_goes_into_the_buffer() {
-    let mut router = router();
+fn shift_uppercase_while_composing_goes_into_the_buffer_when_configured() {
+    // 配成 `shift_letter = "compose"` 才有这条：缺省是交给应用（见 `shift_letters_follow_the_configuration`）。
+    let config = RouterConfig {
+        shift_letter_compose: true,
+        ..RouterConfig::default()
+    };
+    let mut router = router_with(config);
     type_letters(&mut router, "ni");
     // 中文模式按住 Shift 打大写字母：进缓冲区（不再直接交给应用），拼音行照敲的样子显示。
     let shifted = KeyModifiers {
@@ -756,6 +767,7 @@ fn status_bar_mode_click_is_handed_to_dll_via_sync_mode() {
         Some(ServerMessage::ModeSync {
             session: SESSION,
             english: Some(true),
+            input: InputSettings::default(),
         })
     );
     assert_eq!(
@@ -763,6 +775,7 @@ fn status_bar_mode_click_is_handed_to_dll_via_sync_mode() {
         Some(ServerMessage::ModeSync {
             session: SESSION,
             english: None,
+            input: InputSettings::default(),
         })
     );
 }
@@ -791,6 +804,10 @@ fn status_bar_mode_click_is_ignored_when_builtin_english_is_off() {
         Some(ServerMessage::ModeSync {
             session: SESSION,
             english: None,
+            input: InputSettings {
+                english_mode: false,
+                ..InputSettings::default()
+            },
         })
     );
 }
@@ -1292,14 +1309,7 @@ fn privacy_follows_the_focused_session() {
     let (_, commit, _) = press(&mut router, digit(1));
     assert!(commit.is_some());
     // 另一个会话开进来拿焦点：它不私密
-    assert_eq!(
-        router.handle(ClientMessage::OpenSession {
-            session: SessionId(2),
-            app: None,
-            protocol: PROTOCOL_VERSION,
-        }),
-        None
-    );
+    open_session(&mut router, SessionId(2), None);
     press_in(&mut router, SessionId(2), letter('k'));
     assert!(!router.is_private());
     // 焦点回到第一个会话：仍是私密
