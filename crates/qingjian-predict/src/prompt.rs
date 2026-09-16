@@ -37,10 +37,14 @@ sentence：want_sentence 为 true 时给一段文字，它**只替换这段拼�
 - **sentence 必须以 letters 拼出来的那个词开头**（就是 local_candidates 里的词），哪怕 before / after 的语义更像另一个词——用户敲什么就补什么。
   例：before=高等数学是一门非常重要的、拼音 d'x、after=课程 → 以「大学」开头（能接上 after 的说法），**不要「基础」**：`d'x` 拼不出基础，用户想打的是大学。
   实在拼不出合适的就给 null，不要硬凑。
-- **sentence_pinyin**：sentence 前 `syllables` 个字（也就是用户敲的这段拼音对应的部分）的**正确**全拼，音节间用空格、字数等于那几个字，
+- **sentence_pinyin**：用户敲的这段拼音对应的**正确**全拼，一个音节一个拼音、用空格隔开（就是 `syllables` 个音节），
   和 words 的 pinyin 一样要给；本地会拿它和 letters 对（简拼、少量错字都算过），对不上就丢掉整句。
-- sentence 可以**中英混排**（我不了解Linux系统、部署完成后调用API验证）：sentence_pinyin 只覆盖开头那几个字——中文给全拼、英文给原文小写，
-  句子后半段的英文不用给拼音。
+- sentence 可以**中英混排**（我不了解Linux系统、部署完成后调用API验证），数字也常混在里面。给 sentence_pinyin 时\
+  **按用户敲的字母给，不是按写出来的字**：中文给全拼；英文与字母数字混排的照原样小写（`mp3` 是敲 `mp` 加 `san`，就给 `mp san`；`C盘` 给 `cpan`）；\
+  **阿拉伯数字按念法给拼音**（`123` → `yi bai er shi san`），它没有字母可对。
+- **数字与符号怎么写由你判断**，按中文习惯来：金额、数量、序号、年份、代码这类写阿拉伯数字（我花 123 元、第 3 章、2024 年）；\
+  口语量词与成语里的固定说法写汉字（三个月、一个人、一心一意）。同一个句子里两种混着来才自然——「我花 123 元买了三个 mp3」比\
+  「我花一百二十三元买了3个mp3」更像人写的。用户敲的拼音是按汉字念的（`yibaiershisanyuan` 就是 123 元），照念法还原即可。
 want_sentence 为 false 时给 null。语言跟随上下文。
 
 不解释、不加引号、不加序号。";
@@ -373,6 +377,27 @@ fn clean(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 整句里写阿拉伯数字、拼音按念法给（`123` → `yi bai er shi san`）：字母照样对得上，句子收得下。
+    #[test]
+    fn arabic_digits_pass_the_pinyin_check() {
+        let reply = r#"{"words": [], "sentence": "我花123元", "sentence_pinyin": "wo hua yi bai er shi san yuan"}"#;
+        let parsed = parse_reply(reply, &request("wo'hua'yi'bai'er'shi'san'yuan", true));
+        assert_eq!(parsed.sentence.as_deref(), Some("我花123元"));
+    }
+
+    /// 一句话里两种数字写法混着（用户的例子）：金额写阿拉伯数字、量词写汉字，
+    /// 拼音按敲的字母给——`123` 按念法、`mp3` 按 `mp` 加 `san`。
+    #[test]
+    fn mixed_arabic_digits_and_letters_in_one_sentence() {
+        let reply = r#"{"words": [], "sentence": "我花123元买了三个mp3",
+            "sentence_pinyin": "wo hua yi bai er shi san yuan mai le san ge mp san"}"#;
+        let parsed = parse_reply(
+            reply,
+            &request("wo'hua'yi'bai'er'shi'san'yuan'mai'le'san'ge'mp'san", true),
+        );
+        assert_eq!(parsed.sentence.as_deref(), Some("我花123元买了三个mp3"));
+    }
 
     fn request(pinyin: &str, want_sentence: bool) -> PredictionRequest {
         PredictionRequest {
