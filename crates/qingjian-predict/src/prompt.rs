@@ -1,6 +1,6 @@
 //! 提示词与回复解析。模型只输出约定的 JSON，其余一概不信；拼音校验在 Core 里再做一遍。
 
-use qingjian_core::{CloudWord, PredictionKind, PredictionRequest};
+use qingjian_core::{CloudWord, PredictionKind, PredictionRequest, mismatch_count, tolerance};
 use serde::{Deserialize, Serialize};
 
 /// 系统提示。语言跟随上下文，不限定中文。
@@ -13,7 +13,7 @@ local_sentence（本地整句转换的结果，可能错）、local_candidates�
 **local_candidates 和 local_sentence 只是本地的猜测，可能全错。**它们的用途是告诉你本地已经能给什么：\
 和它们重复的词会被丢掉，所以不要照抄；也不要被它们带偏——请只根据 letters 与 before / after 独立判断用户想打什么。
 
-输出 JSON：{\"words\": [{\"text\": \"…\", \"pinyin\": \"…\"}], \"sentence\": \"…\" 或 null}
+输出 JSON：{\"words\": [{\"text\": \"…\", \"pinyin\": \"…\"}], \"sentence\": \"…\" 或 null, \"sentence_pinyin\": \"…\" 或 null}
 
 words：用户最可能想输入、而本地又给不出（或排错了）的词或短语，0 到 max_items 个，按可能性排序。要求：
 - 按 letters 推断用户想打什么，允许纠正错字、漏字、多字（如 zhgdoima → 这个东西吗）；pinyin 给该词**正确**的全拼，音节间用空格，字数等于音节数，\
@@ -23,12 +23,17 @@ words：用户最可能想输入、而本地又给不出（或排错了）的词
 - 只给真实存在的词，不要生造（「不态」「步太」这种组合）；不确定就少给；
 - 本地首选已经对了就不必再给同一个词，也不必给它的同音变体；没有更好的就给空数组，不要凑数。
 
-sentence：want_sentence 为 true 时给一段以这个词开头的文字，它**只替换这段拼音**。分两种情况：
+sentence：want_sentence 为 true 时给一段文字，它**只替换这段拼音**。分两种情况：
 - **有 after**（光标后面已有文字）：sentence 只是填在 before 与 after 之间的那一小段，通常 1 到 6 个字，会被原样插在 before 之后、after 之前。
   例：before=高等数学是、拼音 d'x、after=最重要的基础课程之一 → sentence 给「大学」（拼起来是 高等数学是大学最重要的基础课程之一）。
   **不要重复 after，连改写也不行**（「大学阶段学习的重要基础课程之一」这种等于把 after 又写了一遍，拼起来会重复），不要带句末标点，不要写成能独立成句的完整句子。
 - **没有 after**：才给一条完整的短句，接住 before 的话题往下写、给出有信息量的续写（before 是 笛卡儿积、拼音 shiyizhong → 笛卡儿积是一种二元运算）；
   不要「是一种很好的选择」「对身体健康非常重要」这类与话题无关的空话。**不要把 before 的内容抄进来**。
+- **sentence 必须以 letters 拼出来的那个词开头**（就是 local_candidates 里的词），哪怕 before / after 的语义更像另一个词——用户敲什么就补什么。
+  例：before=高等数学是一门非常重要的、拼音 d'x、after=课程 → 以「大学」开头（能接上 after 的说法），**不要「基础」**：`d'x` 拼不出基础，用户想打的是大学。
+  实在拼不出合适的就给 null，不要硬凑。
+- **sentence_pinyin**：sentence 前 `syllables` 个字（也就是用户敲的这段拼音对应的部分）的**正确**全拼，音节间用空格、字数等于那几个字，
+  和 words 的 pinyin 一样要给；本地会拿它和 letters 对（简拼、少量错字都算过），对不上就丢掉整句。
 want_sentence 为 false 时给 null。语言跟随上下文。
 
 不解释、不加引号、不加序号。";
@@ -164,6 +169,9 @@ struct RawReply {
 
     sentence: Option<String>,
 
+    /// sentence 前 `syllables` 个字的全拼，用来和 letters 对。
+    sentence_pinyin: Option<String>,
+
     /// 问字模式的答案。
     answers: Vec<RawWord>,
 }
@@ -223,14 +231,42 @@ pub fn parse_reply(content: &str, request: &PredictionRequest) -> Reply {
             break;
         }
     }
-    if request.want_sentence {
-        reply.sentence = raw
-            .sentence
-            // 整句只替换拼音：模型爱把 before 的尾巴和 after 的开头抄进来，两头都剥掉
-            .map(|s| strip_after(&strip_before(&clean(&s), &request.before), &request.after))
-            .filter(|s| !s.is_empty() && Some(s.as_str()) != first_local)
-            // 剥不干净的（模型把 after 改写一遍再接上来）整句不要：宁可不补，也不要拼出重复的一句
-            .filter(|s| !restates_after(s, &request.after));
+    if request.want_sentence
+        && let Some(raw_sentence) = raw.sentence
+    {
+        // 整句只替换拼音：模型爱把 before 的尾巴和 after 的开头抄进来，两头都剥掉；
+        // 剥不干净的（模型把 after 改写一遍再接上来）也不收：宁可不补，也不要拼出重复的一句。
+        let sentence = strip_after(
+            &strip_before(&clean(&raw_sentence), &request.before),
+            &request.after,
+        );
+        let syllables: Vec<String> = raw
+            .sentence_pinyin
+            .as_deref()
+            .unwrap_or_default()
+            .split(|c: char| c.is_whitespace() || c == '\'')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_ascii_lowercase())
+            .collect();
+        // 开头那几个字要对得上敲的字母（与云端词同一套容错：简拼、少量错字 / 漏字 / 多字都算过）。
+        // 模型没给 sentence_pinyin、或拼音是先想词再编的（敲 d'x 回「基础」），整句不收——
+        // 本地词库没有的词不受影响：这里只看拼音，不查词库。
+        let letters = request.letters.chars().count();
+        let fits = !sentence.is_empty()
+            && Some(sentence.as_str()) != first_local
+            && !restates_after(&sentence, &request.after)
+            && !syllables.is_empty()
+            && mismatch_count(&request.pinyin, &syllables) <= tolerance(letters);
+        if fits {
+            reply.sentence = Some(sentence);
+        } else {
+            tracing::debug!(
+                %sentence,
+                ?syllables,
+                letters,
+                "整句补全不收（空 / 本地首选 / 复述下文 / 拼音对不上）"
+            );
+        }
     }
     reply
 }
@@ -362,7 +398,7 @@ mod tests {
     fn reply_keeps_words_with_pinyin_and_drops_the_local_first() {
         let reply = r#"{"words": [{"text": "账套", "pinyin": "zhang tao"}, {"text": "张涛", "pinyin": "zhang tao"},
             {"text": "涨停", "pinyin": ""}, {"text": " 章台 ", "pinyin": "Zhang'Tai"}, {"text": "张套", "pinyin": "zhang tao"}],
-            "sentence": " 账套已经建好了\n"}"#;
+            "sentence": " 账套已经建好了\n", "sentence_pinyin": "zhang tao"}"#;
         let parsed = parse_reply(reply, &request("zhang'tao", true));
         let texts: Vec<(&str, Vec<&str>)> = parsed
             .words
@@ -388,14 +424,15 @@ mod tests {
             None
         );
         // 整句里抄了 before 的，去掉重叠部分
-        let echoed = r#"{"words": [], "sentence": "我们今天账套已经建好了"}"#;
+        let echoed = r#"{"words": [], "sentence": "我们今天账套已经建好了", "sentence_pinyin": "zhang tao"}"#;
         assert_eq!(
             parse_reply(echoed, &request("zhang'tao", true))
                 .sentence
                 .as_deref(),
             Some("账套已经建好了")
         );
-        let partial = r#"{"words": [], "sentence": "今天账套已经建好了"}"#;
+        let partial =
+            r#"{"words": [], "sentence": "今天账套已经建好了", "sentence_pinyin": "zhang tao"}"#;
         assert_eq!(
             parse_reply(partial, &request("zhang'tao", true))
                 .sentence
@@ -427,25 +464,26 @@ mod tests {
         request.before = "笛卡儿积是一种二元运算，把".into();
         request.after = "按顺序两两配对组成有序对。".into();
         // 模型把光标后面已有的文字抄了进来：剥掉，只留补拼音那段
-        let echoed = r#"{"words": [], "sentence": "两个集合中的元素按顺序两两配对组成有序对。"}"#;
+        let echoed = r#"{"words": [], "sentence": "两个集合中的元素按顺序两两配对组成有序对。", "sentence_pinyin": "liang ge"}"#;
         assert_eq!(
             parse_reply(echoed, &request).sentence.as_deref(),
             Some("两个集合中的元素")
         );
         // before 的尾巴也被抄了进来：两头都剥
-        let both = r#"{"words": [], "sentence": "把两个集合中的元素按顺序两两配对组成有序对。"}"#;
+        let both = r#"{"words": [], "sentence": "把两个集合中的元素按顺序两两配对组成有序对。", "sentence_pinyin": "liang ge"}"#;
         assert_eq!(
             parse_reply(both, &request).sentence.as_deref(),
             Some("两个集合中的元素")
         );
         // 与下文无关时不误伤
-        let unrelated = r#"{"words": [], "sentence": "两个集合做笛卡儿积。"}"#;
+        let unrelated =
+            r#"{"words": [], "sentence": "两个集合做笛卡儿积。", "sentence_pinyin": "liang ge"}"#;
         assert_eq!(
             parse_reply(unrelated, &request).sentence.as_deref(),
             Some("两个集合做笛卡儿积。")
         );
         // 整句就是下文的原样：剥完为空，不收
-        let only_after = r#"{"words": [], "sentence": "按顺序两两配对组成有序对。"}"#;
+        let only_after = r#"{"words": [], "sentence": "按顺序两两配对组成有序对。", "sentence_pinyin": "an shun"}"#;
         assert!(parse_reply(only_after, &request).sentence.is_none());
     }
 
@@ -455,7 +493,7 @@ mod tests {
         let mut req = request("dx", true);
         req.before = "高等数学是".into();
         req.after = "最重要的基础课程之一".into();
-        let rephrased = r#"{"words": [{"text": "大学", "pinyin": "da xue"}], "sentence": "大学阶段学习的重要基础课程之一"}"#;
+        let rephrased = r#"{"words": [{"text": "大学", "pinyin": "da xue"}], "sentence": "大学阶段学习的重要基础课程之一", "sentence_pinyin": "da xue"}"#;
         let parsed = parse_reply(rephrased, &req);
         assert_eq!(parsed.words[0].text, "大学", "词那一路不受影响");
         assert!(
@@ -464,15 +502,51 @@ mod tests {
             parsed.sentence
         );
         // 真正填空的那几个字照常收
-        let gap = r#"{"words": [], "sentence": "大学"}"#;
+        let gap = r#"{"words": [], "sentence": "大学", "sentence_pinyin": "da xue"}"#;
         assert_eq!(parse_reply(gap, &req).sentence.as_deref(), Some("大学"));
         // 没有 after 时的正常完整句不受影响
         let mut bare = request("dx", true);
         bare.before = "高等数学是".into();
-        let normal = r#"{"words": [], "sentence": "大学是人生的新起点。"}"#;
+        let normal =
+            r#"{"words": [], "sentence": "大学是人生的新起点。", "sentence_pinyin": "da xue"}"#;
         assert_eq!(
             parse_reply(normal, &bare).sentence.as_deref(),
             Some("大学是人生的新起点。")
+        );
+    }
+
+    /// 整句开头那几个字拼不出 letters（敲 `d'x` 回「基础」）时不收；词库没有的词不受影响——这里只看拼音，不查词库。
+    #[test]
+    fn reply_drops_a_sentence_whose_pinyin_does_not_match_the_letters() {
+        let mut req = request("dx", true);
+        req.before = "高等数学是一门非常重要的".into();
+        req.after = "课程".into();
+        // 模型按 before / after 的语义填了「基础」，但 d'x 拼不出 ji chu
+        let semantic = r#"{"words": [{"text": "大学", "pinyin": "da xue"}], "sentence": "基础", "sentence_pinyin": "ji chu"}"#;
+        let parsed = parse_reply(semantic, &req);
+        assert_eq!(parsed.words[0].text, "大学", "词那一路不受影响");
+        assert!(
+            parsed.sentence.is_none(),
+            "拼音对不上不该收，实际 {:?}",
+            parsed.sentence
+        );
+        // 词库里没有的词也可以收：只要拼音对得上
+        let coined = r#"{"words": [], "sentence": "氘氙反应堆", "sentence_pinyin": "dao xian"}"#;
+        assert_eq!(
+            parse_reply(coined, &req).sentence.as_deref(),
+            Some("氘氙反应堆")
+        );
+        // 没给 sentence_pinyin：没法校验，不收
+        let no_pinyin = r#"{"words": [], "sentence": "大学"}"#;
+        assert!(parse_reply(no_pinyin, &req).sentence.is_none());
+        // 少量错字算过（适当纠错）：dhxue 容 1 个错
+        let mut typo = request("dhxue", true);
+        typo.before = "高等数学是".into();
+        let corrected =
+            r#"{"words": [], "sentence": "大学阶段的课程", "sentence_pinyin": "da xue"}"#;
+        assert_eq!(
+            parse_reply(corrected, &typo).sentence.as_deref(),
+            Some("大学阶段的课程")
         );
     }
 

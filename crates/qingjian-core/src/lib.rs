@@ -39,7 +39,7 @@ pub use engine::{
     NoUsageMeter, NoVocabularyTracker, Prediction, PredictionKind, PredictionPolicy,
     PredictionRequest, Predictor, QUESTION_PREFIX, Query, RESCORE_CONTEXT_CHARS, SurroundingText,
     Timings, Translator, Usage, UsageMeter, UsageSummary, VocabularySummary, VocabularyTracker,
-    book_scale,
+    book_scale, mismatch_count, tolerance,
 };
 pub use fuzzy::FuzzyRules;
 pub use history::InputHistory;
