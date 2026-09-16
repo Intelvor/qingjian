@@ -433,9 +433,9 @@ fn traditional_mode_preserves_original_text_across_queries() {
     engine.request_prediction(None, &[]);
     let prediction = engine.poll_prediction().unwrap();
     let cloud_text = prediction.words[0].text.clone();
-    
+
     engine.query().unwrap(); // 第二次 query() 不应清空云端词的映射
-    
+
     let word = Candidate {
         text: cloud_text,
         kind: CandidateKind::Cloud,
