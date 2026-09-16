@@ -146,6 +146,9 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
 按 `in_window()` 决定候选窗口顶部画不画拼音行；`window` 模式没有组句范围，光标矩形改从 `com/edit/anchor.rs::caret_rect`（当前选区）量。
 光标前后文（`ClientMessage::Surrounding` 的 `text` / `after`，DLL 起组句时读 64 / 32 字）进两条路：前文给本地整句模型当前文，
 整份给云联想当上下文（`Router.surrounding`，组句结束作废）；macOS 是每次请求现读，Windows 一段组句只读一次，第一键的请求还没有上下文。
+状态条第四格「☁」是在线联想的隐私开关（`StatusEvent::ToggleCloud` → `dispatch/status`）：翻转 `Router.predict.enabled`、写回
+`[predict] enabled`，并**立刻** `attach_cloud` 换掉 Predictor（关着时连释义兜底一起停），不等热加载；热加载时 `apply_config` 也把
+`Router.predict` 跟着配置文件走，两边不会各说各话。
 
 ## assets
 

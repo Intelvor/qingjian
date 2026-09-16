@@ -66,6 +66,7 @@ impl Placement {
             Some(StatusAction::TogglePunctuation) => {
                 (self.events)(StatusEvent::TogglePunctuation);
             }
+            Some(StatusAction::ToggleCloud) => (self.events)(StatusEvent::ToggleCloud),
             Some(StatusAction::OpenSettings) => open_settings(),
             None => {}
         }

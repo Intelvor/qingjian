@@ -696,12 +696,47 @@ impl StatusSink for RecordingStatus {
             (false, Some(scheme)) => format!("中 · {scheme}"),
             (false, None) => "中".to_owned(),
         };
+        // 云联想开着时跟一个「☁」，方便断言这一格的状态（缺省关着，不影响既有用例）
+        let label = if view.cloud {
+            format!("{label} ☁")
+        } else {
+            label
+        };
         self.0.lock().unwrap().push(Some(label));
     }
 
     fn hide_status(&self) {
         self.0.lock().unwrap().push(None);
     }
+}
+
+/// 状态条上的「☁」：隐私开关，翻转 `[predict] enabled` 并立刻换掉 Predictor，不用等热加载。
+#[test]
+fn status_bar_cloud_click_toggles_the_online_prediction() {
+    let mut router = router_with(RouterConfig {
+        status_enabled: true,
+        ..RouterConfig::default()
+    });
+    let recorder = RecordingStatus::default();
+    router.set_status_sink(Box::new(recorder.clone()));
+    router.configure_predict(qingjian_predict::PredictConfig {
+        enabled: true,
+        ..qingjian_predict::PredictConfig::default()
+    });
+    router.handle(ClientMessage::ModeChanged {
+        session: SESSION,
+        english: false,
+    });
+    assert!(router.cloud_enabled());
+    assert_eq!(recorder.calls().last(), Some(&Some("中 ☁".to_owned())));
+
+    router.handle_status_event(StatusEvent::ToggleCloud);
+    assert!(!router.cloud_enabled(), "点一下该关掉");
+    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+
+    router.handle_status_event(StatusEvent::ToggleCloud);
+    assert!(router.cloud_enabled(), "再点一下该打开");
+    assert_eq!(recorder.calls().last(), Some(&Some("中 ☁".to_owned())));
 }
 
 #[test]

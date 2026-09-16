@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 use qingjian_core::{Engine, SurroundingText};
 use qingjian_platform::LocalModelConfig;
 use qingjian_platform::protocol::{ClientMessage, Frame, ScreenRect, ServerMessage, SessionId};
+use qingjian_predict::PredictConfig;
 
 pub use self::candidates::{CandidateSink, NoopSink};
 use self::composed::Composed;
@@ -43,6 +44,9 @@ pub struct Router {
 
     /// 每页候选数 / 云端槽位 / 排布 / 外观 / 翻页键等。
     config: RouterConfig,
+
+    /// 云联想配置：状态条上的「☁」格翻转 `enabled` 后按它换掉 Predictor，热加载时跟着配置文件走。
+    predict: PredictConfig,
 
     /// 活跃会话及各自的宿主应用。
     sessions: HashMap<SessionId, SessionInfo>,
@@ -124,6 +128,7 @@ impl Router {
                 page_size: config.page_size.max(1),
                 ..config
             },
+            predict: PredictConfig::default(),
             sessions: HashMap::new(),
             focused: None,
             composed: None,
@@ -161,6 +166,16 @@ impl Router {
 
     pub fn set_status_sink(&mut self, sink: Box<dyn StatusSink>) {
         self.status = sink;
+    }
+
+    /// 启动时记下云联想配置（缺省关闭）；状态条上的「☁」格按它翻转 `enabled` 并重新接入。
+    pub fn configure_predict(&mut self, predict: PredictConfig) {
+        self.predict = predict;
+    }
+
+    /// 在线联想开着没有；状态条的「☁」格据此上色，也决定这一格点下去往哪边翻。
+    pub fn cloud_enabled(&self) -> bool {
+        self.predict.enabled
     }
 
     /// 处理一条消息；`None` 表示不用回话。到点顺带把学习数据落盘。

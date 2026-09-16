@@ -142,7 +142,7 @@ impl StatusBar {
         }
     }
 
-    /// 三格从左到右：模式（品牌色）、标点（生效时品牌色，否则灰）、齿轮（灰）。
+    /// 四格从左到右：模式（品牌色）、标点（生效时品牌色，否则灰）、云联想（开着品牌色，否则灰）、齿轮（灰）。
     fn cells(&self, theme: &Theme) -> Vec<CellSpec> {
         let data = self.data.borrow();
         let Some(view) = data.as_ref() else {
@@ -175,6 +175,16 @@ impl StatusBar {
                     theme.gloss_color
                 },
                 action: StatusAction::TogglePunctuation,
+            },
+            CellSpec {
+                text: "\u{2601}".to_owned(),
+                font: theme.symbol_font,
+                color: if view.cloud {
+                    theme.cloud_color
+                } else {
+                    theme.gloss_color
+                },
+                action: StatusAction::ToggleCloud,
             },
             CellSpec {
                 text: "\u{2699}".to_owned(),

@@ -15,6 +15,9 @@ pub struct StatusView {
     /// 当前模式的全角标点开着（中英各记一份配置）；关着时格子显示 `,.` 画成灰的。
     pub full_width: bool,
 
+    /// 在线联想开着（`[predict] enabled`）；开时「☁」格用品牌色，关时画成灰的。
+    pub cloud: bool,
+
     /// 外观模式。
     pub theme: ThemeMode,
 

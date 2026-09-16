@@ -108,6 +108,8 @@ impl Router {
         self.engine.set_zhuyin_mode(config.general.zhuyin);
         self.engine.set_mode_keys(config.shortcut.mode);
         self.config = RouterConfig::from(config);
+        // 状态条上的「☁」格按这份翻转 enabled，配置文件被改时跟着走
+        self.predict = config.predict.clone();
         self.reconcile_status();
         self.apply_model_config(&config.model);
 
