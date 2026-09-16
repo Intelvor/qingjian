@@ -62,7 +62,10 @@ def parse_changelog(path: Path) -> dict[str, dict]:
         if line.startswith("## "):
             m = HEADING.match(line)
             if not m:
-                sys.exit(f"CHANGELOG 标题格式不对，应为「## 版本 · YYYY-MM-DD · 渠道」：{line}")
+                # 「## 0.1.3 · 未发布 · beta」这种还没发的节：跳过，别把整个生成弄死
+                print(f"警告：CHANGELOG 标题格式不对，跳过这一节：{line}", file=sys.stderr)
+                current = None
+                continue
             if m["channel"] not in CHANNELS:
                 sys.exit(f"渠道只能是 {' / '.join(CHANNELS)}：{line}")
             current = {"date": m["date"], "channel": m["channel"], "notes": []}
