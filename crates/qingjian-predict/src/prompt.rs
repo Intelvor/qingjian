@@ -23,10 +23,13 @@ words：用户最可能想输入、而本地又给不出（或排错了）的词
 - 只给真实存在的词，不要生造（「不态」「步太」这种组合）；不确定就少给；
 - 本地首选已经对了就不必再给同一个词，也不必给它的同音变体；没有更好的就给空数组，不要凑数。
 
-sentence：want_sentence 为 true 时给一条以这个词开头的完整短句：**接住 before / after 的话题往下写**，给出有信息量的续写
-（before 是 笛卡儿积、拼音 shiyizhong → 笛卡儿积是一种二元运算）；不要「是一种很好的选择」「对身体健康非常重要」这类与话题无关的空话。
-**after 是光标后面已有的文字、已经在文档里了**：不要把它的内容抄进 sentence，sentence 只补拼音这段缺的（有 after 时也别带句末标点，它会接着 after 排下去）。
-没有上下文时才给最常见、最自然的说法。它只替换这段拼音，**不要把 before 的内容抄进来**。want_sentence 为 false 时给 null。语言跟随上下文。
+sentence：want_sentence 为 true 时给一段以这个词开头的文字，它**只替换这段拼音**。分两种情况：
+- **有 after**（光标后面已有文字）：sentence 只是填在 before 与 after 之间的那一小段，通常 1 到 6 个字，会被原样插在 before 之后、after 之前。
+  例：before=高等数学是、拼音 d'x、after=最重要的基础课程之一 → sentence 给「大学」（拼起来是 高等数学是大学最重要的基础课程之一）。
+  **不要重复 after，连改写也不行**（「大学阶段学习的重要基础课程之一」这种等于把 after 又写了一遍，拼起来会重复），不要带句末标点，不要写成能独立成句的完整句子。
+- **没有 after**：才给一条完整的短句，接住 before 的话题往下写、给出有信息量的续写（before 是 笛卡儿积、拼音 shiyizhong → 笛卡儿积是一种二元运算）；
+  不要「是一种很好的选择」「对身体健康非常重要」这类与话题无关的空话。**不要把 before 的内容抄进来**。
+want_sentence 为 false 时给 null。语言跟随上下文。
 
 不解释、不加引号、不加序号。";
 
@@ -225,7 +228,9 @@ pub fn parse_reply(content: &str, request: &PredictionRequest) -> Reply {
             .sentence
             // 整句只替换拼音：模型爱把 before 的尾巴和 after 的开头抄进来，两头都剥掉
             .map(|s| strip_after(&strip_before(&clean(&s), &request.before), &request.after))
-            .filter(|s| !s.is_empty() && Some(s.as_str()) != first_local);
+            .filter(|s| !s.is_empty() && Some(s.as_str()) != first_local)
+            // 剥不干净的（模型把 after 改写一遍再接上来）整句不要：宁可不补，也不要拼出重复的一句
+            .filter(|s| !restates_after(s, &request.after));
     }
     reply
 }
@@ -283,6 +288,36 @@ fn strip_after(sentence: &str, after: &str) -> String {
         }
     }
     sentence.to_owned()
+}
+
+/// 模型有时不逐字抄 after，而是改写一遍再接上来（sentence 大学阶段学习的重要基础课程之一、
+/// after 最重要的基础课程之一——只差一个「最」和一个「的」），[`strip_after`] 剥不掉，接受之后文档里会重复一句。
+/// 句子大半由 after 的字组成就算复述，整句不收：宁可不补，也不要拼出重复的一句。after 太短时不判（噪声太大）。
+fn restates_after(sentence: &str, after: &str) -> bool {
+    let after: Vec<char> = after.chars().collect();
+    if after.len() < 4 {
+        return false;
+    }
+    let sentence: Vec<char> = sentence.chars().collect();
+    lcs_len(&sentence, &after) * 4 >= after.len() * 3
+}
+
+/// 最长公共子序列长度。两个串都很短（上文几十字），O(nm) 够用。
+fn lcs_len(a: &[char], b: &[char]) -> usize {
+    let mut prev = vec![0usize; b.len() + 1];
+    let mut cur = vec![0usize; b.len() + 1];
+    for &x in a {
+        for (j, &y) in b.iter().enumerate() {
+            cur[j + 1] = if x == y {
+                prev[j] + 1
+            } else {
+                cur[j].max(prev[j + 1])
+            };
+        }
+        std::mem::swap(&mut prev, &mut cur);
+        cur.fill(0);
+    }
+    prev[b.len()]
 }
 
 fn clean(text: &str) -> String {
@@ -412,6 +447,33 @@ mod tests {
         // 整句就是下文的原样：剥完为空，不收
         let only_after = r#"{"words": [], "sentence": "按顺序两两配对组成有序对。"}"#;
         assert!(parse_reply(only_after, &request).sentence.is_none());
+    }
+
+    /// 模型不逐字抄 after，而是改写一遍再接上来（只差一个「最」和一个「的」）：逐字剥不掉，整句不收。
+    #[test]
+    fn reply_drops_a_sentence_that_rephrases_the_after_text() {
+        let mut req = request("dx", true);
+        req.before = "高等数学是".into();
+        req.after = "最重要的基础课程之一".into();
+        let rephrased = r#"{"words": [{"text": "大学", "pinyin": "da xue"}], "sentence": "大学阶段学习的重要基础课程之一"}"#;
+        let parsed = parse_reply(rephrased, &req);
+        assert_eq!(parsed.words[0].text, "大学", "词那一路不受影响");
+        assert!(
+            parsed.sentence.is_none(),
+            "复述了下文的整句不该收，实际 {:?}",
+            parsed.sentence
+        );
+        // 真正填空的那几个字照常收
+        let gap = r#"{"words": [], "sentence": "大学"}"#;
+        assert_eq!(parse_reply(gap, &req).sentence.as_deref(), Some("大学"));
+        // 没有 after 时的正常完整句不受影响
+        let mut bare = request("dx", true);
+        bare.before = "高等数学是".into();
+        let normal = r#"{"words": [], "sentence": "大学是人生的新起点。"}"#;
+        assert_eq!(
+            parse_reply(normal, &bare).sentence.as_deref(),
+            Some("大学是人生的新起点。")
+        );
     }
 
     #[test]
