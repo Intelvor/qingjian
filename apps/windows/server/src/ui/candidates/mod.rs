@@ -168,6 +168,12 @@ impl Inner {
             bands: Bands {
                 rows: rendered.rows.clone(),
                 sentence: rendered.sentence,
+                content: qingjian_render::Rect {
+                    x: rendered.content_x as f32,
+                    y: rendered.content_y as f32,
+                    width: rendered.content_width as f32,
+                    height: rendered.content_height as f32,
+                },
             },
             rendered,
         })

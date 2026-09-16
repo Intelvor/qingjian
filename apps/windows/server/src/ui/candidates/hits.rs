@@ -23,11 +23,33 @@ thread_local! {
     static HITS: RefCell<HashMap<isize, Rc<Hits>>> = RefCell::new(HashMap::new());
 }
 
-/// 一帧里能点的地方：候选行的矩形与整句补全的矩形（都相对内容区左上角）。
-#[derive(Default)]
+/// 一帧里能点的地方：候选行的矩形与整句补全的矩形（都相对内容区左上角），
+/// 外加内容区在客户区里的位置。窗口为了四周留出阴影，左上角比内容区多出那一圈，
+/// 鼠标坐标得先减掉它才跟矩形落在同一套坐标系里——不减的话命中整体偏右下，
+/// 竖排看着像「高亮跑到鼠标下面那一行」，整句那块只有一行高，直接就点不中了。
 pub(super) struct Bands {
     pub(super) rows: Vec<Rect>,
     pub(super) sentence: Option<Rect>,
+
+    /// 内容区在客户区里的位置与大小：鼠标落在它外面（阴影留白、窗口之外）一律不算命中，
+    /// 高亮跟着收掉，不会留在窗口边上那圈没内容的地方。
+    pub(super) content: Rect,
+}
+
+impl Default for Bands {
+    /// 空的：一块零尺寸的内容区，什么也命不中（GDI 退路与窗口还没显示时用）。
+    fn default() -> Self {
+        Self {
+            rows: Vec::new(),
+            sentence: None,
+            content: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.0,
+                height: 0.0,
+            },
+        }
+    }
 }
 
 /// 绘制状态与窗口过程共享的命中状态。
@@ -135,22 +157,7 @@ impl Hits {
 
     /// 客户区坐标底下是什么。内容区外那圈是阴影留白，不算命中。
     fn target_at(&self, x: i32, y: i32) -> Option<Hover> {
-        let bands = self.bands.borrow();
-        // 整句补全画在顶部行右侧、是一块矩形；它在候选行上方，不会跟后者抢。
-        if let Some(rect) = bands.sentence
-            && inside(rect, x, y)
-        {
-            return Some(Hover::Trailing);
-        }
-        bands
-            .rows
-            .iter()
-            .enumerate()
-            .find(|(_, rect)| match self.vertical.get() {
-                true => y >= rect.y as i32 && y < (rect.y + rect.height) as i32,
-                false => x >= rect.x as i32 && x < (rect.x + rect.width) as i32,
-            })
-            .map(|(row, _)| Hover::Row(row))
+        target_in(&self.bands.borrow(), self.vertical.get(), x, y)
     }
 
     /// 登记一次 `WM_MOUSELEAVE`（只登记一次，收到离开后才再登记）。
@@ -170,10 +177,111 @@ impl Hits {
     }
 }
 
+/// 客户区 `(x, y)` 落在哪一个可点的东西上。
+///
+/// `bands.rows` / `bands.sentence` 是内容区坐标，而窗口左上角比内容区往左上多出阴影那一圈，
+/// 所以先按 `bands.content` 判一脚（留白与窗口之外都不算命中），再减掉它换进内容坐标系。
+/// 竖排候选按 `y` 判（整行都能点，点右侧的词不必对准文字），横排按 `x` 判。
+fn target_in(bands: &Bands, vertical: bool, x: i32, y: i32) -> Option<Hover> {
+    if !inside(bands.content, x, y) {
+        return None;
+    }
+    let (x, y) = (x - bands.content.x as i32, y - bands.content.y as i32);
+    // 整句补全画在顶部行右侧、是一块矩形；它在候选行上方，不会跟后者抢。
+    if let Some(rect) = bands.sentence
+        && inside(rect, x, y)
+    {
+        return Some(Hover::Trailing);
+    }
+    bands
+        .rows
+        .iter()
+        .enumerate()
+        .find(|(_, rect)| match vertical {
+            true => y >= rect.y as i32 && y < (rect.y + rect.height) as i32,
+            false => x >= rect.x as i32 && x < (rect.x + rect.width) as i32,
+        })
+        .map(|(row, _)| Hover::Row(row))
+}
+
 /// 点是否落在 `rect`（都相对内容区）里。
 fn inside(rect: Rect, x: i32, y: i32) -> bool {
     x >= rect.x as i32
         && x < (rect.x + rect.width) as i32
         && y >= rect.y as i32
         && y < (rect.y + rect.height) as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 窗口四周为阴影留出的那一圈（逻辑像素），内容区左上角因此不在客户区原点。
+    const MARGIN: i32 = 12;
+
+    /// 两行候选，外加顶部右侧一块整句补全。
+    fn bands() -> Bands {
+        Bands {
+            rows: vec![
+                // 20..40，与下一行之间留出 4 的空隙
+                Rect {
+                    x: 0.0,
+                    y: 20.0,
+                    width: 200.0,
+                    height: 20.0,
+                },
+                Rect {
+                    x: 0.0,
+                    y: 44.0,
+                    width: 200.0,
+                    height: 24.0,
+                },
+            ],
+            sentence: Some(Rect {
+                x: 120.0,
+                y: 0.0,
+                width: 80.0,
+                height: 20.0,
+            }),
+            content: Rect {
+                x: MARGIN as f32,
+                y: MARGIN as f32,
+                width: 200.0,
+                height: 68.0,
+            },
+        }
+    }
+
+    /// 客户区坐标 = 阴影留白 + 内容坐标。不减留白的话整条命中范围偏右下，
+    /// 竖排会高亮到鼠标下面那一行，整句那块只有一行高、直接点不中。
+    #[test]
+    fn hit_test_offsets_by_the_shadow_margin() {
+        let bands = bands();
+        // 压在第一行上
+        let (x, y) = (MARGIN + 5, MARGIN + 30);
+        assert_eq!(target_in(&bands, true, x, y), Some(Hover::Row(0)));
+        assert_eq!(target_in(&bands, false, x, y), Some(Hover::Row(0)));
+        // 压在第二行下沿附近
+        assert_eq!(
+            target_in(&bands, true, MARGIN + 5, MARGIN + 66),
+            Some(Hover::Row(1))
+        );
+        // 压在整句补全那块（内容坐标 y 0..20，在候选行上方）
+        assert_eq!(
+            target_in(&bands, true, MARGIN + 150, MARGIN + 8),
+            Some(Hover::Trailing)
+        );
+    }
+
+    /// 阴影留白那圈不是可点范围：鼠标挪到窗口边上，高亮要跟着收掉。
+    #[test]
+    fn the_shadow_margin_is_not_pointable() {
+        let bands = bands();
+        assert_eq!(target_in(&bands, true, 5, MARGIN + 30), None, "左边留白");
+        assert_eq!(target_in(&bands, true, 300, MARGIN + 30), None, "右边留白");
+        assert_eq!(target_in(&bands, true, MARGIN + 5, 5), None, "顶部留白");
+        assert_eq!(target_in(&bands, true, MARGIN + 5, 200), None, "内容区下方");
+        // 内容区里的行间空隙：两行之间也算没压上
+        assert_eq!(target_in(&bands, true, MARGIN + 5, MARGIN + 42), None);
+    }
 }
