@@ -456,7 +456,12 @@ CC-CEDICT 表（`dict-convert cedict`）保留为备用来源，覆盖面广但�
   本机只 `check`，真正编译在 Windows 机器上做（`qingjian-neural` 的 candle 后端在 Windows 走 CPU，已接进 Server，见下「本地整句模型」）。
 - **本地整句模型（Server 进程，与 macOS 的 `host/model.rs` 对齐）**：`server/src/dispatch/rescore/`。启动时 `find_model`（用户目录 `%APPDATA%\Qingjian\model\` 优先，否则随包 `data\model\`；`.qjm` 单文件或三件套目录）；`[model] enabled` 开着就起线程加载并预热（`ModelLoader`），下一次按键 / tick 接上 `set_async_sentence_scorer`。
   Server 没有定时器：缓冲变化后 `schedule_rescoring` 起防抖，工人循环 `recv_timeout(router.next_tick())` 按 `RescoreState` 的节拍醒来（防抖 80 ms → `request_rescoring`；然后 20 ms 一次 `poll_rescoring`，最多等 2 s），DLL 组句期间每 80 ms 的 `Poll` 也顺带 `tick`。分到了重查一次、重建候选布局（云端词与整句补全留着）、由 Server 自绘的候选窗直接重画，DLL 下一次 `Poll` 拿到新帧更新内联 preedit；翻过页 / 动过高亮不动。热加载 `[model]` 变了才重载 / 卸载。
-  前文：DLL 在**起组句的那次读写编辑会话**里顺手读选区起点前 64 个 UTF-16 单元（`com/edit/surrounding.rs::text_before_caret`，拼音还没插进去、不用再开一次会话），随 `ClientMessage::Surrounding` 单向送来。**密码框与私密输入**（2026-09-12 查了微软文档 / SampleIME / Chromium 源码后定）：
+  前后文：DLL 在**起组句的那次读写编辑会话**里顺手读选区起点前 64 个、后 32 个 UTF-16 单元
+  （`com/edit/surrounding.rs::text_before_caret` / `text_after_caret`，拼音还没插进去、不用再开一次会话），
+  随 `ClientMessage::Surrounding` 单向送来（`text` 前文 + `after` 后文；老 DLL 只带 `text`，后文读成空串）。
+  Server 收到后进两条路：前文给本地整句模型当前文（`set_rescoring_context`），整份给云联想当上下文
+  （`Router.surrounding`，组句结束作废）——与 macOS「每次请求现读」等效，差别是 Windows 一段组句只读一次
+  （组句中应用文本不变），所以第一键的联想请求还没有上下文，第二键起就有。**密码框与私密输入**（2026-09-12 查了微软文档 / SampleIME / Chromium 源码后定）：
   TSF 规定键盘类 TIP 必须看上下文的 `GUID_COMPARTMENT_KEYBOARD_DISABLED`（微软文档明说密码框应禁用文本服务、`IS_PASSWORD` 只是标注不提供保护；Chromium 给密码框的上下文设的就是它），
   DLL 在 `OnTestKeyDown` / `OnKeyDown` / 保留键里没在组句时先查它（连同 `EMPTYCONTEXT`，`com/context.rs`），非零整键放行、不组句——与 macOS 的 Secure Input 同一语义；
   输入范围（`GUID_PROP_INPUTSCOPE`）只在起组句那次编辑会话里读一次（`com/edit/surrounding.rs::input_context`）：含 `IS_PRIVATE` / 密码 / PIN 之一算**私密**——Chromium 源码里密码框与不学习的输入框映射成 `IS_PRIVATE`（含义「别学」；2026-09-12 box 实测 Edge InPrivate 的网页文本框报的仍是 `IS_SEARCH`，`IS_PRIVATE` 只在密码框见过，这条是兜底）——私密时不读前文，并随 `ClientMessage::Privacy` 告诉 Server（客户端只在变了时发；记事本等不支持该属性的应用 `GetValue` 失败按不私密）。

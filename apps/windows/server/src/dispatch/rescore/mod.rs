@@ -1,7 +1,8 @@
 //! 本地整句模型（与 macOS 壳的 `host/model.rs` 对齐）：后台加载、停键后请求重排、结果到了重画当前页。
 //!
 //! 按键回调里永远只跑词级模型；模型的意见在停键 80 毫秒后请求、几十毫秒后到，只换候选窗口里的整句候选，
-//! 用户翻过页或动过高亮就不打扰。前文优先用应用里光标前的文字（DLL 起组句时随 `ClientMessage::Surrounding` 送来），没有退回本会话历史。
+//! 用户翻过页或动过高亮就不打扰。前后文优先用应用里光标附近文字（DLL 起组句时随 `ClientMessage::Surrounding` 送来）：
+//! 前文给整句模型当前文，整份给云联想当上下文，都没有退回本会话历史。
 //! 节拍由工人循环驱动：[`Router::next_tick`] 说下次多久来一次 [`Router::tick`]；DLL 组句期间每 80 ms 的 `Poll` 也顺带 tick。
 //! 加载在 [`loader`]，进行态在 [`state`]。
 
@@ -11,7 +12,7 @@ mod state;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use qingjian_core::CandidateLayout;
+use qingjian_core::{CandidateLayout, SurroundingText};
 use qingjian_platform::LocalModelConfig;
 use qingjian_platform::protocol::SessionId;
 
@@ -104,20 +105,26 @@ impl Router {
         }
     }
 
-    /// 组句结束：什么都不等了；应用前文也作废（下一段组句 DLL 会再送）。
+    /// 组句结束：什么都不等了；应用前后文也作废（下一段组句 DLL 会再送）。
     pub(super) fn stop_rescoring(&mut self) {
         self.rescore.stop();
         self.engine.set_rescoring_context(None);
+        self.surrounding = None;
     }
 
-    /// DLL 送来聚焦会话的光标前文：给 Engine 当前文，缓存里按旧前文记的「要打分的」作废，重新攒一次并重新计时。
+    /// DLL 送来聚焦会话的光标前后文：前文给 Engine 当整句模型的前文，整份给云联想当上下文，
+    /// 缓存里按旧前文记的「要打分的」作废，重新攒一次并重新计时。
     /// 组句已经结束 / 不是聚焦会话的丢掉。
-    pub(super) fn set_surrounding(&mut self, session: SessionId, text: String) {
+    pub(super) fn set_surrounding(&mut self, session: SessionId, before: String, after: String) {
         if self.focused != Some(session) || self.engine.composition().is_empty() {
             return;
         }
+        self.surrounding = Some(SurroundingText {
+            before: before.clone(),
+            after,
+        });
         self.engine
-            .set_rescoring_context((!text.is_empty()).then_some(text));
+            .set_rescoring_context((!before.is_empty()).then_some(before));
         if matches!(self.composed, Some(Composed::Candidates { .. })) {
             // 查一次只为按新前文重新记下要打分的文本，候选顺序此刻不变
             let _ = self.engine.query();

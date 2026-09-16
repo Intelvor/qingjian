@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use qingjian_core::sentence::SentenceScorer;
-use qingjian_core::{Language, ModeKeys, ShuangpinScheme};
+use qingjian_core::{
+    Language, ModeKeys, PredictionPolicy, PredictionRequest, Predictor, ShuangpinScheme,
+};
 use qingjian_platform::protocol::{
     ClientMessage, Frame, KeyEvent, KeyModifiers, KeyOutcome, PROTOCOL_VERSION, ServerMessage,
     SessionId,
@@ -1223,6 +1225,7 @@ fn surrounding_text_arriving_after_the_first_key_still_rescoring() {
         router.handle(ClientMessage::Surrounding {
             session: SESSION,
             text: "今天".to_owned(),
+            after: "天气不错".to_owned(),
         }),
         None
     );
@@ -1234,9 +1237,150 @@ fn surrounding_text_arriving_after_the_first_key_still_rescoring() {
         router.handle(ClientMessage::Surrounding {
             session: SessionId(9),
             text: "无关".to_owned(),
+            after: String::new(),
         }),
         None
     );
+}
+
+/// 假联想：把提交的请求记下来，不回结果（只为断言发了什么）。
+/// `Predictor: Send`，所以记账用 `Arc<Mutex<_>>`。
+struct RecordingPredictor {
+    submitted: Arc<Mutex<Vec<PredictionRequest>>>,
+}
+
+impl Predictor for RecordingPredictor {
+    fn policy(&self) -> PredictionPolicy {
+        PredictionPolicy {
+            before: 64,
+            after: 32,
+            slots: 2,
+            max_items: 4,
+            sentence: true,
+        }
+    }
+
+    fn submit(&mut self, request: PredictionRequest) {
+        self.submitted.lock().unwrap().push(request);
+    }
+
+    fn poll(&mut self) -> Option<qingjian_core::Prediction> {
+        None
+    }
+}
+
+/// 接了假联想的 Router，顺带把每次提交的请求交出来。
+fn router_with_predictor() -> (Router, Arc<Mutex<Vec<PredictionRequest>>>) {
+    let submitted = Arc::new(Mutex::new(Vec::new()));
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let mut engine = assembly::assemble(&AssemblySpec::new(root.join("assets/sample/dict.tsv")))
+        .expect("assemble engine from sample data");
+    engine.set_predictor(Box::new(RecordingPredictor {
+        submitted: submitted.clone(),
+    }));
+    let mut router = Router::new(engine, RouterConfig::default());
+    router.handle(ClientMessage::OpenSession {
+        session: SESSION,
+        app: None,
+        protocol: PROTOCOL_VERSION,
+    });
+    (router, submitted)
+}
+
+/// DLL 在起组句的编辑会话里读到光标前后文、按键之后送来：第二键起的联想请求就该带上它。
+#[test]
+fn cloud_prediction_receives_the_surrounding_text() {
+    let (mut router, submitted) = router_with_predictor();
+    press(&mut router, letter('n'));
+    assert!(
+        submitted.lock().unwrap().is_empty(),
+        "字母少于 2 不该发联想"
+    );
+    assert_eq!(
+        router.handle(ClientMessage::Surrounding {
+            session: SESSION,
+            text: "今天".to_owned(),
+            after: "天气不错".to_owned(),
+        }),
+        None
+    );
+    press(&mut router, letter('i'));
+    let last = submitted
+        .lock()
+        .unwrap()
+        .last()
+        .expect("组句中该发联想请求")
+        .clone();
+    assert_eq!(last.before, "今天");
+    assert_eq!(last.after, "天气不错");
+    assert!(last.want_sentence, "组句联想要整句补全");
+}
+
+/// DLL 没送前后文（应用读不到 / 还没到）：照发请求，上下文为空，别拿本地历史冒充。
+#[test]
+fn cloud_prediction_without_surrounding_sends_empty_context() {
+    let (mut router, submitted) = router_with_predictor();
+    press(&mut router, letter('n'));
+    press(&mut router, letter('i'));
+    let last = submitted
+        .lock()
+        .unwrap()
+        .last()
+        .expect("组句中该发联想请求")
+        .clone();
+    assert_eq!(last.before, "");
+    assert_eq!(last.after, "");
+}
+
+/// 私密输入框：DLL 那侧连前后文都不读，Engine 也不构造请求。
+#[test]
+fn cloud_prediction_stops_at_private_input() {
+    let (mut router, submitted) = router_with_predictor();
+    press(&mut router, letter('n'));
+    assert_eq!(
+        router.handle(ClientMessage::Privacy {
+            session: SESSION,
+            private: true,
+        }),
+        None
+    );
+    press(&mut router, letter('i'));
+    assert!(
+        submitted.lock().unwrap().is_empty(),
+        "私密输入中不该发任何联想请求"
+    );
+}
+
+/// 组句结束后前后文作废：下一段组句在 DLL 送来新的之前，请求里不带旧上下文。
+#[test]
+fn cloud_prediction_forgets_the_surrounding_after_the_composition_ends() {
+    let (mut router, submitted) = router_with_predictor();
+    press(&mut router, letter('n'));
+    router.handle(ClientMessage::Surrounding {
+        session: SESSION,
+        text: "今天".to_owned(),
+        after: "天气不错".to_owned(),
+    });
+    press(&mut router, letter('i'));
+    assert_eq!(submitted.lock().unwrap().last().unwrap().before, "今天");
+    // 空格上屏结束组句
+    let (_, commit, _) = press(
+        &mut router,
+        KeyEvent::new(0x20, Some(' '), Default::default()),
+    );
+    assert!(commit.is_some());
+    submitted.lock().unwrap().clear();
+    // 新一段组句：DLL 还没送来新前后文，请求里不该带着上一段的
+    press(&mut router, letter('n'));
+    press(&mut router, letter('i'));
+    let last = submitted
+        .lock()
+        .unwrap()
+        .last()
+        .expect("组句中该发联想请求")
+        .clone();
+    assert_eq!(last.before, "");
+    assert_eq!(last.after, "");
 }
 
 /// DLL 报来「私密输入框」：Engine 进私密（不学不记不发云端），焦点换到别的会话按那个会话的状态重设，切回来再进。

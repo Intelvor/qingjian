@@ -46,14 +46,19 @@ pub enum ClientMessage {
         session: SessionId,
     },
 
-    /// 组句起始时 DLL 主动送来的应用光标前文，给本地整句模型当前文（对应 macOS 壳在组句第一键读 `surrounding_text`）。
-    /// 在起组句的那次编辑会话里顺手读，不另开会话、不回话；密码框 / 读不到时不发，Server 退回本会话历史。
+    /// 组句起始时 DLL 主动送来的应用光标附近文本（对应 macOS 壳读 `surrounding_text`）：给本地整句模型当前文，
+    /// 也给云联想当 `before` / `after` 上下文。在起组句的那次编辑会话里顺手读，不另开会话、不回话；
+    /// 密码框 / 私密输入框不读也不发，Server 退回本会话历史。
     Surrounding {
         /// 会话标识。
         session: SessionId,
 
         /// 光标前最多 64 字。
         text: String,
+
+        /// 光标后最多 32 字；老 DLL 不带这个字段，读成空串。
+        #[serde(default)]
+        after: String,
     },
 
     /// 输入框私密与否变了（DLL 起组句时按输入范围判：`IS_PRIVATE` / 密码 / PIN 类算私密，浏览器无痕窗口就是它）。

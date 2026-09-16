@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use qingjian_core::Engine;
+use qingjian_core::{Engine, SurroundingText};
 use qingjian_platform::LocalModelConfig;
 use qingjian_platform::protocol::{ClientMessage, Frame, ScreenRect, ServerMessage, SessionId};
 
@@ -96,6 +96,10 @@ pub struct Router {
     /// 聚焦会话最近报来的光标矩形；云联想异步到达时按它原地重摆候选窗口。
     last_rect: Option<ScreenRect>,
 
+    /// 聚焦会话这次组句的光标前后文本（DLL 在组句起始送来的）：给本地整句模型当前文，也给云联想当上下文。
+    /// 组句结束就作废。
+    surrounding: Option<SurroundingText>,
+
     /// 上次真正显示的帧与位置：没变就不重画（组字期间的空转 Poll 很多）。
     last_shown: Option<(Frame, ScreenRect)>,
 
@@ -137,6 +141,7 @@ impl Router {
             status_mode: None,
             pending_mode: None,
             last_rect: None,
+            surrounding: None,
             last_shown: None,
             model_path: None,
             model_loader: None,

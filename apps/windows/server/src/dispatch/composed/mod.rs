@@ -33,7 +33,9 @@ impl Router {
                 let layout =
                     CandidateLayout::new(items, self.config.page_size, self.config.cloud_slots);
                 if self.engine.prediction_enabled() {
-                    self.engine.request_prediction(None, layout.local());
+                    // DLL 在组句起始送来的光标前后文：云联想按它挑同音词、续写整句（第一键时还没送到，之后每键都有）。
+                    self.engine
+                        .request_prediction(self.surrounding.clone(), layout.local());
                 }
                 Composed::Candidates {
                     preedit,

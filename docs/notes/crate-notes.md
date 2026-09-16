@@ -144,6 +144,8 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
 拼音显示位置（`[general] preedit`）在 Windows 上分两处落地：Server 把它读进 `RouterConfig.preedit` 并随 `Frame.preedit_mode`
 下发给 DLL，DLL（`com/service/key_sink.rs`）按 `inline()` 决定要不要放行内拼音，Server（`ui/candidates/render_data.rs::window_preedit`）
 按 `in_window()` 决定候选窗口顶部画不画拼音行；`window` 模式没有组句范围，光标矩形改从 `com/edit/anchor.rs::caret_rect`（当前选区）量。
+光标前后文（`ClientMessage::Surrounding` 的 `text` / `after`，DLL 起组句时读 64 / 32 字）进两条路：前文给本地整句模型当前文，
+整份给云联想当上下文（`Router.surrounding`，组句结束作废）；macOS 是每次请求现读，Windows 一段组句只读一次，第一键的请求还没有上下文。
 
 ## assets
 
