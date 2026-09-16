@@ -80,7 +80,16 @@ fn serve_runs_the_open_type_loop_over_a_stream() {
     while let Some(message) = read_message::<_, ServerMessage>(&mut out).unwrap() {
         responses.push(message);
     }
-    assert_eq!(responses.len(), 5, "五个按键应各回一条 KeyResult");
+    // 开会话先回一次按键行为设置（DLL 不读配置文件），之后才是各个按键的结果。
+    assert!(
+        matches!(responses.first(), Some(ServerMessage::SessionOpened { .. })),
+        "首条应是 SessionOpened"
+    );
+    let keys = responses
+        .iter()
+        .filter(|message| matches!(message, ServerMessage::KeyResult { .. }))
+        .count();
+    assert_eq!(keys, 5, "五个按键应各回一条 KeyResult");
 
     let ServerMessage::KeyResult { frame, .. } = responses.last().unwrap() else {
         panic!("末条应是 KeyResult");

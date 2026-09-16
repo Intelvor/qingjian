@@ -75,6 +75,15 @@ fn named_pipe_round_trips_the_open_type_loop() {
         .unwrap();
     }
 
+    // 开会话先回一次按键行为设置（DLL 不读配置文件），之后才是五个按键的结果。
+    let opened: ServerMessage = read_message(&mut client)
+        .expect("read session opened")
+        .expect("server closed early");
+    assert!(
+        matches!(opened, ServerMessage::SessionOpened { .. }),
+        "首条应是 SessionOpened，实际：{opened:?}"
+    );
+
     let mut last_frame = None;
     for _ in 0..5 {
         let message: ServerMessage = read_message(&mut client)
