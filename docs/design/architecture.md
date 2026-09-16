@@ -461,7 +461,11 @@ CC-CEDICT 表（`dict-convert cedict`）保留为备用来源，覆盖面广但�
   随 `ClientMessage::Surrounding` 单向送来（`text` 前文 + `after` 后文；老 DLL 只带 `text`，后文读成空串）。
   Server 收到后进两条路：前文给本地整句模型当前文（`set_rescoring_context`），整份给云联想当上下文
   （`Router.surrounding`，组句结束作废）——与 macOS「每次请求现读」等效，差别是 Windows 一段组句只读一次
-  （组句中应用文本不变），所以第一键的联想请求还没有上下文，第二键起就有。**密码框与私密输入**（2026-09-12 查了微软文档 / SampleIME / Chromium 源码后定）：
+  （组句中应用文本不变），所以第一键的联想请求还没有上下文，第二键起就有。
+  什么时候读由「`composing()`（Server 回的帧非空）且这一段还没报过」决定，**不能用 `has_composition()`**：
+  上屏那一键 `commit_text` 先结束 TSF 组句，之后再问「有没有组句」永远是没有，会在上屏时误报一次前后文
+  （Server 那边组句已空、直接丢）、并把标记记成已报，下一段真正开始的组句反倒一次都不报
+  （2026-09-16 Edge 地址栏实测：笛卡儿积 之后整段联想的 `before` 全是空的）。**密码框与私密输入**（2026-09-12 查了微软文档 / SampleIME / Chromium 源码后定）：
   TSF 规定键盘类 TIP 必须看上下文的 `GUID_COMPARTMENT_KEYBOARD_DISABLED`（微软文档明说密码框应禁用文本服务、`IS_PASSWORD` 只是标注不提供保护；Chromium 给密码框的上下文设的就是它），
   DLL 在 `OnTestKeyDown` / `OnKeyDown` / 保留键里没在组句时先查它（连同 `EMPTYCONTEXT`，`com/context.rs`），非零整键放行、不组句——与 macOS 的 Secure Input 同一语义；
   输入范围（`GUID_PROP_INPUTSCOPE`）只在起组句那次编辑会话里读一次（`com/edit/surrounding.rs::input_context`）：含 `IS_PRIVATE` / 密码 / PIN 之一算**私密**——Chromium 源码里密码框与不学习的输入框映射成 `IS_PRIVATE`（含义「别学」；2026-09-12 box 实测 Edge InPrivate 的网页文本框报的仍是 `IS_SEARCH`，`IS_PRIVATE` 只在密码框见过，这条是兜底）——私密时不读前文，并随 `ClientMessage::Privacy` 告诉 Server（客户端只在变了时发；记事本等不支持该属性的应用 `GetValue` 失败按不私密）。

@@ -41,16 +41,19 @@ pub(crate) fn apply(
     commit: Option<&str>,
     preedit: &str,
 ) -> Result<()> {
-    if let Some(text) = commit {
-        commit_text(shared, context, ec, text)?;
-    }
-    // 一段组句里只问一次输入框状态。行内模式看组句刚起；`preedit = window` 模式应用里根本没有组句，
-    // 得另用一个标记，否则每敲一键都要重读一遍光标前文、重报一次私密状态。
-    let report_input = !shared.has_composition() && !shared.context_reported();
+    // 组句进行中、且这一段还没报过输入框状态时读一次。判定用 `composing()`（Server 回的帧非空）
+    // 而不是 `has_composition()`：上屏那一键 `commit_text` 先把 TSF 组句结束了，之后再问「有没有组句」
+    // 永远是没有，会在上屏时误报一次前后文（Server 那边组句已空、直接丢），并把标记记成已报，
+    // 下一段真正开始的组句反倒不报了（2026-09-16 Edge 地址栏实测：笛卡儿积 之后整段联想都没有上下文）。
+    // 读在写 preedit 之前：此时选区还是原来的插入点。
+    let report_input = shared.composing() && !shared.context_reported();
     if report_input {
         shared.set_context_reported(true);
     }
     let input = report_input.then(|| input_context(context, ec));
+    if let Some(text) = commit {
+        commit_text(shared, context, ec, text)?;
+    }
     if preedit.is_empty() {
         end_composition(shared, ec)?;
     } else {
