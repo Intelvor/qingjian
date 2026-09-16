@@ -153,6 +153,9 @@ TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解
 拼音显示位置（`[general] preedit`）在 Windows 上分两处落地：Server 把它读进 `RouterConfig.preedit` 并随 `Frame.preedit_mode`
 下发给 DLL，DLL（`com/service/key_sink.rs`）按 `inline()` 决定要不要放行内拼音，Server（`ui/candidates/render_data.rs::window_preedit`）
 按 `in_window()` 决定候选窗口顶部画不画拼音行；`window` 模式没有组句范围，光标矩形改从 `com/edit/anchor.rs::caret_rect`（当前选区）量。
+连不上 Server 时 DLL 自己拉起它（`tsf/src/com/service/launch.rs`）：`ShellExecuteW` 起与 DLL 同目录的 `qingjian-server.exe`
+（`uiAccess=true` 的 exe 用 `CreateProcess` 报 740），进程内 5 秒冷却 + 跨进程命名互斥体防止砸出一串 Server；
+起完清掉重连退避，下一键就试。Server 只在登录时由「启动」文件夹拉起，中途挂了以前只能等下次登录。
 
 候选窗与悬浮状态条默认由 `qingjian-render` 自绘（`ui/painter/` 把 `Frame` / `StatusView` 交出去，`[general] renderer = "system"` 才回落 GDI）。
 鼠标命中用的矩形是渲染器给回来的——候选行 `Rendered.rows`、状态条每格 `RenderedStatus.cell_rects`——不在客户区上另算一套：
