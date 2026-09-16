@@ -170,6 +170,9 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
 整句「按 Tab 才联想」（`[predict] sentence_trigger = "tab"`）在 Windows 上的落地：`RouterConfig.sentence_on_tab` 跟着热加载走，
 `dispatch/key/input.rs` 的 Tab 分支在没有整句可接受时先 `Engine::request_sentence_once()` 现请一次云端（这一下吃掉，组句中的 Tab
 本来也不是缩进），结果到了画在候选窗右侧，再按一次 Tab 才采用；没配这一项时行为不变（无整句就把 Tab 交还应用做缩进 / 跳焦点）。
+没在组句时敲的数字 / `-` / `=` 由 Server 自己插进文档（`dispatch/key/input.rs::apply_punctuation`），不走 `Passthrough`：放行要等宿主
+把键交给自己处理，部分宿主里这些键根本到不了（先是「中文模式按 `-` 没反应」，2026-09-16 又是「微信里敲数字没反应」；日志里那些键
+都是 `consumed=false` 却什么都没发生）。插字符与全角标点同一条路，一定出得来。
 整句请求在路上时候选窗有等待提示：`Router.sentence_pending`（发出时记时刻，结果到了 / 组句结束 / 等超
 `SENTENCE_PENDING_TIMEOUT` 就清，`tick` 里清超时那份）经 `Frame.sentence_pending` 下发，候选窗在整句那块位置画 `☁ …`
 （`ui/candidates/view.rs`，宽度与量尺寸共用 `tail_width`），结果到了原地换成整句。协议版本随之升到 6。

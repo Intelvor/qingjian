@@ -647,6 +647,24 @@ fn backspace_shrinks_preedit() {
     assert_eq!(preedit(&after), "ni'ha");
 }
 
+/// 数字键同理：没有全角映射，但也不放行——放行要等宿主把键交给自己处理，部分宿主（微信）里
+/// 这个键到不了。由我们插入。
+#[test]
+fn digits_are_inserted_by_us_instead_of_passed_through() {
+    let mut router = router();
+    let nine = KeyEvent::new(0x39, Some('9'), Default::default());
+    assert_eq!(
+        press(&mut router, nine),
+        (KeyOutcome::Consumed, Some("9".to_owned()), Frame::default())
+    );
+    // 组句中的数字仍是选候选，不是插字符
+    type_letters(&mut router, "ni");
+    let one = KeyEvent::new(0x31, Some('1'), Default::default());
+    let (outcome, commit, _) = press(&mut router, one);
+    assert_eq!(outcome, KeyOutcome::Consumed);
+    assert_eq!(commit.as_deref(), Some("你"), "「ni」第 1 个候选是「你」");
+}
+
 #[test]
 fn non_letter_without_composing_passes_through() {
     let mut router = router();

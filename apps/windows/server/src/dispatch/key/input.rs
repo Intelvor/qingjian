@@ -165,8 +165,9 @@ impl Router {
 
     /// 当前模式开着全角就让 Core 转（数字后的 `.` 保持半角）；转不了的原样交给应用并告知 Core。
     ///
-    /// `-` `=` 例外：没有全角映射，但**不放行、由我们插入**——放行要等宿主把键交给应用，实测在部分宿主里
-    /// 这个键到不了（用户报告「中文模式按 `-` 没反应」）。插入与全角标点同一条路，一定出得来，仍是半角。
+    /// `-` `=` 与数字例外：没有全角映射，但**不放行、由我们插入**——放行要等宿主把键交给自己处理，
+    /// 实测在部分宿主里这些键到不了（先是「中文模式按 `-` 没反应」，后来是「微信里敲数字没反应」：
+    /// 日志里那些键都是 `consumed=false` 放行出去的）。插入与全角标点同一条路，一定出得来。
     fn apply_punctuation(&mut self, c: char, event: &KeyEvent) -> Effect {
         let english = event.modifiers.caps || event.modifiers.english_mode;
         if self.full_width_for(english)
@@ -175,7 +176,7 @@ impl Router {
             return Effect::Changed(Some(text.to_owned()));
         }
         self.engine.note_passthrough(c);
-        if matches!(c, '-' | '=') {
+        if matches!(c, '-' | '=') || c.is_ascii_digit() {
             return Effect::Changed(Some(c.to_string()));
         }
         Effect::Passthrough
