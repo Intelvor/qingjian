@@ -423,6 +423,8 @@ impl QingjianInputController {
             c
         };
         host::with(|h| h.engine.set_english_mode(english_candidates && !question));
+        let (page_previous, page_next) =
+            host::with(|h| h.page_keys).unwrap_or(qingjian_platform::DEFAULT_PAGE_KEYS);
         // Caps Lock 亮着 = 英文模式：不组句、不转标点，字母默认小写、按住 Shift 才大写
         if english && !question {
             // Caps Lock 亮着时 macOS 不管按没按 Shift 送来的都是大写，只能读 Shift 状态：按着才大写
@@ -443,10 +445,23 @@ impl QingjianInputController {
                 host::with(|h| h.engine.note_passthrough(c));
                 return false;
             }
-            // 英文候选：字母（以及组词中的数字、_ ' -）进缓冲区，候选来自英文词表；
-            // 空格、回车、标点先把敲的字母原样上屏再交给应用，数字键照常是数字。
-            // 选词靠 Tab 和方向键；用方向键动过高亮之后空格也选那个词（再把空格交给应用），
-            // 没动过的空格还是原样上屏——不选词时它和纯直通完全一样，打 kubectl 这类词表没有的词不会被补全替换
+            // 英文候选：字母（以及组词中的 _ ' -）进缓冲区，候选来自英文词表。选词与中文模式一样：
+            // 空格选高亮（词上屏后空格照样交给应用，接着打下一个词）、数字选当前页第 N 个、翻页键翻页；
+            // 有候选时数字才选词，没候选（kubectl 这类词表没有的词）时数字是标识符的一部分（foo1）。
+            // 回车、标点先把敲的字母原样上屏再交给应用
+            if composing && let Some(offset) = c.to_digit(10).filter(|d| *d > 0) {
+                let (index, cells) = host::with(|h| {
+                    (
+                        h.session.index_on_page(offset as usize - 1),
+                        h.session.page_cells().len(),
+                    )
+                })
+                .unwrap_or((None, 0));
+                if cells > 0 {
+                    // 空格子按了不算
+                    return index.is_none_or(|index| self.commit_index(index, client));
+                }
+            }
             if c.is_ascii_alphabetic()
                 || (composing && (c.is_ascii_digit() || matches!(c, '_' | '\'' | '-')))
             {
@@ -454,9 +469,14 @@ impl QingjianInputController {
                 self.refresh(client);
                 return true;
             }
+            if composing && c == page_previous {
+                return self.turn_page(-1, client);
+            }
+            if composing && c == page_next {
+                return self.turn_page(1, client);
+            }
             if composing {
-                let navigated = host::with(|h| h.session.navigated).unwrap_or(false);
-                if c == ' ' && navigated {
+                if c == ' ' {
                     self.commit_highlighted(client);
                 } else {
                     self.commit_raw(client);
@@ -469,8 +489,6 @@ impl QingjianInputController {
         let expression = composing && host::with(|h| h.engine.expression_mode()).unwrap_or(false);
         // 英文直输段（缓冲区里已有 `-` 这类字符）：可见字符一律追加，空格 / 回车整段原样上屏
         let raw = composing && host::with(|h| h.engine.raw_mode()).unwrap_or(false);
-        let (page_previous, page_next) =
-            host::with(|h| h.page_keys).unwrap_or(qingjian_platform::DEFAULT_PAGE_KEYS);
         // 组句中敲 `-`：进入英文直输段（`no-way`）；配成翻页键（`[general] page_keys` 选 `-=`）时才翻页
         let hyphen = composing && !question && c == '-' && c != page_previous && c != page_next;
         // 问字模式下敲的还可能是码点（`u4e00`、`u+1f600`）：数字与 `+` 进缓冲区而不是选词
