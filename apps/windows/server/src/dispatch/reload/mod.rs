@@ -116,9 +116,11 @@ impl Router {
         let Some(reload) = &mut self.reload else {
             return;
         };
+        let mut predict_changed = false;
         if config.predict != reload.applied_predict {
             attach_cloud(&mut self.engine, &config.predict);
             reload.applied_predict = config.predict.clone();
+            predict_changed = true;
         }
         if config.dictionaries != reload.applied_dictionaries {
             let dicts = extra_dictionaries::load(
@@ -129,6 +131,11 @@ impl Router {
             tracing::info!(count = dicts.len(), "附加词库已热重装");
             self.engine.set_extra_dictionaries(dicts);
             reload.applied_dictionaries = config.dictionaries.clone();
+        }
+        // 换了（或关了）Predictor：手里那份整句补全跟着作废，别让 Tab 上屏旧句子。
+        // 放在 `reload` 借用结束之后，两条借用才不打架。
+        if predict_changed {
+            self.drop_sentence();
         }
     }
 }

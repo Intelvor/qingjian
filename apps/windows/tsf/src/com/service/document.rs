@@ -1,12 +1,14 @@
-//! 往文档写字：按键结果经异步编辑会话写上屏文本 + 组句拼音行；失焦 / 停用 / 切模式时让 Server 交出缓冲区原样落定；
-//! 翻译选中文字时起只读会话读选区。
+//! 往文档写字：按键结果经异步编辑会话写上屏文本 + 组句拼音行；候选窗上点选的候选也走这条路（轮询取回后补一次）；
+//! 失焦 / 停用 / 切模式时让 Server 交出缓冲区原样落定；翻译选中文字时起只读会话读选区。
 
 use windows::Win32::UI::TextServices::ITfContext;
 use windows::core::Ref;
 
 use super::TextService_Impl;
+use crate::com::composition::preedit_string;
 use crate::com::edit::{request_selection, request_update};
 use crate::com::log::log;
+use qingjian_platform::protocol::Frame;
 
 impl TextService_Impl {
     pub(super) fn read_selection(&self, pic: Ref<ITfContext>, request: u64) {
@@ -73,6 +75,34 @@ impl TextService_Impl {
         if let Err(error) = requested {
             log(&format!("失焦上屏的编辑会话没被受理: {error}"));
             self.shared.reset();
+        }
+    }
+
+    /// 用户在候选窗点了候选：把 Server 已经选好的文本落进文档；上屏路径与按键选词同一条。
+    ///
+    /// 点选发生在没按键的时候，所以文档上下文取最近收键的那个（做法同失焦上屏）。帧非空说明这段拼音
+    /// 还没吃完，剩下那截接着组句——`apply` 会先结束旧组句落定这个词，再按新 preedit 起一段。
+    pub(super) fn commit_picked(&self, commit: String, frame: Frame) {
+        self.shared.set_composing(!frame.is_empty());
+        let preedit = if frame.preedit_mode.inline() {
+            preedit_string(&frame)
+        } else {
+            String::new()
+        };
+        let Some(context) = self.shared.last_context() else {
+            log(&format!("点选候选没有上下文，丢弃: {commit:?}"));
+            return;
+        };
+        log(&format!("点选候选上屏: {commit:?}"));
+        if let Err(error) = request_update(
+            &context,
+            self.client_id.get(),
+            self.engine.clone(),
+            self.shared.clone(),
+            Some(commit),
+            preedit,
+        ) {
+            log(&format!("点选候选的编辑会话没被受理: {error}"));
         }
     }
 

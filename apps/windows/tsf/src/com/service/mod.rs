@@ -22,6 +22,7 @@ use windows::Win32::UI::TextServices::{
 use windows::core::{ComObject, implement};
 
 use qingjian_platform::KeyCombo;
+use qingjian_platform::protocol::Frame;
 
 use super::composition::Shared;
 use super::key::KeyTap;
@@ -114,6 +115,11 @@ pub(super) fn on_mode_sync(english: bool) {
             service.set_english_mode(english);
         }
     });
+}
+
+/// 轮询取到了候选窗上点选的候选（见 [`super::poll`]）：把 Server 选好的词落进文档。
+pub(super) fn on_pick_commit(commit: String, frame: Frame) {
+    with_active(|service| service.commit_picked(commit, frame));
 }
 
 /// 轮询定时器到点：配置文件改了就地重读（见 [`TextService_Impl::reload_settings_if_changed`]）。

@@ -71,6 +71,8 @@ impl Router {
                 if !enabled {
                     // 在飞的请求作废，回来的结果也不认
                     self.cancel_prediction();
+                    // 已经拿到手的那段整句也作废：关掉之后按 Tab 不该再冒出旧句子。
+                    self.drop_sentence();
                 }
                 super::reload::attach_cloud(&mut self.engine, &self.predict);
             }

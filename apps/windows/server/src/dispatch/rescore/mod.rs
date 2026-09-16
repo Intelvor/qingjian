@@ -20,6 +20,7 @@ use self::loader::Loaded;
 pub(crate) use self::loader::ModelLoader;
 pub(crate) use self::state::RescoreState;
 use super::Router;
+use super::SENTENCE_PENDING_TIMEOUT;
 use super::composed::Composed;
 
 /// 找模型（`.qjm` 单文件，或开发时的三件套目录）：用户目录 `model/` 优先（用户自己的模型），否则随包 `data/model/`；都没有为 `None`。
@@ -155,6 +156,13 @@ impl Router {
         self.attach_loaded_model();
         self.advance_rescoring();
         self.poll_config_reload();
+        // 等超了还没结果（云端超时 / 丢了）：把「联想中」收掉，别一直挂着。
+        if self
+            .sentence_pending
+            .is_some_and(|at| at.elapsed() >= SENTENCE_PENDING_TIMEOUT)
+        {
+            self.sentence_pending = None;
+        }
     }
 
     /// 防抖到点就发请求；在等结果就收一次，收到了重查并重画当前页。

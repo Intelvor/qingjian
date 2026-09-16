@@ -18,6 +18,11 @@ toml_edit.workspace = true
 # UI 本体只在 Windows 编
 [target."cfg(windows)".dependencies]
 windows-reactor = "0.100"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+] }
 qingjian-learning.workspace = true
 qingjian-core.workspace = true
 qingjian-translate.workspace = true

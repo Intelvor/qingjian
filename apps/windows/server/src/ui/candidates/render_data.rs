@@ -31,6 +31,9 @@ pub(crate) struct RenderData {
     /// 整句补全，画在拼音行右侧。
     pub(super) sentence: Option<String>,
 
+    /// 整句请求还在路上：同一位置先显示几个点，结果到了换成整句。
+    pub(super) sentence_pending: bool,
+
     /// 屏幕提示（删候选后的「已删除…」），画在拼音行下方。
     pub(super) notice: Option<String>,
 
@@ -51,6 +54,7 @@ impl RenderData {
             highlight: usize::MAX,
             footer: None,
             sentence: None,
+            sentence_pending: false,
             notice: None,
             layout: LayoutMode::default(),
             theme_mode: ThemeMode::default(),
@@ -73,6 +77,7 @@ impl RenderData {
         self.footer =
             (frame.page_count > 1).then(|| format!("{}/{}", frame.page + 1, frame.page_count));
         self.sentence = frame.sentence.clone();
+        self.sentence_pending = frame.sentence_pending;
         self.notice = frame.notice.clone();
     }
 }

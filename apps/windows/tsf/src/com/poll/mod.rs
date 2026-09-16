@@ -133,10 +133,16 @@ fn poll_once(context: &PollContext) {
         return;
     };
     match client.poll() {
-        Ok(frame) => {
+        Ok(reply) => {
+            // 后面要借引擎走编辑会话 / 通知 Server，先把这一拍的借用放掉。
+            drop(guard);
             // 翻译评审时回空帧 = 翻译已在 Server 侧结束（云端没给译文）。
-            if translating && frame.is_empty() {
-                drop(guard);
+            let ended = translating && reply.frame.is_empty();
+            // 用户在候选窗点了候选：Server 已经把词选上，这里把它落进文档。
+            if let Some(text) = reply.commit {
+                super::service::on_pick_commit(text, reply.frame);
+            }
+            if ended {
                 context.shared.set_translating(false);
                 context.shared.hide_candidates();
             }

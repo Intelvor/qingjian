@@ -23,7 +23,7 @@ use qingjian_platform::LocalModelConfig;
 use qingjian_platform::protocol::{ClientMessage, Frame, ScreenRect, ServerMessage, SessionId};
 use qingjian_predict::PredictConfig;
 
-pub use self::candidates::{CandidateSink, NoopSink};
+pub use self::candidates::{CandidateEvent, CandidateSink, NoopSink};
 use self::composed::Composed;
 pub use self::config::RouterConfig;
 use self::reload::ConfigReload;
@@ -36,6 +36,9 @@ use self::translate::Translation;
 
 /// 学习数据落盘间隔（与 macOS 壳一致）；Server 没有定时器，借消息节拍看时间。
 const LEARNING_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
+
+/// 整句请求最长等多久就不再显示「联想中」（云端那边超时是 5 秒，再留点余量）。
+const SENTENCE_PENDING_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// 同一时刻只有一个应用有键盘焦点，所以一个 Engine 持当前组句；焦点切到别的会话时先清掉上一个的残留。
 pub struct Router {
@@ -63,11 +66,18 @@ pub struct Router {
     /// 已发出、等 DLL 回选区的请求号；对不上的 `Selection` 丢弃。
     pending_selection: Option<u64>,
 
+    /// 候选窗上点选、还没被 DLL 取走的上屏文本：传输一问一答，只能攒着等下一次轮询带回。
+    pending_commit: Option<String>,
+
     /// 「翻译选中文字」请求号计数器。
     selection_seq: u64,
 
     /// 整句补全（preedit 右侧、Tab 上屏）；缓冲变化时清空。
     sentence: Option<String>,
+
+    /// 整句请求发出去了、结果还没到（发出时刻）：候选窗据此显示「联想中」，
+    /// 结果到了 / 组句结束 / 等超（[`SENTENCE_PENDING_TIMEOUT`]）就清。
+    sentence_pending: Option<Instant>,
 
     /// 删候选后的屏幕提示，随下一帧下发、下一次按键清。
     notice: Option<String>,
@@ -134,8 +144,10 @@ impl Router {
             composed: None,
             translation: None,
             pending_selection: None,
+            pending_commit: None,
             selection_seq: 0,
             sentence: None,
+            sentence_pending: None,
             notice: None,
             highlight: 0,
             navigated: false,

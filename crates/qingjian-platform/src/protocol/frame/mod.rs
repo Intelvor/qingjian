@@ -46,6 +46,11 @@ pub struct Frame {
     /// 整句补全（云联想给的整段拼音的整句结果）：画在 preedit 行右侧，按 Tab 上屏。无则 `None`。
     pub sentence: Option<String>,
 
+    /// 整句请求发出去了、结果还没到：候选窗在 [`sentence`](Self::sentence) 那块位置显示「联想中」，
+    /// 结果到了就换成整句（或收掉）。不认这个字段的老 DLL 当 `false`，只是少一个等待提示。
+    #[serde(default)]
+    pub sentence_pending: bool,
+
     /// 屏幕提示（删候选后的「已删除…」一句）：画在 preedit 行下方，显示到下一次按键。无则 `None`。
     /// 不参与 [`is_empty`](Self::is_empty)：单有提示不算在组句，否则空组句也会撑开候选窗口。
     #[serde(default)]
