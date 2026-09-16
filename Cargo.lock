@@ -2369,7 +2369,7 @@ dependencies = [
 
 [[package]]
 name = "qingjian-windows-server"
-version = "0.1.0-alpha.14-dev"
+version = "0.1.0-alpha.15-dev"
 dependencies = [
  "dotenvy",
  "embed-manifest",
@@ -2393,7 +2393,7 @@ dependencies = [
 
 [[package]]
 name = "qingjian-windows-settings"
-version = "0.1.0-alpha.14-dev"
+version = "0.1.0-alpha.15-dev"
 dependencies = [
  "jiff",
  "qingjian-core",
@@ -2410,7 +2410,7 @@ dependencies = [
 
 [[package]]
 name = "qingjian-windows-tsf"
-version = "0.1.0-alpha.14-dev"
+version = "0.1.0-alpha.15-dev"
 dependencies = [
  "qingjian-core",
  "qingjian-platform",
