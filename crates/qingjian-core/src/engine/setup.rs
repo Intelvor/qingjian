@@ -295,6 +295,17 @@ impl Engine {
         self.chinese_first
     }
 
+    /// 中文模式下 Shift+字母是否进组句缓冲区（配置 `[general] shift_letter`，缺省关）。
+    /// 开着时大写按小写参与匹配、原样上屏时还原，`Cpan` 与 `cpan` 一样出「C盘」；
+    /// 关着时壳直接把大写字母交给应用，进这里的字母就按它自己的样子匹配。
+    pub fn set_shift_letter_compose(&mut self, on: bool) {
+        self.shift_letter_compose = on;
+    }
+
+    pub fn shift_letter_compose(&self) -> bool {
+        self.shift_letter_compose
+    }
+
     pub fn with_learner(mut self, learner: Box<dyn Learner>) -> Self {
         self.learner.replace(learner);
         self.forget_span_cache();

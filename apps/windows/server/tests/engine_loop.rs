@@ -1456,6 +1456,37 @@ fn tab_passes_through_when_cloud_is_off() {
     assert!(!frame.sentence_pending, "没接联想，不该摆等待提示");
 }
 
+/// 中文模式下的 Shift 大写：缺省交给应用（与以前一致），配成 compose 才收进组句缓冲区。
+#[test]
+fn shift_letters_follow_the_configuration() {
+    // 缺省 `shift_letter = "passthrough"`：临时打英文，字母归应用
+    let mut router = router();
+    let (outcome, commit, _) = press(&mut router, letter_with('P', SHIFT));
+    assert_eq!(outcome, KeyOutcome::Passthrough);
+    assert_eq!(commit, None);
+
+    // 配成 compose：进组句，按小写参与匹配
+    let config = RouterConfig {
+        shift_letter_compose: true,
+        ..RouterConfig::default()
+    };
+    let mut router = router_with(config);
+    type_letters(&mut router, "c");
+    let (outcome, commit, frame) = press(&mut router, letter_with('P', SHIFT));
+    assert_eq!(outcome, KeyOutcome::Consumed);
+    assert_eq!(commit, None);
+    assert_eq!(preedit(&frame), "cP", "大写收进组句，拼音行按敲的样子显示");
+}
+
+/// 中文模式没在组句时按 `-`：不放行、由壳插入——放行的键在部分宿主里到不了应用。
+#[test]
+fn minus_is_inserted_instead_of_passed_through() {
+    let mut router = router();
+    let (outcome, commit, _) = press(&mut router, punct('-'));
+    assert_eq!(outcome, KeyOutcome::Consumed);
+    assert_eq!(commit.as_deref(), Some("-"));
+}
+
 /// 放行的按键不能把攒着的点选文本吞掉（DLL 不碰文档），要留给下一次轮询。
 #[test]
 fn a_passthrough_key_keeps_the_picked_text_for_the_next_poll() {

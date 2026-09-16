@@ -95,10 +95,8 @@ impl Engine {
         // 两字母全大写缩写（mp → MP、bm → BM）让中文先：整段太短，几乎总是在打中文。
         let short_acronym = text.len() <= 2
             && word.is_some_and(|word| word.chars().all(|c| c.is_ascii_uppercase()));
-        let english_first = !self.chinese_first
-            && unlikely_pinyin
-            && chosen <= english_weight
-            && !short_acronym;
+        let english_first =
+            !self.chinese_first && unlikely_pinyin && chosen <= english_weight && !short_acronym;
         let mut position = if items.is_empty() || english_first {
             0
         } else {

@@ -2,7 +2,7 @@
 
 use qingjian_platform::{
     CandidateRenderer, Config, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, LayoutMode, LogLevel,
-    PreeditMode, ThemeMode,
+    PreeditMode, ShiftLetter, ThemeMode,
 };
 use windows_reactor::*;
 
@@ -75,6 +75,9 @@ impl Component for Settings {
             }
             Message::Preedit(Some(i)) if i < PreeditMode::ALL.len() => {
                 self.save("general", "preedit", PreeditMode::ALL[i].key());
+            }
+            Message::ShiftLetter(Some(i)) if i < ShiftLetter::ALL.len() => {
+                self.save("general", "shift_letter", ShiftLetter::ALL[i].key());
             }
             Message::Renderer(Some(i)) if i < CandidateRenderer::ALL.len() => {
                 self.save("general", "renderer", CandidateRenderer::ALL[i].key());

@@ -110,15 +110,17 @@ fn short_all_caps_acronym_yields_to_chinese() {
     // `mp` 整段只有两个字母、英文写法又是全大写缩写（MP）：几乎总是在打 门票，让中文先，
     // 英文词仍在候选里只是退到后面。超过两个字母的正文英文（hello / cargo）不受这条影响——
     // 曾经试过按词频一刀切，冻结日志回放实测英文首选从 82.5% 掉到 50.9%，cargo / rust 全被整句挤掉。
-    let dictionary =
-        Dictionary::parse("门票\tmen piao\t5000\n买票\tmai piao\t3000\n").unwrap();
+    let dictionary = Dictionary::parse("门票\tmen piao\t5000\n买票\tmai piao\t3000\n").unwrap();
     let words = WordList::parse("MP\tmp\t4290\nhello\thello\t4720\ncargo\tcargo\t5000\n").unwrap();
     let mut engine = Engine::new(dictionary).with_english(words);
 
     engine.set_input("mp");
     let all = texts_of(&engine);
     assert_eq!(all[0], "门票");
-    assert!(all.iter().any(|t| t == "MP"), "英文词仍在候选里，只是让到后面");
+    assert!(
+        all.iter().any(|t| t == "MP"),
+        "英文词仍在候选里，只是让到后面"
+    );
     assert!(all.iter().position(|t| t == "MP").unwrap() > 0);
 
     // 三个字母以上的正文英文：拼音不像话时照旧排第一

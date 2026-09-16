@@ -19,6 +19,10 @@ pub struct RouterConfig {
     /// 缺省 `idle` 是停止输入后自动联想。云端词两种模式下都照常自动。
     pub sentence_on_tab: bool,
 
+    /// 中文模式下 Shift+字母收进组句缓冲区（`[general] shift_letter = "compose"`）。
+    /// 关着（缺省）时壳把大写字母交给应用，与以前一致。
+    pub shift_letter_compose: bool,
+
     /// 候选排布（`[general] layout`）。
     pub layout: LayoutMode,
 
@@ -92,6 +96,7 @@ impl From<&Config> for RouterConfig {
             page_size: config.general.page_size(),
             cloud_slots: config.predict.slots,
             sentence_on_tab: config.predict.sentence_on_tab(),
+            shift_letter_compose: config.general.shift_letter.compose(),
             layout: config.general.layout,
             theme: config.general.theme,
             renderer: config.general.renderer,

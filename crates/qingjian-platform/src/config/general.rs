@@ -1,7 +1,7 @@
 use qingjian_core::ShuangpinScheme;
 use serde::{Deserialize, Serialize};
 
-use super::{CandidateRenderer, LayoutMode, LogLevel, PreeditMode, ThemeMode};
+use super::{CandidateRenderer, LayoutMode, LogLevel, PreeditMode, ShiftLetter, ThemeMode};
 
 /// 每页最多几个候选：数字键只有 1–9。
 pub const MAX_PAGE_SIZE: usize = 9;
@@ -52,6 +52,10 @@ pub struct GeneralConfig {
     /// 常在中文模式里打英文词的人不受影响；想要中文永远在前的自己打开。
     pub chinese_first: bool,
 
+    /// 中文模式下按住 Shift 敲的字母：交给应用（缺省）还是收进组句缓冲区参与匹配。
+    /// 收进组句才能打出「C盘」这类混杂词（`Cpan` 与 `cpan` 一样匹配）。
+    pub shift_letter: ShiftLetter,
+
     /// 中文模式下不在组句时敲的标点转成全角（`，。？！` 等，数字后的 `.` 保持半角）。
     /// Windows 悬浮状态条上可点切换；macOS 在偏好设置中选择默认模式。
     pub full_width_punctuation: bool,
@@ -92,6 +96,7 @@ impl Default for GeneralConfig {
             preedit: PreeditMode::default(),
             english_candidates: true,
             chinese_first: false,
+            shift_letter: ShiftLetter::default(),
             full_width_punctuation: true,
             english_full_width_punctuation: false,
             shuangpin: String::new(),

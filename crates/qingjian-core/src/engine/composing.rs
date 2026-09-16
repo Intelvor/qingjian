@@ -147,9 +147,14 @@ impl Engine {
             self.page_turns = 0;
             self.retype_snapshot = None;
         }
-        // 中文模式下 Shift+字母：按小写进缓冲区参与匹配（`Cpan` 与 `cpan` 一样出 C盘），
-        // 原样上屏（回车 / 无候选）时再还原大写。英文模式与英文直输段（`no-Way`）保留原样。
-        if c.is_ascii_uppercase() && !self.english_mode && !self.raw_mode() {
+        // 中文模式下 Shift+字母（配置 `shift_letter = "compose"` 时才收）：按小写进缓冲区参与匹配
+        // （`Cpan` 与 `cpan` 一样出 C盘），原样上屏（回车 / 无候选）时再还原大写。
+        // 缺省关：壳把大写字母直接交给应用，根本进不到这里；英文模式与英文直输段（`no-Way`）始终保留原样。
+        if self.shift_letter_compose
+            && c.is_ascii_uppercase()
+            && !self.english_mode
+            && !self.raw_mode()
+        {
             self.composition.push_shifted(c);
         } else {
             self.composition.push(c);

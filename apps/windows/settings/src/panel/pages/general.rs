@@ -1,6 +1,6 @@
 //! 「通用」页：学习语言、每页候选数、双拼、英文模式候选。
 
-use qingjian_platform::MAX_PAGE_SIZE;
+use qingjian_platform::{MAX_PAGE_SIZE, ShiftLetter};
 use windows_reactor::*;
 
 use crate::panel::controls::{field, index_of, page};
@@ -31,6 +31,14 @@ pub(crate) fn string_combo(
     ComboBox::new()
         .items_source(options.iter().map(|(label, _)| *label))
         .selected_index(index_of(options, current))
+        .on_selection_changed(callback)
+}
+
+/// Shift+字母的下拉：选项直接由 [`ShiftLetter::ALL`] 生成，免得再抄一份表（顺序要和它一致）。
+fn shift_letter_combo(current: ShiftLetter, callback: Callback<Option<usize>>) -> ComboBox {
+    ComboBox::new()
+        .items_source(ShiftLetter::ALL.iter().map(|mode| mode.label()))
+        .selected_index(ShiftLetter::ALL.iter().position(|mode| *mode == current))
         .on_selection_changed(callback)
 }
 
@@ -107,6 +115,12 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
             ToggleSwitch::new()
                 .is_on(g.chinese_first)
                 .on_toggled(context.callback(Message::ChineseFirst)),
+        ),
+        field(
+            "中文模式下的 Shift + 字母",
+            "「交给应用」是临时打英文（与以前一致）：拼音先上屏，这个键归应用；\
+             「进组句」把它收进拼音缓冲区，匹配时按小写算，所以 Cpan 与 cpan 一样能出「C盘」。",
+            shift_letter_combo(g.shift_letter, context.callback(Message::ShiftLetter)),
         ),
     ];
     page("通用", StackPanel::new().spacing(16.0).children(rows))

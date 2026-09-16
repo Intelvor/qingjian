@@ -247,20 +247,29 @@ fn shortcuts_follow_the_first_local_candidate() {
 }
 
 #[test]
-fn shifted_uppercase_enters_the_buffer_and_matches_lowercase() {
+fn shift_letters_join_the_buffer_only_when_configured() {
     let dictionary = Dictionary::parse("C盘\tc pan\t8000\n磁盘\tci pan\t249\n").unwrap();
     let mut engine = Engine::new(dictionary);
-    // 中文模式下按住 Shift 敲 C，再打 pan
-    engine.push('C');
-    for c in "pan".chars() {
-        engine.push(c);
-    }
+    let type_cpan = |engine: &mut Engine| {
+        // 中文模式下按住 Shift 敲 C，再打 pan
+        engine.push('C');
+        for c in "pan".chars() {
+            engine.push(c);
+        }
+    };
+
+    // 缺省 `shift_letter = "passthrough"`：壳直接把大写字母交给应用，这一路本来就不会走到；
+    // 万一走到也不该被当成拼音去匹配（所以「C盘」出不来）
+    type_cpan(&mut engine);
+    assert_ne!(engine.query().unwrap().candidates.items[0].text, "C盘");
+    engine.clear();
+
+    // 开了 compose：按小写参与匹配，拼音行按敲的样子显示，回车原样上屏时保留大写
+    engine.set_shift_letter_compose(true);
+    type_cpan(&mut engine);
     let query = engine.query().unwrap();
-    // 匹配按小写算：C盘 出得来
     assert_eq!(query.candidates.items[0].text, "C盘");
-    // 拼音行按敲的样子显示大写
     assert_eq!(query.marked_text(), "C'pan");
-    // 回车原样上屏时保留大写
     assert_eq!(engine.take_raw(), "Cpan");
     assert!(engine.composition().is_empty());
 }

@@ -13,6 +13,8 @@ pub(crate) enum Message {
     Zhuyin(bool),
     EnglishCandidates(bool),
     ChineseFirst(bool),
+    /// 中文模式下 Shift+字母：交给应用（缺省）还是进组句缓冲区。
+    ShiftLetter(Option<usize>),
     FullWidthPunctuation(bool),
     EnglishFullWidthPunctuation(bool),
     /// 开=写入平台默认名单，关=清空。
