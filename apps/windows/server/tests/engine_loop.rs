@@ -1373,6 +1373,8 @@ fn candidate_click_hands_the_text_to_the_next_poll() {
 struct FakeCloud {
     /// 每次请求的 `want_sentence`，按提交顺序。
     asked: Vec<bool>,
+    /// 每次请求带的光标前文，按提交顺序。
+    befores: Vec<String>,
     /// 最近一次请求的序号：`deliver` 用它造结果。
     last_request: Option<u64>,
     /// 备好、等轮询取走的结果。
@@ -1396,6 +1398,7 @@ impl Predictor for FakePredictor {
     fn submit(&mut self, request: PredictionRequest) {
         let mut cloud = self.cloud.lock().unwrap();
         cloud.asked.push(request.want_sentence);
+        cloud.befores.push(request.before);
         cloud.last_request = Some(request.sequence);
     }
 
@@ -1501,6 +1504,24 @@ fn tab_accepts_a_sentence_that_arrived_automatically() {
 
     let (_, commit, _) = press(&mut router, tab());
     assert_eq!(commit.as_deref(), Some(CLOUD_SENTENCE));
+}
+
+/// 云联想要带上下文：DLL 在组句起始时送来的光标前文，每一次请求都要跟着走。
+/// 没有它模型只能按拼音硬猜，给出来的句子常常接不上用户正在写的话题。
+#[test]
+fn cloud_requests_carry_the_surrounding_text() {
+    let (mut router, cloud) = router_with_cloud(true, false);
+    router.handle(ClientMessage::Surrounding {
+        session: SESSION,
+        text: "我们今天".to_owned(),
+    });
+    type_letters(&mut router, "nihao");
+    let befores = cloud.lock().unwrap().befores.clone();
+    assert!(!befores.is_empty(), "敲了拼音就该有请求");
+    assert!(
+        befores.iter().all(|b| b == "我们今天"),
+        "每次都该带上前文，实际：{befores:?}"
+    );
 }
 
 /// 云联想关着：Tab 交还应用（缩进 / 跳焦点），不吞键也不去现请。

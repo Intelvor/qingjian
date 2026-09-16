@@ -82,6 +82,11 @@ pub struct Router {
     /// 结果到了 / 组句结束 / 等超（[`SENTENCE_PENDING_TIMEOUT`]）就清，别让它挂着。
     sentence_pending: Option<Instant>,
 
+    /// 应用里光标前的文字（DLL 在组句起始时随 [`ClientMessage::Surrounding`] 送来）。
+    /// 本地整句重排与云联想都用它当上下文——云那一路没有它就只能按拼音硬猜，
+    /// 给出来的句子常常接不上用户在写的话题。
+    surrounding_before: Option<String>,
+
     /// 删候选后的屏幕提示，随下一帧下发、下一次按键清。
     notice: Option<String>,
 
@@ -150,6 +155,7 @@ impl Router {
             sentence_requested: false,
             pending_commit: None,
             sentence_pending: None,
+            surrounding_before: None,
             notice: None,
             highlight: 0,
             navigated: false,

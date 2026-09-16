@@ -2,7 +2,7 @@
 
 mod state;
 
-use qingjian_core::{Candidate, CandidateLayout, CandidateList, CloudWord};
+use qingjian_core::{Candidate, CandidateLayout, CandidateList, CloudWord, SurroundingText};
 use qingjian_platform::protocol::{Frame, PreeditKind, PreeditSegment};
 use std::time::Instant;
 
@@ -38,7 +38,9 @@ impl Router {
                 let layout =
                     CandidateLayout::new(items, self.config.page_size, self.config.cloud_slots);
                 if self.engine.prediction_enabled() {
-                    let sent = self.engine.request_prediction(None, layout.local());
+                    let sent = self
+                        .engine
+                        .request_prediction(self.surrounding_text(), layout.local());
                     // 这一拍自动就要整句（`sentence_trigger = "idle"`）且真发出去了：
                     // 候选窗先摆「☁ …」。云端词那一路不提示（它一直在问，闪起来太吵）。
                     self.sentence_pending = (sent.is_some()
@@ -120,11 +122,26 @@ impl Router {
         };
         self.engine.request_sentence_once();
         self.sentence_requested = true;
-        let sent = self.engine.request_prediction(None, local).is_some();
+        let sent = self
+            .engine
+            .request_prediction(self.surrounding_text(), local)
+            .is_some();
         if sent {
             self.sentence_pending = Some(Instant::now());
         }
         sent
+    }
+
+    /// 给云联想的周围文本。Windows 壳只在组句起始时读一次光标前文（`ClientMessage::Surrounding`），
+    /// 光标后文 TSF 这边没读，所以 `after` 恒为空——Core 会按 `policy.before` 裁剪到约定的字数。
+    /// 没有前文就是 `None`（应用给不出上下文时），模型只能按拼音硬猜。
+    fn surrounding_text(&self) -> Option<SurroundingText> {
+        self.surrounding_before
+            .as_ref()
+            .map(|before| SurroundingText {
+                before: before.clone(),
+                after: String::new(),
+            })
     }
 
     /// 云联想关掉 / 换掉 Predictor 时作废手里那份整句：它是上一个 Predictor 给的，

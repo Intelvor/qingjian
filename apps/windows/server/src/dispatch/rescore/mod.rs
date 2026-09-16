@@ -114,6 +114,9 @@ impl Router {
     /// DLL 送来聚焦会话的光标前文：给 Engine 当前文，缓存里按旧前文记的「要打分的」作废，重新攒一次并重新计时。
     /// 组句已经结束 / 不是聚焦会话的丢掉。
     pub(super) fn set_surrounding(&mut self, session: SessionId, text: String) {
+        // 云联想也用这份前文（macOS 壳是每键从 IMK 取，Windows 只在组句起始时读一次）。
+        // 必须在「不是聚焦会话就返回」之前记：会话刚打开、还没组句时这一条同样要收下。
+        self.surrounding_before = (!text.is_empty()).then_some(text.clone());
         if self.focused != Some(session) || self.engine.composition().is_empty() {
             return;
         }
