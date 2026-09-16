@@ -132,16 +132,17 @@ impl Router {
         sent
     }
 
-    /// 给云联想的周围文本。Windows 壳只在组句起始时读一次光标前文（`ClientMessage::Surrounding`），
-    /// 光标后文 TSF 这边没读，所以 `after` 恒为空——Core 会按 `policy.before` 裁剪到约定的字数。
-    /// 没有前文就是 `None`（应用给不出上下文时），模型只能按拼音硬猜。
+    /// 给云联想的周围文本。Windows 壳只在组句起始时读一次光标前后文
+    /// （`ClientMessage::Surrounding`），Core 会按 `policy.before` / `policy.after` 裁到约定的字数。
+    /// 两头都没有就是 `None`（应用给不出上下文时），模型只能按拼音硬猜。
     fn surrounding_text(&self) -> Option<SurroundingText> {
-        self.surrounding_before
-            .as_ref()
-            .map(|before| SurroundingText {
-                before: before.clone(),
-                after: String::new(),
-            })
+        if self.surrounding_before.is_none() && self.surrounding_after.is_none() {
+            return None;
+        }
+        Some(SurroundingText {
+            before: self.surrounding_before.clone().unwrap_or_default(),
+            after: self.surrounding_after.clone().unwrap_or_default(),
+        })
     }
 
     /// 云联想关掉 / 换掉 Predictor 时作废手里那份整句：它是上一个 Predictor 给的，

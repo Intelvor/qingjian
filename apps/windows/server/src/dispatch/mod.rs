@@ -87,6 +87,10 @@ pub struct Router {
     /// 给出来的句子常常接不上用户在写的话题。
     surrounding_before: Option<String>,
 
+    /// 光标**后**的文字（同一条 [`ClientMessage::Surrounding`]）。光标后面已有文字时，
+    /// 云整句只填中间缺的那几个字——`after` 空着的话模型会把下文又写一遍，拼起来就重复了。
+    surrounding_after: Option<String>,
+
     /// 删候选后的屏幕提示，随下一帧下发、下一次按键清。
     notice: Option<String>,
 
@@ -156,6 +160,7 @@ impl Router {
             pending_commit: None,
             sentence_pending: None,
             surrounding_before: None,
+            surrounding_after: None,
             notice: None,
             highlight: 0,
             navigated: false,

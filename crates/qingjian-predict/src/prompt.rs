@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 pub const SYSTEM_PROMPT: &str = "\
 你是一个拼音输入法的云端联想引擎。用户正在打拼音，还没选词。你会收到一段 JSON：\
 letters（用户实际敲的字母，**可能有错字、漏字、多字、音节切错**）、pinyin（输入法按 letters 做的切分，' 分隔音节，单个字母是声母缩写，切分可能是错的）、\
-syllables（切分出的音节数，仅供参考）、before / after（当前光标前后的文本，应用给不出时为空）、\
+syllables（切分出的音节数，仅供参考）、before / after（当前光标前后的文本，应用给不出时为空——**判断用户在写什么主要靠它们**，
+别只看 letters 猜：before 是「高等数学是」时 `d'x` 出「大学」，不要出「大象」）、\
 local_sentence（本地整句转换的结果，可能错）、local_candidates（本地词库排在前面的候选，第一个是本地首选）、max_items、want_sentence。
 
 用户经常**中英混排**：letters 可能整个是英文词（docker、linux、API）、可能全是拼音，也可能一半一半（今天 qu gongsi、我不了解 linux）；\
@@ -37,8 +38,8 @@ sentence：want_sentence 为 true 时给一段文字，它**只替换这段拼�
 - **sentence 必须以 letters 拼出来的那个词开头**（就是 local_candidates 里的词），哪怕 before / after 的语义更像另一个词——用户敲什么就补什么。
   例：before=高等数学是一门非常重要的、拼音 d'x、after=课程 → 以「大学」开头（能接上 after 的说法），**不要「基础」**：`d'x` 拼不出基础，用户想打的是大学。
   实在拼不出合适的就给 null，不要硬凑。
-- **sentence_pinyin**：用户敲的这段拼音对应的**正确**全拼，一个音节一个拼音、用空格隔开（就是 `syllables` 个音节），
-  和 words 的 pinyin 一样要给；本地会拿它和 letters 对（简拼、少量错字都算过），对不上就丢掉整句。
+- **sentence_pinyin 必须给**（不给整句直接丢弃，等于白答）：用户敲的这段拼音对应的**正确**全拼，
+  一个音节一个拼音、用空格隔开（就是 `syllables` 个音节）；本地会拿它和 letters 对（简拼、少量错字都算过）。
 - sentence 可以**中英混排**（我不了解Linux系统、部署完成后调用API验证），数字也常混在里面。给 sentence_pinyin 时\
   **按用户敲的字母给，不是按写出来的字**：中文给全拼；英文与字母数字混排的照原样小写（`mp3` 是敲 `mp` 加 `san`，就给 `mp san`；`C盘` 给 `cpan`）；\
   **阿拉伯数字按念法给拼音**（`123` → `yi bai er shi san`），它没有字母可对。

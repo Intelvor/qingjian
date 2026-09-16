@@ -54,6 +54,11 @@ pub enum ClientMessage {
 
         /// 光标前最多 64 字。
         text: String,
+
+        /// 光标后最多 32 字（光标后面已有文字时，云整句只填中间缺的那几个字）。
+        /// 老 DLL 不带这个字段，读成空串——那条路下 `after` 恒空，行为与以前一致。
+        #[serde(default)]
+        after: String,
     },
 
     /// 输入框私密与否变了（DLL 起组句时按输入范围判：`IS_PRIVATE` / 密码 / PIN 类算私密，浏览器无痕窗口就是它）。

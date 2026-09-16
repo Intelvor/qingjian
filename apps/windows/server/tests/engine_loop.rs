@@ -1272,6 +1272,7 @@ fn surrounding_text_arriving_after_the_first_key_still_rescoring() {
         router.handle(ClientMessage::Surrounding {
             session: SESSION,
             text: "今天".to_owned(),
+            after: String::new(),
         }),
         None
     );
@@ -1283,6 +1284,7 @@ fn surrounding_text_arriving_after_the_first_key_still_rescoring() {
         router.handle(ClientMessage::Surrounding {
             session: SessionId(9),
             text: "无关".to_owned(),
+            after: String::new(),
         }),
         None
     );
@@ -1375,6 +1377,8 @@ struct FakeCloud {
     asked: Vec<bool>,
     /// 每次请求带的光标前文，按提交顺序。
     befores: Vec<String>,
+    /// 每次请求带的光标后文，按提交顺序。
+    afters: Vec<String>,
     /// 最近一次请求的序号：`deliver` 用它造结果。
     last_request: Option<u64>,
     /// 备好、等轮询取走的结果。
@@ -1399,6 +1403,7 @@ impl Predictor for FakePredictor {
         let mut cloud = self.cloud.lock().unwrap();
         cloud.asked.push(request.want_sentence);
         cloud.befores.push(request.before);
+        cloud.afters.push(request.after);
         cloud.last_request = Some(request.sequence);
     }
 
@@ -1506,7 +1511,7 @@ fn tab_accepts_a_sentence_that_arrived_automatically() {
     assert_eq!(commit.as_deref(), Some(CLOUD_SENTENCE));
 }
 
-/// 云联想要带上下文：DLL 在组句起始时送来的光标前文，每一次请求都要跟着走。
+/// 云联想要带上下文：DLL 在组句起始时送来的光标前后文，每一次请求都要跟着走。
 /// 没有它模型只能按拼音硬猜，给出来的句子常常接不上用户正在写的话题。
 #[test]
 fn cloud_requests_carry_the_surrounding_text() {
@@ -1514,13 +1519,20 @@ fn cloud_requests_carry_the_surrounding_text() {
     router.handle(ClientMessage::Surrounding {
         session: SESSION,
         text: "我们今天".to_owned(),
+        after: "开会".to_owned(),
     });
     type_letters(&mut router, "nihao");
-    let befores = cloud.lock().unwrap().befores.clone();
-    assert!(!befores.is_empty(), "敲了拼音就该有请求");
+    let cloud = cloud.lock().unwrap();
+    assert!(!cloud.befores.is_empty(), "敲了拼音就该有请求");
     assert!(
-        befores.iter().all(|b| b == "我们今天"),
-        "每次都该带上前文，实际：{befores:?}"
+        cloud.befores.iter().all(|b| b == "我们今天"),
+        "每次都该带上光标前文，实际：{:?}",
+        cloud.befores
+    );
+    assert!(
+        cloud.afters.iter().all(|a| a == "开会"),
+        "光标后文也要带上，实际：{:?}",
+        cloud.afters
     );
 }
 

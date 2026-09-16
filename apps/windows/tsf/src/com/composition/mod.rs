@@ -56,11 +56,14 @@ pub(crate) fn apply(
     } else {
         update_preedit(shared, context, ec, preedit)?;
     }
-    if let Some(InputContext { private, before }) = input {
+    if let Some(InputContext {
+        private,
+        before,
+        after,
+    }) = input
+    {
         report_privacy(engine, private);
-        if let Some(before) = before {
-            report_surrounding(engine, before);
-        }
+        report_surrounding(engine, before, after);
     }
     report_caret(shared, engine, context, ec);
     Ok(())
@@ -76,15 +79,20 @@ fn report_privacy(engine: &SharedClient, private: bool) {
     }
 }
 
-/// 把光标前文送给 Server；引擎正被别处借着（罕见）就算了，Server 退回会话历史。
-fn report_surrounding(engine: &SharedClient, before: String) {
-    let chars = before.chars().count();
+/// 把光标前后文送给 Server；引擎正被别处借着（罕见）就算了，Server 退回会话历史。
+fn report_surrounding(engine: &SharedClient, before: Option<String>, after: Option<String>) {
+    let before = before.unwrap_or_default();
+    let after = after.unwrap_or_default();
+    if before.is_empty() && after.is_empty() {
+        return;
+    }
+    let (before_chars, after_chars) = (before.chars().count(), after.chars().count());
     if let Ok(mut guard) = engine.try_borrow_mut()
         && let Some(client) = guard.as_mut()
     {
-        match client.surrounding(before) {
-            Ok(()) => super::log::log(&format!("送光标前文 {chars} 字")),
-            Err(error) => super::log::log(&format!("送光标前文失败: {error}")),
+        match client.surrounding(before, after) {
+            Ok(()) => super::log::log(&format!("送光标前后文 {before_chars}/{after_chars} 字")),
+            Err(error) => super::log::log(&format!("送光标前后文失败: {error}")),
         }
     }
 }
