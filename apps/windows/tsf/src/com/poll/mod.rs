@@ -29,7 +29,8 @@ static CLASS: WindowClass = WindowClass::new();
 const TIMER_ID: usize = 1;
 const INTERVAL_MS: u32 = 80;
 
-/// 没在组句时每几拍问一次状态条的切模式请求（320 ms 一次，点了状态条肉眼看不出延迟）。
+/// 每几拍问一次状态条的切模式请求（320 ms 一次，点了状态条肉眼看不出延迟）。组句中也照问，
+/// 否则点了状态条再开始打字，那个目标模式会一直挂在 Server 那边等不到取回。
 /// 按键行为设置（切换键、内置英文模式）也跟着这一拍取回，所以设置改完同样是约 320 ms 生效。
 const MODE_SYNC_EVERY: u32 = 4;
 
@@ -109,15 +110,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
-/// 组句中或翻译评审中拉云结果；否则前台时隔几拍问一次切模式（顺路取回按键行为设置）。引擎正被按键处理借用时跳过这一拍；连接坏了断开。
+/// 组句中或翻译评审中拉云结果；每隔几拍问一次切模式（顺路取回按键行为设置）。引擎正被按键处理借用时跳过这一拍；连接坏了断开。
 fn poll_once(context: &PollContext) {
     let tick = context.ticks.get().wrapping_add(1);
     context.ticks.set(tick);
     let translating = context.shared.translating();
-    if !context.shared.composing() && !translating {
-        if context.shared.foreground() && tick.is_multiple_of(MODE_SYNC_EVERY) {
-            sync_mode(context);
-        }
+    let composing = context.shared.composing();
+    // 切中英模式的请求**组句中也要看**：否则用户点了状态条之后马上开始打字，那个目标模式会一直
+    // 挂在 Server 那边等不到取回——表现就是「点『中 / 英』有时没反应」，要等这句敲完才生效。
+    // 没组句时仍只在前台应用里问（状态条常驻桌面，后台应用不需要）。
+    if tick.is_multiple_of(MODE_SYNC_EVERY) && (composing || context.shared.foreground()) {
+        sync_mode(context);
+    }
+    if !composing && !translating {
         return;
     }
     let Ok(mut guard) = context.engine.try_borrow_mut() else {
