@@ -52,7 +52,7 @@ fn client_types_pinyin_and_gets_candidates() {
     let (client_end, server_end) = UnixStream::pair().unwrap();
     let server = spawn_server(server_end);
 
-    let mut client = EngineClient::open(client_end, SESSION, None).expect("open session");
+    let (mut client, _input) = EngineClient::open(client_end, SESSION, None).expect("open session");
     let mut last = None;
     for c in "nihao".chars() {
         last = Some(result(client.key(letter(c)).expect("key round-trips")));
@@ -89,7 +89,7 @@ fn space_commits_first_candidate() {
     let (client_end, server_end) = UnixStream::pair().unwrap();
     let server = spawn_server(server_end);
 
-    let mut client = EngineClient::open(client_end, SESSION, None).expect("open session");
+    let (mut client, _input) = EngineClient::open(client_end, SESSION, None).expect("open session");
     for c in "ni".chars() {
         client.key(letter(c)).expect("key round-trips");
     }
@@ -112,7 +112,7 @@ fn commit_returns_raw_text() {
     let (client_end, server_end) = UnixStream::pair().unwrap();
     let server = spawn_server(server_end);
 
-    let mut client = EngineClient::open(client_end, SESSION, None).expect("open session");
+    let (mut client, _input) = EngineClient::open(client_end, SESSION, None).expect("open session");
     for c in "nihao".chars() {
         client.key(letter(c)).expect("key round-trips");
     }
@@ -135,7 +135,7 @@ fn translate_combo_is_dormant_without_cloud() {
     let (client_end, server_end) = UnixStream::pair().unwrap();
     let server = spawn_server(server_end);
 
-    let mut client = EngineClient::open(client_end, SESSION, None).expect("open session");
+    let (mut client, _input) = EngineClient::open(client_end, SESSION, None).expect("open session");
     // Ctrl+Alt+T（缺省 translate_selection）：character = 't'，修饰键 ctrl+alt。
     let combo = KeyEvent::new(
         b'T' as u32,
