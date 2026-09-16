@@ -18,7 +18,7 @@ use qingjian_platform::protocol::{Frame, PreeditKind};
 
 pub(crate) use self::shared::Shared;
 use self::sink::CompositionSink;
-use super::edit::{InputContext, anchor_rect, caret_rect, input_context};
+use super::edit::{InputContext, anchor_rect, input_context};
 use super::service::SharedClient;
 
 /// 内联要显示的拼音行（跳过被纠错划掉的原字母）；空串表示没有组句内容。
@@ -41,32 +41,21 @@ pub(crate) fn apply(
     commit: Option<&str>,
     preedit: &str,
 ) -> Result<()> {
-    // 组句进行中、且这一段还没报过输入框状态时读一次。判定用 `composing()`（Server 回的帧非空）
-    // 而不是 `has_composition()`：上屏那一键 `commit_text` 先把 TSF 组句结束了，之后再问「有没有组句」
-    // 永远是没有，会在上屏时误报一次前后文（Server 那边组句已空、直接丢），并把标记记成已报，
-    // 下一段真正开始的组句反倒不报了（2026-09-16 Edge 地址栏实测：笛卡儿积 之后整段联想都没有上下文）。
-    // 读在写 preedit 之前：此时选区还是原来的插入点。
-    let report_input = shared.composing() && !shared.context_reported();
-    if report_input {
-        shared.set_context_reported(true);
-    }
-    let input = report_input.then(|| input_context(context, ec));
     if let Some(text) = commit {
         commit_text(shared, context, ec, text)?;
     }
     if preedit.is_empty() {
         end_composition(shared, ec)?;
     } else {
+        let starting = !shared.has_composition();
+        let input = starting.then(|| input_context(context, ec));
         update_preedit(shared, context, ec, preedit)?;
-    }
-    if let Some(InputContext {
-        private,
-        before,
-        after,
-    }) = input
-    {
-        report_privacy(engine, private);
-        report_surrounding(engine, before, after);
+        if let Some(InputContext { private, before }) = input {
+            report_privacy(engine, private);
+            if let Some(before) = before {
+                report_surrounding(engine, before);
+            }
+        }
     }
     report_caret(shared, engine, context, ec);
     Ok(())
@@ -82,38 +71,28 @@ fn report_privacy(engine: &SharedClient, private: bool) {
     }
 }
 
-/// 把光标前后文送给 Server：本地整句模型的前文 + 云联想的上下文。
-/// 引擎正被别处借着（罕见）就算了，Server 退回会话历史；前后都读不到就不发。
-fn report_surrounding(engine: &SharedClient, before: Option<String>, after: Option<String>) {
-    if before.is_none() && after.is_none() {
-        return;
-    }
-    let before = before.unwrap_or_default();
-    let after = after.unwrap_or_default();
-    let chars = before.chars().count() + after.chars().count();
+/// 把光标前文送给 Server；引擎正被别处借着（罕见）就算了，Server 退回会话历史。
+fn report_surrounding(engine: &SharedClient, before: String) {
+    let chars = before.chars().count();
     if let Ok(mut guard) = engine.try_borrow_mut()
         && let Some(client) = guard.as_mut()
     {
-        match client.surrounding(before, after) {
-            Ok(()) => super::log::log(&format!("送光标前后文 {chars} 字")),
-            Err(error) => super::log::log(&format!("送光标前后文失败: {error}")),
+        match client.surrounding(before) {
+            Ok(()) => super::log::log(&format!("送光标前文 {chars} 字")),
+            Err(error) => super::log::log(&format!("送光标前文失败: {error}")),
         }
     }
 }
 
 /// 组句进行中才报位置；组句已收 Server 会按空帧 / `Commit` 自行收窗口。
 fn report_caret(shared: &Shared, engine: &SharedClient, context: &ITfContext, ec: u32) {
-    let rect = match shared.composition() {
-        Some(composition) => {
-            let Ok(range) = (unsafe { composition.GetRange() }) else {
-                return;
-            };
-            anchor_rect(context, ec, &range)
-        }
-        // 「只在候选窗口」模式应用里不放行内拼音：没有组句范围可量，量插入点。
-        None if shared.composing() => caret_rect(context, ec),
-        None => return,
+    let Some(composition) = shared.composition() else {
+        return;
     };
+    let Ok(range) = (unsafe { composition.GetRange() }) else {
+        return;
+    };
+    let rect = anchor_rect(context, ec, &range);
     // 引擎正被别处借着（罕见）就跳过这拍，Server 保持上次位置。
     if let Ok(mut guard) = engine.try_borrow_mut()
         && let Some(client) = guard.as_mut()

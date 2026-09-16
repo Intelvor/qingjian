@@ -1,12 +1,15 @@
 //! 配置热加载：空闲时看 `config.toml` 的 mtime，改了就重读并应用（与 macOS 壳对齐）。
-//! 便宜的设置无条件重设；云联想 / 附加词库只在对应分节变了才重建。热加载状态在 [`ConfigReload`]。
+//! 便宜的设置无条件重设；云联想 / 释义表按配置变化重建，附加词库也检查文件增删与更新。热加载状态在 [`ConfigReload`]。
 
 mod state;
+
+#[cfg(test)]
+mod tests;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use qingjian_core::{Engine, NoGlossFiller, NoPredictor};
+use qingjian_core::{Engine, Language, NoGlossFiller, NoPredictor, NoTranslator};
 use qingjian_platform::{Config, extra_dictionaries};
 use qingjian_predict::{CloudGlossFiller, CloudPredictor, PredictConfig};
 
@@ -15,6 +18,7 @@ pub(super) use self::state::ConfigReload;
 /// 看配置文件 mtime 的最短间隔；工人循环空闲时按它等，重排的短节拍来得更勤时按这个节流。
 pub(super) const CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(1);
 use super::{Router, RouterConfig};
+use crate::assembly::{self, user_dicts_dir};
 
 fn mtime(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path)
@@ -49,6 +53,39 @@ pub fn attach_cloud(engine: &mut Engine, predict: &PredictConfig) {
     }
 }
 
+/// 学习语言变了就换释义表：关是不翻译；换语言重装随包 + 个人释义表，没有这门语言的表或装不上就保持原样。
+/// 换成功（或关掉）返回 true。
+fn swap_translator(
+    engine: &mut Engine,
+    language: Option<Language>,
+    root: &Path,
+    user_dir: Option<&Path>,
+) -> bool {
+    let Some(language) = language else {
+        engine.set_translator(Box::new(NoTranslator));
+        tracing::info!("学习语言已关，不显示译文");
+        return true;
+    };
+    let Some(path) = assembly::glossary_file(root, language) else {
+        tracing::warn!(
+            language = language.code(),
+            "没有这门语言的释义表，学习语言不变"
+        );
+        return false;
+    };
+    match assembly::load_glossary(language, &path, user_dir) {
+        Ok(glossary) => {
+            tracing::info!(language = language.code(), "释义表已切换");
+            engine.set_translator(Box::new(glossary));
+            true
+        }
+        Err(error) => {
+            tracing::warn!(%error, "释义表加载失败，学习语言不变");
+            false
+        }
+    }
+}
+
 impl Router {
     /// `config.toml` 路径；没开热加载（测试）时为 `None`。
     pub(super) fn config_path(&self) -> Option<&Path> {
@@ -57,23 +94,30 @@ impl Router {
             .map(|reload| reload.config_path.as_path())
     }
 
-    /// 开启热加载：记下路径与当前已应用的 predict / dictionaries。
+    /// 开启热加载：记下路径与当前已应用的 predict / dictionaries / 学习语言。
     pub fn watch_config(
         &mut self,
         config: &Config,
         config_path: PathBuf,
-        bundled_dicts_dir: Option<PathBuf>,
+        root: PathBuf,
         user_dir: Option<PathBuf>,
     ) {
         let last_mtime = mtime(&config_path);
+        let dictionary_files = user_dicts_dir(user_dir.as_deref())
+            .map(|dir| extra_dictionaries::snapshot(&dir))
+            .unwrap_or_default();
+        let bundled_dicts_dir = Some(root.join("data/generated/dicts")).filter(|dir| dir.is_dir());
         self.reload = Some(ConfigReload {
             config_path,
             last_check: Instant::now(),
+            root,
             bundled_dicts_dir,
             user_dir,
             last_mtime,
             applied_predict: config.predict.clone(),
             applied_dictionaries: config.dictionaries.clone(),
+            dictionary_files,
+            applied_language: assembly::learning_language(config),
         });
     }
 
@@ -86,6 +130,16 @@ impl Router {
             return;
         }
         reload.last_check = Instant::now();
+        let files = user_dicts_dir(reload.user_dir.as_deref())
+            .map(|dir| extra_dictionaries::snapshot(&dir))
+            .unwrap_or_default();
+        let dictionaries_changed = files != reload.dictionary_files;
+        if dictionaries_changed {
+            // 配置损坏也继续使用上次有效的词库开关；文件变化不触发配置重试。
+            self.engine
+                .set_extra_dictionaries(reload.load_dictionaries());
+            reload.dictionary_files = files;
+        }
         let current = mtime(&reload.config_path);
         if current == reload.last_mtime {
             return;
@@ -101,41 +155,45 @@ impl Router {
         }
     }
 
-    /// 应用新配置。学习语言变了仍需重启（要换释义表 / 等级表）。
+    /// 应用新配置。学习语言变了换释义表（词汇等级表启动时已全装，不用换）。
     fn apply_config(&mut self, config: &Config) {
         self.engine.set_fuzzy(config.fuzzy);
         self.engine.set_shuangpin(config.general.shuangpin());
         self.engine.set_zhuyin_mode(config.general.zhuyin);
+        self.engine.set_learning(config.general.learning);
         self.engine.set_mode_keys(config.shortcut.mode);
+        self.engine.set_chinese_first(config.general.chinese_first);
+        let previous = self.config.render_settings();
         self.config = RouterConfig::from(config);
-        // 状态条上的「☁」格按这份翻转 enabled，配置文件被改时跟着走
-        self.predict = config.predict.clone();
+        let settings = self.config.render_settings();
+        if settings != previous {
+            self.candidates.configure(settings);
+        }
         self.reconcile_status();
         self.apply_model_config(&config.model);
 
         let Some(reload) = &mut self.reload else {
             return;
         };
-        let mut predict_changed = false;
         if config.predict != reload.applied_predict {
             attach_cloud(&mut self.engine, &config.predict);
             reload.applied_predict = config.predict.clone();
-            predict_changed = true;
+        }
+        let language = assembly::learning_language(config);
+        if language != reload.applied_language
+            && swap_translator(
+                &mut self.engine,
+                language,
+                &reload.root,
+                reload.user_dir.as_deref(),
+            )
+        {
+            reload.applied_language = language;
         }
         if config.dictionaries != reload.applied_dictionaries {
-            let dicts = extra_dictionaries::load(
-                reload.bundled_dicts_dir.as_deref(),
-                reload.user_dir.as_deref(),
-                &config.dictionaries,
-            );
-            tracing::info!(count = dicts.len(), "附加词库已热重装");
-            self.engine.set_extra_dictionaries(dicts);
             reload.applied_dictionaries = config.dictionaries.clone();
-        }
-        // 换了（或关了）Predictor：手里那份整句补全跟着作废，别让 Tab 上屏旧句子。
-        // 放在 `reload` 借用结束之后，两条借用才不打架。
-        if predict_changed {
-            self.drop_sentence();
+            self.engine
+                .set_extra_dictionaries(reload.load_dictionaries());
         }
     }
 }

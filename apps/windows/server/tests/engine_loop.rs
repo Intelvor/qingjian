@@ -4,17 +4,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use qingjian_core::sentence::SentenceScorer;
-use qingjian_core::{
-    Language, ModeKeys, NoPredictor, Prediction, PredictionPolicy, PredictionRequest, Predictor,
-    ShuangpinScheme,
-};
+use qingjian_core::{Language, ModeKeys, ShuangpinScheme};
 use qingjian_platform::protocol::{
     ClientMessage, Frame, KeyEvent, KeyModifiers, KeyOutcome, PROTOCOL_VERSION, ServerMessage,
     SessionId,
 };
-use qingjian_platform::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, PreeditMode};
-use qingjian_predict::PredictConfig;
-use qingjian_windows_server::dispatch::{CandidateEvent, StatusEvent, StatusSink, StatusView};
+use qingjian_platform::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS};
+use qingjian_windows_server::dispatch::{StatusEvent, StatusSink, StatusView};
 use qingjian_windows_server::{AssemblySpec, Router, RouterConfig, assembly};
 
 const SESSION: SessionId = SessionId(1);
@@ -247,26 +243,6 @@ fn typing_pinyin_shows_candidates() {
     );
 }
 
-/// 拼音显示位置随帧下发给 DLL：DLL 按 `inline()` 决定要不要往应用里放行内拼音，
-/// 窗口顶部画不画拼音行由 Server 自己按 `in_window()` 定，所以帧始终带着拼音行。
-#[test]
-fn frame_carries_the_preedit_mode() {
-    for mode in PreeditMode::ALL {
-        let mut router = router_with(RouterConfig {
-            preedit: mode,
-            ..RouterConfig::default()
-        });
-        let (_, _, frame) = type_letters(&mut router, "nihao");
-
-        assert_eq!(frame.preedit_mode, mode);
-        assert_eq!(
-            preedit(&frame),
-            "ni'hao",
-            "{mode:?} 下帧也要带拼音行，画不画是窗口的事"
-        );
-    }
-}
-
 #[test]
 fn selecting_by_digit_commits_and_clears() {
     let mut router = router();
@@ -288,332 +264,6 @@ fn selecting_by_digit_commits_and_clears() {
         after.is_empty(),
         "上屏后应收起候选，实际 preedit={:?}",
         preedit(&after)
-    );
-}
-
-/// 鼠标点候选窗里的一行：选中的词攒着，等 DLL 轮询取走（Server 不主动推，传输一问一答）。
-#[test]
-fn picking_a_candidate_waits_for_the_next_poll() {
-    let mut router = router();
-    let (_, _, frame) = type_letters(&mut router, "nihao");
-    let row = frame
-        .candidates
-        .items
-        .iter()
-        .position(|c| c.text == "你好")
-        .expect("「你好」在候选页内");
-
-    router.handle_candidate_event(CandidateEvent::Pick(row));
-
-    match router.handle(ClientMessage::Poll { session: SESSION }) {
-        Some(ServerMessage::Update { commit, frame, .. }) => {
-            assert_eq!(commit.as_deref(), Some("你好"), "点选的词由轮询带回");
-            assert!(frame.is_empty(), "整段拼音吃完，组句结束");
-        }
-        other => panic!("expected update, got {other:?}"),
-    }
-    // 取走就清了：下一拍没有东西可上屏。
-    match router.handle(ClientMessage::Poll { session: SESSION }) {
-        Some(ServerMessage::Update { commit, .. }) => assert_eq!(commit, None),
-        other => panic!("expected update, got {other:?}"),
-    }
-}
-
-/// 点选的词还没被取走时来了个放行的键（Ctrl+C 归应用）：词不能被吞掉，留下一次轮询。
-#[test]
-fn a_passthrough_key_keeps_the_picked_word_for_later() {
-    let mut router = router();
-    let (_, _, frame) = type_letters(&mut router, "nihao");
-    let row = frame
-        .candidates
-        .items
-        .iter()
-        .position(|c| c.text == "你好")
-        .expect("「你好」在候选页内");
-    router.handle_candidate_event(CandidateEvent::Pick(row));
-
-    let ctrl_c = KeyEvent::new(
-        0x43,
-        Some('c'),
-        KeyModifiers {
-            ctrl: true,
-            ..KeyModifiers::default()
-        },
-    );
-    let (outcome, commit, _) = press(&mut router, ctrl_c);
-    assert_eq!(outcome, KeyOutcome::Passthrough);
-    assert_eq!(commit, None, "放行的键自己不带上屏文本");
-
-    match router.handle(ClientMessage::Poll { session: SESSION }) {
-        Some(ServerMessage::Update { commit, .. }) => {
-            assert_eq!(commit.as_deref(), Some("你好"), "留下的词由下一次轮询带回");
-        }
-        other => panic!("expected update, got {other:?}"),
-    }
-}
-
-/// 假联想：被问过之后回一条整句补全（结果取走就没了，别让 Engine 一直拉）。
-struct SentencePredictor {
-    /// 要回的整句。
-    sentence: String,
-
-    /// 自动请求要不要整句——对应真实配置里 `sentence_trigger = "idle"`（`PredictConfig::policy`）。
-    want: bool,
-
-    /// 还没被取走的结果。
-    pending: Option<String>,
-
-    /// 最近一次请求的序号；回结果得对上，对不上 Engine 当过期丢掉。
-    sequence: u64,
-}
-
-impl Predictor for SentencePredictor {
-    fn policy(&self) -> PredictionPolicy {
-        PredictionPolicy {
-            before: 64,
-            after: 32,
-            slots: 0,
-            max_items: 0,
-            sentence: self.want,
-        }
-    }
-
-    fn submit(&mut self, request: PredictionRequest) {
-        self.sequence = request.sequence;
-        // 真实实现按 `want_sentence` 决定要不要问整句（false 时 prompt 要 null），这里照做。
-        self.pending = request.want_sentence.then(|| self.sentence.clone());
-    }
-
-    fn poll(&mut self) -> Option<Prediction> {
-        let sentence = self.pending.take()?;
-        Some(Prediction {
-            sequence: self.sequence,
-            words: Vec::new(),
-            sentence: Some(sentence),
-        })
-    }
-}
-
-/// 接了会回整句的假联想的 Router；`on_tab` 对应 `[predict] sentence_trigger = "tab"`
-///（真实环境里这一项同时决定 Router 的 Tab 行为与策略里的 `sentence`，这里也一并设上）。
-fn router_with_sentence(sentence: &str, on_tab: bool) -> Router {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    let mut engine = assembly::assemble(&AssemblySpec::new(root.join("assets/sample/dict.tsv")))
-        .expect("assemble engine from sample data");
-    engine.set_predictor(Box::new(SentencePredictor {
-        sentence: sentence.to_owned(),
-        want: !on_tab,
-        pending: None,
-        sequence: 0,
-    }));
-    let config = RouterConfig {
-        sentence_on_tab: on_tab,
-        ..RouterConfig::default()
-    };
-    let mut router = Router::new(engine, config);
-    router.handle(ClientMessage::OpenSession {
-        session: SESSION,
-        app: None,
-        protocol: PROTOCOL_VERSION,
-    });
-    router
-}
-
-/// 发一次轮询，取出回给 DLL 的帧。
-fn poll_frame(router: &mut Router) -> Frame {
-    match router.handle(ClientMessage::Poll { session: SESSION }) {
-        Some(ServerMessage::Update { frame, .. }) => frame,
-        other => panic!("expected update, got {other:?}"),
-    }
-}
-
-/// 鼠标点顶部的整句补全：接受它上屏（与 Tab 同一条路），文本同样由轮询带回。
-#[test]
-fn picking_the_sentence_prediction_commits_it() {
-    let mut router = router_with_sentence("你好世界", false);
-    type_letters(&mut router, "nihao");
-    // 平时是 DLL 的 80 ms 轮询把云结果拉进帧，这里手动拉一次。
-    let frame = poll_frame(&mut router);
-    assert_eq!(
-        frame.sentence.as_deref(),
-        Some("你好世界"),
-        "整句补全该进帧"
-    );
-
-    router.handle_candidate_event(CandidateEvent::PickSentence);
-
-    match router.handle(ClientMessage::Poll { session: SESSION }) {
-        Some(ServerMessage::Update { commit, frame, .. }) => {
-            assert_eq!(commit.as_deref(), Some("你好世界"), "点选的整句由轮询带回");
-            assert!(frame.is_empty(), "整段拼音吃完，组句结束");
-        }
-        other => panic!("expected update, got {other:?}"),
-    }
-}
-
-/// 「按 Tab 才联想整句」（`[predict] sentence_trigger = "tab"`）：自动那一拍只问词；
-/// 按一下 Tab 请一次整句（键吃掉、不上屏），结果到了再按一次 Tab 才采用。
-#[test]
-fn sentence_on_tab_asks_only_when_tab_is_pressed() {
-    let mut router = router_with_sentence("你好世界", true);
-    type_letters(&mut router, "nihao");
-    let frame = poll_frame(&mut router);
-    assert!(
-        frame.sentence.is_none(),
-        "手动模式下不自动要整句，云端词照旧"
-    );
-
-    let tab = KeyEvent::new(0x09, None, KeyModifiers::default());
-    let (outcome, commit, _) = press(&mut router, tab);
-    assert_eq!(outcome, KeyOutcome::Consumed, "Tab 被吃掉，不透传给应用");
-    assert_eq!(commit, None, "只是请了一次，还没上屏");
-
-    // 假联想是同步就绪的（真实云端要等一拍），所以这里不追究帧里有没有。
-    let frame = poll_frame(&mut router);
-    assert_eq!(
-        frame.sentence.as_deref(),
-        Some("你好世界"),
-        "Tab 请来的整句该进帧"
-    );
-
-    let (_, commit, after) = press(&mut router, tab);
-    assert_eq!(commit.as_deref(), Some("你好世界"), "再按一次 Tab 采用");
-    assert!(after.is_empty(), "整段拼音吃完，组句结束");
-}
-
-/// 没配手动模式时，Tab 在没整句可接受的情况下仍交还应用（缩进 / 跳焦点）。
-#[test]
-fn tab_without_sentence_still_goes_to_the_app() {
-    // 假联想从不回结果，等于「整句还没到」。
-    let (mut router, _) = router_with_predictor();
-    type_letters(&mut router, "nihao");
-    let (outcome, commit, _) = press(
-        &mut router,
-        KeyEvent::new(0x09, None, KeyModifiers::default()),
-    );
-    assert_eq!(outcome, KeyOutcome::Passthrough);
-    assert_eq!(commit, None);
-}
-
-/// 请求发出去了、结果还没到：帧里带着「联想中」的标记，候选窗据此在整句那块显示等待提示。
-#[test]
-fn the_sentence_request_shows_a_pending_hint_until_the_result_arrives() {
-    // 假联想从不回结果，等于「一直没到」。
-    let (mut router, _) = router_with_predictor();
-    type_letters(&mut router, "nihao");
-    let frame = poll_frame(&mut router);
-    assert!(frame.sentence_pending, "请求发出去了，该有等待提示");
-    assert!(frame.sentence.is_none(), "结果还没到，没有整句可画");
-}
-
-/// 结果到了（哪怕模型没给整句）就把提示收掉，不留个一直转的记号。
-#[test]
-fn the_pending_hint_clears_when_the_result_arrives() {
-    let mut router = router_with_sentence("你好世界", false);
-    type_letters(&mut router, "nihao");
-    let frame = poll_frame(&mut router);
-    assert!(!frame.sentence_pending, "结果到了就该收掉提示");
-    assert_eq!(frame.sentence.as_deref(), Some("你好世界"));
-}
-
-/// 组句结束（Esc 清空）也把提示收掉，别留着上一段的。
-#[test]
-fn the_pending_hint_goes_away_with_the_composition() {
-    let (mut router, _) = router_with_predictor();
-    type_letters(&mut router, "nihao");
-    press(
-        &mut router,
-        KeyEvent::new(0x1B, None, KeyModifiers::default()),
-    ); // Esc
-    let frame = poll_frame(&mut router);
-    assert!(!frame.sentence_pending);
-}
-
-/// 关掉云联想后，手里那段已经拿到的整句要作废：不然再按 Tab 会把一段旧句子打出去。
-#[test]
-fn turning_off_cloud_drops_the_sentence_already_received() {
-    let mut router = router_with_sentence("你好世界", false);
-    // 状态条上的「☁」是翻转 `[predict] enabled`，先让它开着才有关掉这一下。
-    router.configure_predict(PredictConfig {
-        enabled: true,
-        ..PredictConfig::default()
-    });
-    type_letters(&mut router, "nihao");
-    assert_eq!(
-        poll_frame(&mut router).sentence.as_deref(),
-        Some("你好世界"),
-        "开着的时候先拿到一段整句"
-    );
-
-    router.handle_status_event(StatusEvent::ToggleCloud);
-
-    let frame = poll_frame(&mut router);
-    assert!(frame.sentence.is_none(), "关掉云联想，手里这段该作废");
-    let (_, commit, _) = press(
-        &mut router,
-        KeyEvent::new(0x09, None, KeyModifiers::default()),
-    );
-    assert_eq!(commit, None, "不该上屏那段旧整句");
-}
-
-/// 手动模式下云联想没开：按 Tab 说明为什么，而不是什么都不发生（也别让应用顺手来个缩进）。
-#[test]
-fn tab_without_cloud_says_so_instead_of_doing_nothing() {
-    let mut router = router_with_sentence("你好世界", true);
-    // 没接联想的 Engine：`prediction_enabled()` 为假（真实环境里就是 `[predict] enabled = false`）。
-    router.engine_mut().set_predictor(Box::new(NoPredictor));
-    type_letters(&mut router, "nihao");
-
-    let (outcome, commit, frame) = press(
-        &mut router,
-        KeyEvent::new(0x09, None, KeyModifiers::default()),
-    );
-    assert_eq!(outcome, KeyOutcome::Consumed, "吃掉，别透传成缩进");
-    assert_eq!(commit, None);
-    assert!(
-        frame
-            .notice
-            .as_deref()
-            .is_some_and(|notice| notice.contains("云联想")),
-        "该说清为什么没联想，实际 notice={:?}",
-        frame.notice
-    );
-}
-
-/// 整句补全这个开关关着时，手动模式按 Tab 也说一句（云联想开着也不问）。
-#[test]
-fn tab_with_sentence_feature_off_says_it_is_off() {
-    let mut router = router_in(
-        RouterConfig {
-            sentence_on_tab: true,
-            sentence_enabled: false,
-            ..RouterConfig::default()
-        },
-        None,
-    );
-    router
-        .engine_mut()
-        .set_predictor(Box::new(SentencePredictor {
-            sentence: "你好世界".to_owned(),
-            want: false,
-            pending: None,
-            sequence: 0,
-        }));
-    type_letters(&mut router, "nihao");
-
-    let (outcome, commit, frame) = press(
-        &mut router,
-        KeyEvent::new(0x09, None, KeyModifiers::default()),
-    );
-    assert_eq!(outcome, KeyOutcome::Consumed);
-    assert_eq!(commit, None);
-    assert!(
-        frame
-            .notice
-            .as_deref()
-            .is_some_and(|notice| notice.contains("整句补全")),
-        "该说清整句补全是关的，实际 notice={:?}",
-        frame.notice
     );
 }
 
@@ -645,24 +295,6 @@ fn backspace_shrinks_preedit() {
 
     assert_eq!(outcome, KeyOutcome::Consumed);
     assert_eq!(preedit(&after), "ni'ha");
-}
-
-/// 数字键同理：没有全角映射，但也不放行——放行要等宿主把键交给自己处理，部分宿主（微信）里
-/// 这个键到不了。由我们插入。
-#[test]
-fn digits_are_inserted_by_us_instead_of_passed_through() {
-    let mut router = router();
-    let nine = KeyEvent::new(0x39, Some('9'), Default::default());
-    assert_eq!(
-        press(&mut router, nine),
-        (KeyOutcome::Consumed, Some("9".to_owned()), Frame::default())
-    );
-    // 组句中的数字仍是选候选，不是插字符
-    type_letters(&mut router, "ni");
-    let one = KeyEvent::new(0x31, Some('1'), Default::default());
-    let (outcome, commit, _) = press(&mut router, one);
-    assert_eq!(outcome, KeyOutcome::Consumed);
-    assert_eq!(commit.as_deref(), Some("你"), "「ni」第 1 个候选是「你」");
 }
 
 #[test]
@@ -763,6 +395,36 @@ fn page_keys_follow_config() {
         preedit(&frame).contains(']'),
         "`]` 应进直输段：{}",
         preedit(&frame)
+    );
+}
+
+#[test]
+fn minus_equals_page_keys_preserve_expression_input() {
+    let mut router = router_with(RouterConfig {
+        page_size: 1,
+        page_keys: ('-', '='),
+        ..RouterConfig::default()
+    });
+    let (_, _, frame) = type_letters(&mut router, "ni");
+    assert!(frame.page_count > 1);
+    let (outcome, commit, frame) = press(&mut router, punct('='));
+    assert_eq!((outcome, commit), (KeyOutcome::Consumed, None));
+    assert_eq!(frame.page, 1);
+    assert_eq!(preedit(&frame), "ni");
+    let (_, _, frame) = press(&mut router, punct('-'));
+    assert_eq!(frame.page, 0);
+    assert_eq!(preedit(&frame), "ni");
+    press(&mut router, KeyEvent::new(0x1B, None, Default::default()));
+
+    type_letters(&mut router, "v");
+    for c in "2-1=".chars() {
+        let (outcome, commit, _) = press(&mut router, punct(c));
+        assert_eq!((outcome, commit), (KeyOutcome::Consumed, None));
+    }
+    let (outcome, commit, _) = press(&mut router, punct(' '));
+    assert_eq!(
+        (outcome, commit),
+        (KeyOutcome::Consumed, Some("2-1=1".to_owned()))
     );
 }
 
@@ -912,20 +574,23 @@ fn switching_to_chinese_mid_word_flushes_english_letters() {
 }
 
 #[test]
-fn shift_uppercase_while_composing_goes_into_the_buffer() {
+fn shift_uppercase_while_composing_commits_raw_first() {
     let mut router = router();
     type_letters(&mut router, "ni");
-    // 中文模式按住 Shift 打大写字母：进缓冲区（不再直接交给应用），拼音行照敲的样子显示。
+    // 中文模式按住 Shift 打大写字母：拼音原样上屏，字母跟在后面一起插。
     let shifted = KeyModifiers {
         shift: true,
         ..KeyModifiers::default()
     };
     let (outcome, commit, frame) = press(&mut router, letter_with('A', shifted));
-    assert_eq!((outcome, commit.as_deref()), (KeyOutcome::Consumed, None));
-    assert_eq!(preedit(&frame), "niA");
-    // 回车原样上屏，大写还原。
-    let (_, commit, _) = press(&mut router, function_key(0x0D));
-    assert_eq!(commit.as_deref(), Some("niA"));
+    assert_eq!(
+        (outcome, commit.as_deref()),
+        (KeyOutcome::Consumed, Some("niA"))
+    );
+    assert!(frame.is_empty());
+    // 没在组句时大写字母交给应用。
+    let (outcome, commit, _) = press(&mut router, letter_with('A', shifted));
+    assert_eq!((outcome, commit), (KeyOutcome::Passthrough, None));
 }
 
 #[test]
@@ -1042,47 +707,12 @@ impl StatusSink for RecordingStatus {
             (false, Some(scheme)) => format!("中 · {scheme}"),
             (false, None) => "中".to_owned(),
         };
-        // 云联想开着时跟一个「☁」，方便断言这一格的状态（缺省关着，不影响既有用例）
-        let label = if view.cloud {
-            format!("{label} ☁")
-        } else {
-            label
-        };
         self.0.lock().unwrap().push(Some(label));
     }
 
     fn hide_status(&self) {
         self.0.lock().unwrap().push(None);
     }
-}
-
-/// 状态条上的「☁」：隐私开关，翻转 `[predict] enabled` 并立刻换掉 Predictor，不用等热加载。
-#[test]
-fn status_bar_cloud_click_toggles_the_online_prediction() {
-    let mut router = router_with(RouterConfig {
-        status_enabled: true,
-        ..RouterConfig::default()
-    });
-    let recorder = RecordingStatus::default();
-    router.set_status_sink(Box::new(recorder.clone()));
-    router.configure_predict(qingjian_predict::PredictConfig {
-        enabled: true,
-        ..qingjian_predict::PredictConfig::default()
-    });
-    router.handle(ClientMessage::ModeChanged {
-        session: SESSION,
-        english: false,
-    });
-    assert!(router.cloud_enabled());
-    assert_eq!(recorder.calls().last(), Some(&Some("中 ☁".to_owned())));
-
-    router.handle_status_event(StatusEvent::ToggleCloud);
-    assert!(!router.cloud_enabled(), "点一下该关掉");
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
-
-    router.handle_status_event(StatusEvent::ToggleCloud);
-    assert!(router.cloud_enabled(), "再点一下该打开");
-    assert_eq!(recorder.calls().last(), Some(&Some("中 ☁".to_owned())));
 }
 
 #[test]
@@ -1109,34 +739,6 @@ fn status_bar_mode_click_is_handed_to_dll_via_sync_mode() {
             english: Some(true),
         })
     );
-    assert_eq!(
-        router.handle(ClientMessage::SyncMode { session: SESSION }),
-        Some(ServerMessage::ModeSync {
-            session: SESSION,
-            english: None,
-        })
-    );
-}
-
-#[test]
-fn status_bar_mode_click_is_ignored_when_builtin_english_is_off() {
-    let config = RouterConfig {
-        status_enabled: true,
-        english_mode: false,
-        ..RouterConfig::default()
-    };
-    let mut router = router_with(config);
-    let recorder = RecordingStatus::default();
-    router.set_status_sink(Box::new(recorder.clone()));
-    router.handle(ClientMessage::ModeChanged {
-        session: SESSION,
-        english: false,
-    });
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
-
-    // 关掉内置英文模式：点「中」不翻成「英」，也不给 DLL 递目标模式（DLL 那边同样会拦）
-    router.handle_status_event(StatusEvent::ToggleMode);
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
     assert_eq!(
         router.handle(ClientMessage::SyncMode { session: SESSION }),
         Some(ServerMessage::ModeSync {
@@ -1174,34 +776,6 @@ fn chinese_punctuation_is_full_width_only_when_not_composing() {
     router.handle(ClientMessage::Commit { session: SESSION });
     router.handle_status_event(StatusEvent::TogglePunctuation);
     assert_eq!(press(&mut router, comma).0, KeyOutcome::Passthrough);
-}
-
-#[test]
-fn hyphen_and_equals_are_inserted_by_us_instead_of_passed_through() {
-    let mut router = router();
-    // `-` `=` 没有全角映射，但由我们插入：放行那条路在部分宿主里到不了应用（中文模式按 - 没反应）
-    let hyphen = KeyEvent::new(0xBD, Some('-'), Default::default());
-    assert_eq!(
-        press(&mut router, hyphen),
-        (KeyOutcome::Consumed, Some("-".to_owned()), Frame::default())
-    );
-    let equals = KeyEvent::new(0xBB, Some('='), Default::default());
-    assert_eq!(
-        press(&mut router, equals),
-        (KeyOutcome::Consumed, Some("=".to_owned()), Frame::default())
-    );
-    // 其他没有全角映射的键（`@`）仍原样交给应用
-    let at = KeyEvent::new(0x32, Some('@'), SHIFT);
-    assert_eq!(press(&mut router, at).0, KeyOutcome::Passthrough);
-    // 组句中的 `-` 仍进英文直输段，不插字符
-    type_letters(&mut router, "ni");
-    let (outcome, commit, frame) = press(&mut router, hyphen);
-    assert_eq!((outcome, commit), (KeyOutcome::Consumed, None));
-    assert!(
-        preedit(&frame).contains('-'),
-        "应进直输段: {:?}",
-        preedit(&frame)
-    );
 }
 
 #[test]
@@ -1606,7 +1180,6 @@ fn surrounding_text_arriving_after_the_first_key_still_rescoring() {
         router.handle(ClientMessage::Surrounding {
             session: SESSION,
             text: "今天".to_owned(),
-            after: "天气不错".to_owned(),
         }),
         None
     );
@@ -1618,150 +1191,9 @@ fn surrounding_text_arriving_after_the_first_key_still_rescoring() {
         router.handle(ClientMessage::Surrounding {
             session: SessionId(9),
             text: "无关".to_owned(),
-            after: String::new(),
         }),
         None
     );
-}
-
-/// 假联想：把提交的请求记下来，不回结果（只为断言发了什么）。
-/// `Predictor: Send`，所以记账用 `Arc<Mutex<_>>`。
-struct RecordingPredictor {
-    submitted: Arc<Mutex<Vec<PredictionRequest>>>,
-}
-
-impl Predictor for RecordingPredictor {
-    fn policy(&self) -> PredictionPolicy {
-        PredictionPolicy {
-            before: 64,
-            after: 32,
-            slots: 2,
-            max_items: 4,
-            sentence: true,
-        }
-    }
-
-    fn submit(&mut self, request: PredictionRequest) {
-        self.submitted.lock().unwrap().push(request);
-    }
-
-    fn poll(&mut self) -> Option<qingjian_core::Prediction> {
-        None
-    }
-}
-
-/// 接了假联想的 Router，顺带把每次提交的请求交出来。
-fn router_with_predictor() -> (Router, Arc<Mutex<Vec<PredictionRequest>>>) {
-    let submitted = Arc::new(Mutex::new(Vec::new()));
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    let mut engine = assembly::assemble(&AssemblySpec::new(root.join("assets/sample/dict.tsv")))
-        .expect("assemble engine from sample data");
-    engine.set_predictor(Box::new(RecordingPredictor {
-        submitted: submitted.clone(),
-    }));
-    let mut router = Router::new(engine, RouterConfig::default());
-    router.handle(ClientMessage::OpenSession {
-        session: SESSION,
-        app: None,
-        protocol: PROTOCOL_VERSION,
-    });
-    (router, submitted)
-}
-
-/// DLL 在起组句的编辑会话里读到光标前后文、按键之后送来：第二键起的联想请求就该带上它。
-#[test]
-fn cloud_prediction_receives_the_surrounding_text() {
-    let (mut router, submitted) = router_with_predictor();
-    press(&mut router, letter('n'));
-    assert!(
-        submitted.lock().unwrap().is_empty(),
-        "字母少于 2 不该发联想"
-    );
-    assert_eq!(
-        router.handle(ClientMessage::Surrounding {
-            session: SESSION,
-            text: "今天".to_owned(),
-            after: "天气不错".to_owned(),
-        }),
-        None
-    );
-    press(&mut router, letter('i'));
-    let last = submitted
-        .lock()
-        .unwrap()
-        .last()
-        .expect("组句中该发联想请求")
-        .clone();
-    assert_eq!(last.before, "今天");
-    assert_eq!(last.after, "天气不错");
-    assert!(last.want_sentence, "组句联想要整句补全");
-}
-
-/// DLL 没送前后文（应用读不到 / 还没到）：照发请求，上下文为空，别拿本地历史冒充。
-#[test]
-fn cloud_prediction_without_surrounding_sends_empty_context() {
-    let (mut router, submitted) = router_with_predictor();
-    press(&mut router, letter('n'));
-    press(&mut router, letter('i'));
-    let last = submitted
-        .lock()
-        .unwrap()
-        .last()
-        .expect("组句中该发联想请求")
-        .clone();
-    assert_eq!(last.before, "");
-    assert_eq!(last.after, "");
-}
-
-/// 私密输入框：DLL 那侧连前后文都不读，Engine 也不构造请求。
-#[test]
-fn cloud_prediction_stops_at_private_input() {
-    let (mut router, submitted) = router_with_predictor();
-    press(&mut router, letter('n'));
-    assert_eq!(
-        router.handle(ClientMessage::Privacy {
-            session: SESSION,
-            private: true,
-        }),
-        None
-    );
-    press(&mut router, letter('i'));
-    assert!(
-        submitted.lock().unwrap().is_empty(),
-        "私密输入中不该发任何联想请求"
-    );
-}
-
-/// 组句结束后前后文作废：下一段组句在 DLL 送来新的之前，请求里不带旧上下文。
-#[test]
-fn cloud_prediction_forgets_the_surrounding_after_the_composition_ends() {
-    let (mut router, submitted) = router_with_predictor();
-    press(&mut router, letter('n'));
-    router.handle(ClientMessage::Surrounding {
-        session: SESSION,
-        text: "今天".to_owned(),
-        after: "天气不错".to_owned(),
-    });
-    press(&mut router, letter('i'));
-    assert_eq!(submitted.lock().unwrap().last().unwrap().before, "今天");
-    // 空格上屏结束组句
-    let (_, commit, _) = press(
-        &mut router,
-        KeyEvent::new(0x20, Some(' '), Default::default()),
-    );
-    assert!(commit.is_some());
-    submitted.lock().unwrap().clear();
-    // 新一段组句：DLL 还没送来新前后文，请求里不该带着上一段的
-    press(&mut router, letter('n'));
-    press(&mut router, letter('i'));
-    let last = submitted
-        .lock()
-        .unwrap()
-        .last()
-        .expect("组句中该发联想请求")
-        .clone();
-    assert_eq!(last.before, "");
-    assert_eq!(last.after, "");
 }
 
 /// DLL 报来「私密输入框」：Engine 进私密（不学不记不发云端），焦点换到别的会话按那个会话的状态重设，切回来再进。

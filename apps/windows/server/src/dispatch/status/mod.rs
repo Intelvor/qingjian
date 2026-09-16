@@ -34,11 +34,6 @@ impl Router {
     pub fn handle_status_event(&mut self, event: StatusEvent) {
         match event {
             StatusEvent::ToggleMode => {
-                // 关掉内置英文模式后这一格不切模式：DLL 那边也会拦（配置改了没切走再切回时两边都挡住）
-                if !self.config.english_mode {
-                    tracing::debug!("内置英文模式已关闭，状态条不切模式");
-                    return;
-                }
                 let Some(english) = self.status_mode else {
                     return;
                 };
@@ -60,21 +55,6 @@ impl Router {
                 };
                 tracing::debug!(english, full_width, "状态条：切换全角标点");
                 self.persist("general", key, full_width);
-            }
-            StatusEvent::ToggleCloud => {
-                // 隐私开关：翻转 [predict] enabled，写回配置文件，并立刻换掉 Predictor——
-                // 关着时不再向服务商发任何请求（云联想与释义兜底一起关），不用等热加载。
-                let enabled = !self.predict.enabled;
-                self.predict.enabled = enabled;
-                tracing::info!(enabled, "状态条：切换在线联想");
-                self.persist("predict", "enabled", enabled);
-                if !enabled {
-                    // 在飞的请求作废，回来的结果也不认
-                    self.cancel_prediction();
-                    // 已经拿到手的那段整句也作废：关掉之后按 Tab 不该再冒出旧句子。
-                    self.drop_sentence();
-                }
-                super::reload::attach_cloud(&mut self.engine, &self.predict);
             }
             StatusEvent::Moved(x, y) => {
                 self.config.status_pos = Some((x, y));
@@ -116,7 +96,6 @@ impl Router {
                         .shuangpin
                         .map(|scheme| scheme.label().to_owned()),
                     full_width: self.full_width_for(english),
-                    cloud: self.predict.enabled,
                     theme: self.config.theme,
                     anchor: self.config.status_pos,
                 });

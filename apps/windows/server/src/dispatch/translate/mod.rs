@@ -99,7 +99,6 @@ impl Router {
             .unwrap_or_else(|| "翻译中…".to_owned());
         Frame {
             preedit: Vec::new(),
-            preedit_mode: self.config.preedit,
             cursor: 0,
             candidates: CandidateList {
                 items: vec![translate_candidate(text)],
@@ -110,8 +109,6 @@ impl Router {
             layout: self.config.layout,
             theme: self.config.theme,
             sentence: None,
-            // 翻译自己用「翻译中…」那条候选表示进度，不用整句那个提示。
-            sentence_pending: false,
             notice: None,
         }
     }

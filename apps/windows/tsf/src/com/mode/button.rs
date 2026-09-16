@@ -18,8 +18,6 @@ use windows::Win32::UI::TextServices::{
 use windows::Win32::UI::WindowsAndMessaging::{CreateIconIndirect, HICON, ICONINFO};
 use windows::core::{BOOL, BSTR, GUID, IUnknown, Interface, Ref, Result, implement, w};
 
-use qingjian_platform::SwitchKey;
-
 use super::ModeState;
 use crate::com::CLSID_QINGJIAN;
 
@@ -57,17 +55,7 @@ impl ITfLangBarItem_Impl for ModeButton_Impl {
     }
 
     fn GetTooltipString(&self) -> Result<BSTR> {
-        let text = if !self.state.enabled() {
-            "中 / 英（内置英文模式已关闭）"
-        } else {
-            match self.state.switch_key() {
-                SwitchKey::Shift => "中 / 英（单击 Shift 切换）",
-                SwitchKey::Control => "中 / 英（单击 Ctrl 切换）",
-                SwitchKey::CtrlSpace => "中 / 英（Ctrl + Space 切换）",
-                SwitchKey::None => "中 / 英（未设切换键，点这里切换）",
-            }
-        };
-        Ok(BSTR::from(text))
+        Ok(BSTR::from("中 / 英（单击 Shift 切换）"))
     }
 }
 

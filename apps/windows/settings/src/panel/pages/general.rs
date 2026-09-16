@@ -1,14 +1,18 @@
 //! 「通用」页：学习语言、每页候选数、双拼、英文模式候选。
 
-use qingjian_platform::{MAX_PAGE_SIZE, SwitchKey};
+use qingjian_platform::MAX_PAGE_SIZE;
 use windows_reactor::*;
 
 use crate::panel::controls::{field, index_of, page};
 use crate::panel::{Message, Settings};
 
 /// 学习语言：界面名 + 配置写法。
-pub(crate) const LANGUAGES: [(&str, &str); 3] =
-    [("英语", "en"), ("日语", "ja"), ("西班牙语", "es")];
+pub(crate) const LANGUAGES: [(&str, &str); 4] = [
+    ("英语", "en"),
+    ("日语", "ja"),
+    ("西班牙语", "es"),
+    ("不显示译文", "off"),
+];
 
 /// 双拼方案：界面名 + 配置写法（空串为全拼）。
 pub(crate) const SHUANGPIN: [(&str, &str); 5] = [
@@ -19,16 +23,7 @@ pub(crate) const SHUANGPIN: [(&str, &str); 5] = [
     ("搜狗双拼", "sogou"),
 ];
 
-/// 中英切换键：界面名 + 配置写法，与 [`SwitchKey::ALL`] 同序（有测试钉住）。
-pub(crate) const SWITCH_KEYS: [(&str, &str); 4] = [
-    (SwitchKey::Shift.label(), SwitchKey::Shift.key()),
-    (SwitchKey::Control.label(), SwitchKey::Control.key()),
-    (SwitchKey::CtrlSpace.label(), SwitchKey::CtrlSpace.key()),
-    (SwitchKey::None.label(), SwitchKey::None.key()),
-];
-
-/// 多选一的字符串配置：界面名 + 配置写法一组，选中后回报下标（其他页也用它）。
-pub(crate) fn string_combo(
+fn string_combo(
     options: &'static [(&str, &str)],
     current: &str,
     callback: Callback<Option<usize>>,
@@ -45,7 +40,7 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
     let rows = [
         field(
             "学习语言",
-            "候选词右侧显示哪种语言的译词，只列出装了释义表的语言。",
+            "候选词右侧显示哪种语言的译词，只列出装了释义表的语言；「不显示译文」同时关掉生词标记与释义兜底。",
             string_combo(
                 &LANGUAGES,
                 &g.learning_language,
@@ -107,35 +102,12 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
                 .on_toggled(context.callback(Message::EnglishOffInApps)),
         ),
         field(
-            "中英切换键",
-            "单击选中的键（或按 Ctrl + Space）在中英之间切换，改完立刻生效。打字时容易误触 Shift 的话改成「单击 Ctrl」；「不切换」时只剩任务栏 / 悬浮状态条上的「中」「英」按钮。注意 Ctrl + Space 常被编辑器用作代码补全等快捷键，选了它会把这些应用里的该组合键抢过来。",
-            string_combo(
-                &SWITCH_KEYS,
-                settings.config.shortcut.switch_mode.key(),
-                context.callback(Message::SwitchMode),
-            ),
-        ),
-        field(
-            "启用内置英文模式",
-            "关掉后青简固定中文模式：切换键与任务栏、悬浮状态条上的「中」「英」按钮都不再切到英文，需要英文时用系统快捷键（Win + Space）切到别的输入法。",
+            "输入拼音时中文候选排在英文词前面",
+            "开着时整段输入是英文词时（hello、key）英文词排第二，空格上屏的仍是中文；关着（缺省）拼音不成立的输入英文词排第一。",
             ToggleSwitch::new()
-                .is_on(g.english_mode)
-                .on_toggled(context.callback(Message::EnglishMode)),
+                .is_on(g.chinese_first)
+                .on_toggled(context.callback(Message::ChineseFirst)),
         ),
     ];
     page("通用", StackPanel::new().spacing(16.0).children(rows))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 下拉的项与配置枚举一一对应，顺序也一样（下标就是 `SwitchKey::ALL` 的下标）。
-    #[test]
-    fn switch_key_options_follow_the_config_enum() {
-        assert_eq!(SWITCH_KEYS.len(), SwitchKey::ALL.len());
-        for (index, key) in SwitchKey::ALL.into_iter().enumerate() {
-            assert_eq!(SWITCH_KEYS[index], (key.label(), key.key()));
-        }
-    }
 }

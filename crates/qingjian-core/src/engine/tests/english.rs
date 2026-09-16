@@ -4,11 +4,7 @@ use super::*;
 
 #[test]
 fn english_word_ranks_first_when_input_is_unlikely_pinyin() {
-    // 词频是 Zipf×1000，与产品 english.tsv 同一尺度
-    let words = WordList::parse(
-        "hello\thello\t4720\nchina\tchina\t5100\nGitHub\tgithub\t3180\nkey\tkey\t5120\n",
-    )
-    .unwrap();
+    let words = WordList::parse("hello\nchina\nGitHub\tgithub\n").unwrap();
     let mut engine = engine().with_english(words);
 
     engine.set_input("hello"); // he l… l… o：中间有声母缩写
@@ -68,7 +64,7 @@ fn usage_meter_counts_hanzi_words_and_english_words_per_commit() {
 fn english_word_yields_to_a_chinese_word_the_user_keeps_choosing() {
     let dictionary = Dictionary::parse("可以\tke yi\t9000\n客运\tke yun\t100\n").unwrap();
     let mut engine = Engine::new(dictionary)
-        .with_english(WordList::parse("key\tkey\t5120\n").unwrap())
+        .with_english(WordList::parse("key\n").unwrap())
         .with_learner(Box::new(CountingLearner(HashMap::new())));
     let first_two = |engine: &Engine| {
         let all = texts_of(engine);
@@ -86,7 +82,12 @@ fn english_word_yields_to_a_chinese_word_the_user_keeps_choosing() {
             .unwrap();
         engine.commit(&candidate);
     };
-    // ke'y 末尾落单一个字母，拼音不像话：英文词在前
+    // 开了中文优先：ke'y 再不像话，中文词也在前、英文第二
+    engine.set_chinese_first(true);
+    engine.set_input("key");
+    assert_eq!(first_two(&engine), ("可以".into(), "key".into()));
+    // 缺省关：末尾落单一个字母、拼音不像话，英文词在前
+    engine.set_chinese_first(false);
     engine.set_input("key");
     assert_eq!(first_two(&engine), ("key".into(), "可以".into()));
     // 这段字母下选过一次 可以：中文在前，英文退到第二
@@ -98,35 +99,6 @@ fn english_word_yields_to_a_chinese_word_the_user_keeps_choosing() {
     pick(&mut engine, "key");
     engine.set_input("key");
     assert_eq!(first_two(&engine), ("key".into(), "可以".into()));
-}
-
-#[test]
-fn uncommon_english_yields_to_chinese() {
-    // MP Zipf 4.29 < 4.5：门票在前；bim 的补全 Zipf 都 < 3.5：不出、避免在前
-    let dictionary =
-        Dictionary::parse("门票\tmen piao\t5000\n买票\tmai piao\t3000\n避免\tbi mian\t8000\n")
-            .unwrap();
-    let words = WordList::parse(
-        "MP\tmp\t4290\nbimbo\tbimbo\t2870\nbimonthly\tbimonthly\t2600\nhello\thello\t4720\n",
-    )
-    .unwrap();
-    let mut engine = Engine::new(dictionary).with_english(words);
-
-    engine.set_input("mp");
-    let all = texts_of(&engine);
-    assert_eq!(all[0], "门票");
-    assert!(all.iter().any(|t| t == "MP"));
-    assert!(all.iter().position(|t| t == "MP").unwrap() > 0);
-
-    engine.set_input("bim");
-    let all = texts_of(&engine);
-    assert_eq!(all[0], "避免");
-    assert!(!all.iter().any(|t| t == "bimbo"));
-    assert!(!all.iter().any(|t| t == "bimonthly"));
-
-    // 够常用的英文仍排第一
-    engine.set_input("hello");
-    assert_eq!(texts_of(&engine)[0], "hello");
 }
 
 #[test]
@@ -157,9 +129,8 @@ fn hyphen_turns_the_buffer_into_a_raw_english_segment() {
 
 #[test]
 fn english_completions_appear_when_pinyin_is_unlikely() {
-    // Zipf×1000：company 5.6 / compare 4.45 / compass 3.74 都过补全门槛 3.5
     let words = WordList::parse(
-            "company\tcompany\t5600\ncompare\tcompare\t4450\ncompass\tcompass\t3740\ncomma\tcomma\t2900\nxian\txian\t4500\nxiangkai\txiangkai\t10\n",
+            "company\tcompany\t900\ncompare\tcompare\t500\ncompass\tcompass\t300\ncomma\tcomma\t100\nxian\txian\t50\nxiangkai\txiangkai\t10\n",
         )
         .unwrap();
     let mut engine = engine().with_english(words);
@@ -177,7 +148,7 @@ fn english_completions_appear_when_pinyin_is_unlikely() {
     // 第一个字母就切不动的（i 不是任何音节的开头）也要出补全
     engine.set_input("impo");
     assert!(engine.query().is_err());
-    let words = WordList::parse("important\timportant\t4800\nimport\timport\t4600\n").unwrap();
+    let words = WordList::parse("important\timportant\t900\nimport\timport\t800\n").unwrap();
     let mut fresh = Engine::new(Dictionary::parse(SAMPLE).unwrap()).with_english(words);
     fresh.set_input("impo");
     assert_eq!(texts_of(&fresh), ["important", "import"]);

@@ -7,12 +7,6 @@ use crate::panel::cloud_status::CloudStatus;
 use crate::panel::controls::{field, labeled, note, page};
 use crate::panel::{Message, Settings};
 
-use super::general;
-
-/// 整句补全的触发方式：界面名 + 配置写法。
-pub(crate) const SENTENCE_TRIGGERS: [(&str, &str); 2] =
-    [("停止输入后自动联想", "idle"), ("按 Tab 键时才联想", "tab")];
-
 /// 后台跑一次连通性测试，轮询到有结果或被取消。
 pub(crate) fn run_test(
     config: &PredictConfig,
@@ -76,16 +70,6 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
             ToggleSwitch::new()
                 .is_on(p.sentence)
                 .on_toggled(context.callback(Message::CloudSentence)),
-        ),
-        field(
-            "整句联想时机",
-            "「停止输入后」打一段停一下就问（与云端词同一拍）；「按 Tab 键」只在你按 Tab 时才问一次，省 token——\
-按 Tab 开始算，结果到了再按一次 Tab 采用。云端词不受这里影响。",
-            general::string_combo(
-                &SENTENCE_TRIGGERS,
-                &p.sentence_trigger,
-                context.callback(Message::CloudSentenceTrigger),
-            ),
         ),
         field(
             "接口地址",

@@ -1,6 +1,8 @@
 use qingjian_core::ShuangpinScheme;
 use qingjian_platform::protocol::KeyModifiers;
-use qingjian_platform::{AppsConfig, Config, KeyCombo, LayoutMode, PreeditMode, ThemeMode};
+use qingjian_platform::{AppsConfig, CandidateRenderer, Config, KeyCombo, LayoutMode, ThemeMode};
+
+use super::RenderSettings;
 
 /// Router 要用的配置项，与 macOS 壳的 `Host` 字段对齐。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,31 +13,23 @@ pub struct RouterConfig {
     /// 云端候选在第一页预留的格数（`[predict] slots`）。
     pub cloud_slots: usize,
 
-    /// 整句补全只在按 Tab 键时才联想（`[predict] sentence_trigger = "tab"`）；
-    /// 否则停止输入后自动联想。云端词两种模式下都照常自动。
-    pub sentence_on_tab: bool,
-
-    /// 要不要整句补全（`[predict] sentence`）；关掉后按 Tab 只会说一句「已关闭」。
-    pub sentence_enabled: bool,
-
     /// 候选排布（`[general] layout`）。
     pub layout: LayoutMode,
 
     /// 候选窗口外观（`[general] theme`）。
     pub theme: ThemeMode,
 
-    /// 拼音显示位置（`[general] preedit`）。
-    pub preedit: PreeditMode,
+    /// 候选窗口 / 状态条由青简渲染器还是 GDI 画（`[general] renderer`）。
+    pub renderer: CandidateRenderer,
+
+    /// 候选窗口字体的字族名（`[general] font`），空为系统字体；只对青简渲染器生效。
+    pub font: String,
 
     /// 翻页键对（`[general] page_keys`，上一页 / 下一页）。
     pub page_keys: (char, char),
 
     /// 英文模式给不给英文候选（`[general] english_candidates`）。
     pub english_candidates: bool,
-
-    /// 内置英文模式总开关（`[general] english_mode`）：关掉后状态条上的「中 / 英」不再切模式
-    /// （切换键与语言栏按钮由 DLL 按同一项拦住，见 `com::service::mode`）。
-    pub english_mode: bool,
 
     /// 中文模式下不在组句时的标点转全角（`[general] full_width_punctuation`）；状态条可切。
     pub full_width: bool,
@@ -73,6 +67,14 @@ impl RouterConfig {
     pub fn english_candidates_in(&self, app: Option<&str>) -> bool {
         self.english_candidates && !app.is_some_and(|app| self.apps.english_candidates_off(app))
     }
+
+    /// 交给 UI 线程的画法。
+    pub fn render_settings(&self) -> RenderSettings {
+        RenderSettings {
+            renderer: self.renderer,
+            font: self.font.clone(),
+        }
+    }
 }
 
 impl From<&Config> for RouterConfig {
@@ -80,14 +82,12 @@ impl From<&Config> for RouterConfig {
         Self {
             page_size: config.general.page_size(),
             cloud_slots: config.predict.slots,
-            sentence_on_tab: config.predict.sentence_on_tab(),
-            sentence_enabled: config.predict.sentence,
             layout: config.general.layout,
             theme: config.general.theme,
-            preedit: config.general.preedit,
+            renderer: config.general.renderer,
+            font: config.general.font.trim().to_owned(),
             page_keys: config.general.page_keys(),
             english_candidates: config.general.english_candidates,
-            english_mode: config.general.english_mode,
             full_width: config.general.full_width_punctuation,
             english_full_width: config.general.english_full_width_punctuation,
             zhuyin: config.general.zhuyin,

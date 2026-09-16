@@ -1,4 +1,5 @@
 mod apps;
+mod candidate_renderer;
 mod dictionaries;
 mod general;
 mod key_combo;
@@ -9,7 +10,6 @@ mod modifiers;
 mod preedit_mode;
 mod shortcut;
 mod status_bar;
-mod switch_key;
 mod theme_mode;
 
 use std::path::Path;
@@ -25,8 +25,11 @@ pub use apps::{
     AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF, DEFAULT_ENGLISH_CANDIDATES_OFF_MACOS,
     DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS,
 };
+pub use candidate_renderer::CandidateRenderer;
 pub use dictionaries::{DEFAULT_DOMAINS, DictionariesConfig};
-pub use general::{DEFAULT_PAGE_KEYS, GeneralConfig, MAX_PAGE_SIZE, PAGE_KEY_OPTIONS};
+pub use general::{
+    DEFAULT_PAGE_KEYS, GeneralConfig, LEARNING_LANGUAGE_OFF, MAX_PAGE_SIZE, PAGE_KEY_OPTIONS,
+};
 pub use key_combo::KeyCombo;
 pub use layout_mode::LayoutMode;
 pub use log_level::LogLevel;
@@ -35,7 +38,6 @@ pub use modifiers::Modifiers;
 pub use preedit_mode::PreeditMode;
 pub use shortcut::ShortcutConfig;
 pub use status_bar::StatusBarConfig;
-pub use switch_key::SwitchKey;
 pub use theme_mode::ThemeMode;
 
 /// 用户配置文件（TOML）。所有平台同一份格式，缺省值全部在各分节的 `Default` 里。
@@ -120,10 +122,7 @@ english_candidates_off = [
 #[cfg(not(windows))]
 macro_rules! template_shortcut_keys {
     () => {
-        r#"# 中 / 英模式切换键：单击这个修饰键在中英之间翻转。shift 单击 (缺省, 与微软拼音一致) / control 单击 / none 不切换。
-# macOS 的切换键是 Caps Lock（系统级），本项不生效
-switch_mode = "shift"
-# 数字键配这些修饰键上屏候选的译词：translation 第一个译词，translation_second 第二个（候选右侧有两个译词时）
+        r#"# 数字键配这些修饰键上屏候选的译词：translation 第一个译词，translation_second 第二个（候选右侧有两个译词时）
 # 任意修饰键组合（option / shift / control / command 用 + 连），偏好设置里点按钮录制；别用 control+数字（系统切桌面）和 command+数字（应用切标签页）
 translation = "option"
 translation_second = "shift+option"
@@ -140,15 +139,11 @@ delete_candidate = "shift"
 #[cfg(windows)]
 macro_rules! template_shortcut_keys {
     () => {
-        r#"# 中 / 英模式切换键：单击这个修饰键在中英之间翻转，不用组合。
-# shift 单击（缺省，与微软拼音一致；打字时容易误触 Shift 的话改成 control 单击或 none 不切换）
-# ctrl+space 是组合键；若系统把「输入法/非输入法切换」也绑在它上面会抢先，需先在 Windows 语言设置里关掉
-switch_mode = "shift"
-# 数字键配这些修饰键上屏候选的译词：translation 第一个译词，translation_second 第二个（候选右侧有两个译词时）
+        r#"# 数字键配这些修饰键上屏候选的译词：translation 第一个译词，translation_second 第二个（候选右侧有两个译词时）
 # 任意修饰键组合（alt / shift / ctrl / win 用 + 连）。Alt+数字会被 Windows 当菜单快捷键截走，缺省用 Ctrl；组句时才拦，不打字时照常放行给应用
 translation = "ctrl"
 translation_second = "shift+ctrl"
-# 把应用里选中的文字译成学习语言（要开着云服务）：译文先出现在候选窗口，回车替换选中的文字，Esc 保留原文
+# 把应用里选中的文字译成学习语言（要开着云服务）：Windows 上还没接
 translate_selection = "ctrl+alt+t"
 # 数字键配这些修饰键删掉候选：用户词（云端选过的、自动造的）整个删掉，词库里的词清掉对它的学习记录。组句中要打感叹号先把词上屏
 delete_candidate = "shift"
@@ -162,7 +157,7 @@ pub const TEMPLATE: &str = concat!(
     r#"# 青简输入法配置。保存后自动生效；也可以在菜单栏的输入法菜单里改。
 
 [general]
-# 学习语言（en 英语 / ja 日语 / es 西班牙语）：候选旁显示哪种语言的译文，要有对应的释义表才生效
+# 学习语言（en 英语 / ja 日语 / es 西班牙语 / off 不显示译文）：候选旁显示哪种语言的译文，要有对应的释义表才生效
 learning_language = "en"
 # 每页候选数（1–9）
 page_size = 9
@@ -172,13 +167,16 @@ page_keys = "[]"
 theme = "system"
 # 候选窗口排布：vertical 竖排 / horizontal 横排（横排只给高亮候选显示译文）
 layout = "vertical"
+# 候选窗口由谁绘制：qingjian 青简渲染器（各平台一致，主题走它）/ system 系统原生绘制（渲染器有问题时的退路）
+renderer = "qingjian"
+# 候选窗口字体（字族名，如 "LXGW WenKai"）；空为系统字体。只对青简渲染器生效，没装这个字体时自动回到系统字体
+font = ""
 # 组句中的拼音显示在哪：both 行内和候选窗口 / inline 只在行内 / window 只在候选窗口（应用里不放 marked text）
 preedit = "both"
 # 英文模式（Caps Lock 亮着）是否给英文候选：Tab 或方向键选词，空格、回车、标点仍原样上屏敲的字母；false 就是纯直通
 english_candidates = true
-# 内置英文模式：开着时单击切换键（[shortcut] switch_mode）或 Caps Lock 亮着进英文模式
-# 关掉后青简保持中文模式，切换键与语言栏按钮都不再切过去；要打英文请用系统快捷键（Windows 的 Win+Space / macOS 的输入法菜单）切到别的输入法
-english_mode = true
+# 中文模式下整段输入是英文词时（hello / key）是否让中文候选排第一、英文词第二；缺省 false：拼音不像话的输入英文词排第一
+chinese_first = false
 # 中文模式下（没在组句时）敲的标点转全角：, . ? ! : ; ( ) 等，数字后面的 . 保持半角。Windows 上悬浮状态条的「，。」格可以点着切；macOS 在偏好设置中选择默认中文标点模式
 full_width_punctuation = true
 # 英文模式下的同一件事，中英各记一份，状态条切的是当前模式那份；只有 Windows 用
@@ -191,6 +189,10 @@ log_level = "info"
 # 输入日志：每次上屏记一行到数据目录的 input-log.jsonl（敲的键、看到的候选、选了什么），只写在这台电脑上，不上传；
 # 用来离线评测排序和训练个人模型。false 不记；「高级」页可以清空
 input_log = true
+# 学习输入习惯：按你的选择调整候选顺序、记新词与敲错纠正。false 不再学，已学的仍参与排序；学习数据在数据目录，删掉文件即清空
+learning = true
+# 把系统设置「键盘 → 文本替换」里的条目当自定义短语：输入码（小写字母）敲全后短语出现在该码最靠前的空位；只有 macOS 用
+system_text_replacements = true
 
 # 自定义短语示例：取消下面各行注释后启用；同码同位置不能重复。
 # [[custom_phrases]]
@@ -259,9 +261,6 @@ lookahead = 32
 slots = 2
 # 组句中除了词候选还要不要整句补全（preedit 右侧，Tab 接受）
 sentence = true
-# 整句补全什么时候要：idle 停止输入后自动联想（与云端词同一拍，看上面的 debounce_ms），tab 只在按 Tab 时联想一次
-# 按 Tab 那一路：按一下开始算，结果到了再按一下采用；云端词不受这项影响，两种设置下都照常自动联想
-sentence_trigger = "idle"
 
 [status_bar]
 # 桌面上常驻、可拖动的悬浮状态条（Windows）：「中 / 英」格点一下切换模式（开着双拼时还显示方案名）、「，。」格切全角 / 半角标点、齿轮打开设置。
@@ -508,12 +507,7 @@ mod tests {
         assert_eq!(config.general.log_level, LogLevel::Info);
         assert_eq!(config.shortcut.mode.expression, 'i');
         assert_eq!(config.shortcut.mode.question, 'u');
-        assert_eq!(
-            config.shortcut.translation,
-            ShortcutConfig::default().translation
-        );
-        assert_eq!(config.shortcut.switch_mode, SwitchKey::Shift);
-        assert!(config.general.english_mode);
+        assert_eq!(config.shortcut.translation, Modifiers::OPTION);
     }
 
     #[test]

@@ -6,17 +6,18 @@ use std::path::{Path, PathBuf};
 
 use qingjian_core::{Engine, Language};
 use qingjian_platform::{Config, ConfigError, LogLevel, resources};
+use qingjian_windows_server::assembly::{glossary_file, learning_language};
 use qingjian_windows_server::{
     AssemblySpec, LanguageModelFiles, Router, RouterConfig, ServerError, assembly, dispatch,
 };
 
 /// 用户数据目录 `%APPDATA%\Qingjian`。非 Windows 拿不到。
 fn user_dir() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|dir| PathBuf::from(dir).join("Qingjian"))
+    qingjian_platform::dirs::user_dir()
 }
 
 fn config_path() -> Option<PathBuf> {
-    user_dir().map(|dir| dir.join("config.toml"))
+    qingjian_platform::dirs::config_path()
 }
 
 /// 首次启动把带说明的配置模板写到 `%APPDATA%\Qingjian\config.toml`（与 macOS 一致）；
@@ -50,14 +51,6 @@ fn load_env() {
     }
 }
 
-fn learning_language(config: &Config) -> Language {
-    let code = &config.general.learning_language;
-    code.parse().unwrap_or_else(|_| {
-        tracing::warn!(code, "不认识的学习语言，按英文");
-        Language::English
-    })
-}
-
 /// `<root>/data/generated/<name>`，不存在为 `None`。
 fn generated(root: &Path, name: &str) -> Option<PathBuf> {
     existing(root.join("data/generated").join(name))
@@ -81,13 +74,6 @@ fn sample_dict(root: &Path) -> PathBuf {
     root.join("assets/sample/dict.tsv")
 }
 
-/// 某语言的释义表：打包过的优先，否则随 git 的 TSV。
-fn glossary_file(root: &Path, language: Language) -> Option<PathBuf> {
-    let code = language.code();
-    generated(root, &format!("glossary-{code}.qj"))
-        .or_else(|| asset(root, &format!("glossary/glossary-{code}.tsv")))
-}
-
 /// 正式词库装配失败回落样例词库，连样例都装不起来才报错。
 fn assemble_with_fallback(mut spec: AssemblySpec, root: &Path) -> Result<Engine, ServerError> {
     assembly::assemble(&spec).or_else(|error| {
@@ -97,8 +83,9 @@ fn assemble_with_fallback(mut spec: AssemblySpec, root: &Path) -> Result<Engine,
     })
 }
 
+/// 三个进程共用的日志目录 `%LOCALAPPDATA%\Qingjian\logs`（见 `qingjian_platform::dirs`），这里顺手建出来。
 fn log_dir() -> Option<PathBuf> {
-    let dir = user_dir()?.join("logs");
+    let dir = qingjian_platform::dirs::log_dir()?;
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
 }
@@ -118,7 +105,7 @@ fn init_logging(config: &Config) -> Option<tracing_appender::non_blocking::Worke
         Some(dir) => {
             let appender = tracing_appender::rolling::RollingFileAppender::builder()
                 .rotation(tracing_appender::rolling::Rotation::DAILY)
-                .filename_prefix("qingjian-server")
+                .filename_prefix("server")
                 .filename_suffix("log")
                 .max_log_files(7)
                 .build(&dir)
@@ -156,13 +143,16 @@ fn main() {
     let dict = std::env::var_os("QINGJIAN_DICT")
         .map(PathBuf::from)
         .unwrap_or_else(|| default_dict(&root));
-    let glossary = std::env::var_os("QINGJIAN_GLOSSARY")
-        .map(PathBuf::from)
-        .or_else(|| glossary_file(&root, language))
-        .filter(|path| path.is_file());
+    let glossary_path = language.and_then(|language| {
+        std::env::var_os("QINGJIAN_GLOSSARY")
+            .map(PathBuf::from)
+            .or_else(|| glossary_file(&root, language))
+            .filter(|path| path.is_file())
+    });
+    let glossary = language.zip(glossary_path);
     let bundled_dicts_dir = Some(root.join("data/generated/dicts")).filter(|dir| dir.is_dir());
     let spec = AssemblySpec {
-        glossary: glossary.clone().map(|path| (language, path)),
+        glossary: glossary.clone(),
         english_glossary: glossary_file(&root, Language::Chinese),
         english: generated(&root, "english.tsv"),
         emoji: ["emoji-zh.tsv", "emoji-en.tsv"]
@@ -188,20 +178,20 @@ fn main() {
     engine.set_shuangpin(config.general.shuangpin());
     engine.set_zhuyin_mode(config.general.zhuyin);
     engine.set_mode_keys(config.shortcut.mode);
+    engine.set_chinese_first(config.general.chinese_first);
     engine.log_session(env!("CARGO_PKG_VERSION"), "windows");
     dispatch::attach_cloud(&mut engine, &config.predict);
     let router_config = RouterConfig::from(&config);
     let mut router = Router::new(engine, router_config.clone());
-    router.configure_predict(config.predict.clone());
     let model_path = dispatch::find_model(user_dir().as_deref(), &root);
     router.configure_local_model(model_path.clone(), &config.model);
     if let Some(path) = config_path() {
-        router.watch_config(&config, path, bundled_dicts_dir, user_dir());
+        router.watch_config(&config, path, root.clone(), user_dir());
     }
     tracing::info!(
         dict = %dict.display(),
-        glossary = glossary.as_deref().map(|p| p.display().to_string()).unwrap_or_default(),
-        language = language.code(),
+        glossary = glossary.as_ref().map(|(_, p)| p.display().to_string()).unwrap_or_default(),
+        language = language.map_or("off", |l| l.code()),
         page_size = router_config.page_size,
         page_keys = %format!("{}{}", router_config.page_keys.0, router_config.page_keys.1),
         layout = router_config.layout.key(),
@@ -218,21 +208,15 @@ fn main() {
     serve(router);
 }
 
-/// DLL 日志目录 `%LOCALAPPDATA%\Qingjian` 给 AppContainer 应用（任务栏搜索 / 设置）写权限：
+/// 日志目录 `%LOCALAPPDATA%\Qingjian\logs` 给 AppContainer 应用（任务栏搜索 / 设置）写权限：
 /// 那些进程里的 DLL 默认写不了用户目录，出了问题连日志都没有。失败只记警告。
 #[cfg(windows)]
 fn grant_appcontainer_log_access() {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let Some(dir) =
-        std::env::var_os("LOCALAPPDATA").map(|base| PathBuf::from(base).join("Qingjian"))
-    else {
+    let Some(dir) = log_dir() else {
         return;
     };
-    if let Err(error) = std::fs::create_dir_all(&dir) {
-        tracing::warn!(%error, dir = %dir.display(), "建 DLL 日志目录失败");
-        return;
-    }
     // S-1-15-2-1 = ALL APPLICATION PACKAGES，S-1-15-2-2 = ALL RESTRICTED APPLICATION PACKAGES。
     let status = std::process::Command::new("icacls")
         .arg(&dir)
@@ -242,7 +226,7 @@ fn grant_appcontainer_log_access() {
         .status();
     match status {
         Ok(status) if status.success() => {}
-        Ok(status) => tracing::warn!(%status, "给 AppContainer 授权 DLL 日志目录失败"),
+        Ok(status) => tracing::warn!(%status, "给 AppContainer 授权日志目录失败"),
         Err(error) => tracing::warn!(%error, "跑 icacls 失败"),
     }
 }
@@ -253,17 +237,13 @@ fn serve(mut router: Router) {
     use qingjian_windows_server::ipc::{Work, pipe};
     use qingjian_windows_server::ui::UiHandle;
     grant_appcontainer_log_access();
-    // 工人循环的活：各连接的消息 + 候选窗 / 状态条上的操作（UI 线程投进来）。
+    // 工人循环的活：各连接的消息 + 状态条上的操作（UI 线程投进来）。
     let (work_tx, work_rx) = std::sync::mpsc::channel::<Work>();
     let status_events = work_tx.clone();
     let on_status = Box::new(move |event| {
         let _ = status_events.send(Work::Status(event));
     });
-    let candidate_events = work_tx.clone();
-    let on_candidate = Box::new(move |event| {
-        let _ = candidate_events.send(Work::Candidate(event));
-    });
-    match UiHandle::spawn(on_status, on_candidate) {
+    match UiHandle::spawn(on_status) {
         Ok(ui) => {
             router.set_candidate_sink(Box::new(ui.clone()));
             router.set_status_sink(Box::new(ui));

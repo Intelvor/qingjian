@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use qingjian_platform::protocol::SessionId;
 
-use super::launch;
 use super::{RECONNECT_INTERVAL, TextService_Impl};
 use crate::client::EngineClient;
 use crate::client::pipe::connect_default;
@@ -29,12 +28,6 @@ impl TextService_Impl {
                 log(&format!(
                     "连 Server 失败（qingjian-server 没起？）: {error}"
                 ));
-                // Server 只在登录时由「启动」文件夹拉起，中途挂了以前只能等下次登录；
-                // 这里自己起一次（进程内冷却 + 跨进程互斥体，不会砸出一串 Server）。
-                if launch::launch_server() {
-                    // 不等 RECONNECT_INTERVAL：Server 一百多毫秒就监听管道，下一键就该连上
-                    self.last_connect_failure.set(None);
-                }
             }
         }
     }

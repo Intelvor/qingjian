@@ -4,11 +4,9 @@ mod state;
 
 use qingjian_core::{Candidate, CandidateLayout, CandidateList, CloudWord};
 use qingjian_platform::protocol::{Frame, PreeditKind, PreeditSegment};
-use std::time::Instant;
 
 pub(super) use self::state::Composed;
 use super::Router;
-use super::SENTENCE_PENDING_TIMEOUT;
 
 impl Router {
     /// 缓冲变化后：按 Engine 状态重建 [`Composed`]，发一次云联想请求，归零高亮与整句补全。
@@ -35,15 +33,7 @@ impl Router {
                 let layout =
                     CandidateLayout::new(items, self.config.page_size, self.config.cloud_slots);
                 if self.engine.prediction_enabled() {
-                    // DLL 在组句起始送来的光标前后文：云联想按它挑同音词、续写整句（第一键时还没送到，之后每键都有）。
-                    let sent = self
-                        .engine
-                        .request_prediction(self.surrounding.clone(), layout.local());
-                    // 这一拍要了整句（策略里 `sentence` 为真）且真发出去了：候选窗先显示「联想中」，
-                    // 结果到了再换成整句。云端词那一路不提示（它一直在问，闪起来太吵）。
-                    self.sentence_pending = (sent.is_some()
-                        && self.engine.prediction_policy().sentence)
-                        .then(Instant::now);
+                    self.engine.request_prediction(None, layout.local());
                 }
                 Composed::Candidates {
                     preedit,
@@ -70,8 +60,6 @@ impl Router {
         let Some(prediction) = self.engine.poll_prediction() else {
             return;
         };
-        // 这一拍的结果到了（给没给整句都算到了）：收掉「联想中」。
-        self.sentence_pending = None;
         if self.translation.is_some() {
             match prediction.sentence {
                 Some(text) => {
@@ -153,27 +141,11 @@ impl Router {
         Some(self.engine.commit(&candidate))
     }
 
-    /// 记下「整句请求发出去了」（手动模式按 Tab 那一路）；候选窗据此显示联想中的提示。
-    pub(super) fn note_sentence_pending(&mut self) {
-        self.sentence_pending = Some(Instant::now());
-    }
-
-    /// 云联想关掉 / 换掉：手里这份整句补全作废。它是上一个 Predictor 给的，留着会被 Tab
-    /// 当成新的上屏（用户关掉云联想之后再按 Tab 反而出来一段旧句子）。
-    pub(super) fn drop_sentence(&mut self) {
-        self.sentence = None;
-        self.sentence_pending = None;
-    }
-
     /// 按当前状态生成一帧：翻译评审优先；没在组句给空帧；否则给高亮所在的那一页。
     pub(super) fn current_frame(&self) -> Frame {
         if let Some(translation) = &self.translation {
             return self.translation_frame(translation);
         }
-        // 等超了就当没在等（真正清在 `tick` 里），提示不会挂死。
-        let sentence_pending = self
-            .sentence_pending
-            .is_some_and(|at| at.elapsed() < SENTENCE_PENDING_TIMEOUT);
         match &self.composed {
             None => Frame::default(),
             Some(Composed::Raw { text, cursor }) => Frame {
@@ -181,7 +153,6 @@ impl Router {
                     text: text.clone(),
                     kind: PreeditKind::Typed,
                 }],
-                preedit_mode: self.config.preedit,
                 cursor: *cursor,
                 candidates: CandidateList { items: Vec::new() },
                 highlight: usize::MAX,
@@ -190,7 +161,6 @@ impl Router {
                 layout: self.config.layout,
                 theme: self.config.theme,
                 sentence: None,
-                sentence_pending,
                 notice: self.notice.clone(),
             },
             Some(Composed::Candidates {
@@ -210,7 +180,6 @@ impl Router {
                 self.engine.annotate(&mut candidates);
                 Frame {
                     preedit: preedit.clone(),
-                    preedit_mode: self.config.preedit,
                     cursor: *cursor,
                     candidates,
                     highlight: highlight - page * page_size,
@@ -219,7 +188,6 @@ impl Router {
                     layout: self.config.layout,
                     theme: self.config.theme,
                     sentence: self.sentence.clone(),
-                    sentence_pending,
                     notice: self.notice.clone(),
                 }
             }

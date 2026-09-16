@@ -32,19 +32,13 @@ pub enum ServerMessage {
         text: Option<String>,
     },
 
-    /// 不由按键触发的重绘（云联想补词、本地整句模型重排到达）；也顺路带回用户在候选窗口上点选的候选。
+    /// 不由按键触发的重绘（云联想补词、本地整句模型重排到达）。
     Update {
         /// 会话标识。
         session: SessionId,
 
         /// 要重绘的状态。
         frame: Frame,
-
-        /// 用户点了候选窗里的候选、Server 已经替他把这个词选上：本次要立即上屏的文本。
-        /// 点选发生在 DLL 没来问的时候，而传输是一问一答（Server 不主动推），所以攒到下一次 `Poll`
-        /// 一起带回，最迟一拍。不认这个字段的老 DLL 只当普通重绘，那次点选落空。
-        #[serde(default)]
-        commit: Option<String>,
     },
 
     /// 对一次 [`super::ClientMessage::SyncMode`] 的答复：状态条上点出来、还没被取走的目标模式。

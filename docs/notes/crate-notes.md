@@ -12,10 +12,15 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 
 ## crates/qingjian-core
 
-模块：`composition`（缓冲区与光标；中文模式下 Shift+字母按小写进 `buffer` 参与匹配、大写记在 `shifted`，`typed_text` 还原后用于原样上屏）/ `parser` / `correction`（拼写纠错：整段一处编辑的候选纠正 + `typo` 音节级敲错变体表，后者进整句词图当带代价的边）/
+模块：`composition` / `parser` / `correction`（拼写纠错：整段一处编辑的候选纠正 + `typo` 音节级敲错变体表，后者进整句词图当带代价的边）/
 `candidate` / `ranking` / `shortcut` / `sentence` / `fuzzy` / `shuangpin`（双拼：四套方案键位表、键 → 全拼解码与消耗换算）/ `zhuyin`（大千注音：键 → 注音符号 → 拼音，`[general] zhuyin` 开关，声调只判音节完整不进查询）/ `emoji` /
 `english`（英文模式候选）/ `engine`（`query::EnglishTail`：句末英文词并入整句，`woxiangxuehaorust` → 我想学好rust，尾段也像拼音时按分数与拼音读法比）。
 `Engine` 是对外唯一门面，`Translator` / `Learner` trait 在 `engine` 模块；词库是「主词库 + 附加词库（`set_extra_dictionaries`）+ 用户词」的列表。
+- 中英混输的英文词位置：`Engine::set_chinese_first`（配置 `[general] chinese_first`，缺省关）关着时拼音不像话的输入英文排第一（`extras::insert_english`，
+  用户老选中文词时仍让中文在前），开着时整句先插、英文词紧随其后排第二（`query_inner` 里两步的先后按开关掉转）；句末英文词并入整句（`EnglishTail`）不受它影响。
+  缺省关是回放定的（9241 词 / 269 条英文上屏：缺省开英文首选 82.5% → 7.1%）。
+- `custom_phrase::merge_replacements` 把平台给的「输入码 → 短语」表（macOS 系统文本替换）并进配置里的自定义短语：每条占该码最靠前的空位（1–9），
+  输入码不是小写字母、已有同码同文本、九位都满的跳过；Core 不管数据从哪来。
 
 `EngineSession` 保存可挂起的组句、标点、历史与学习链，`Engine::swap_session` 在同一个引擎里交换输入状态，共用词库与落盘服务。切换上下文时清除查询及异步预测缓存，并由平台恢复各自私密状态。
 
@@ -47,9 +52,6 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 - `CloudPredictor`：`Predictor` trait 的网络实现（async-openai，OpenAI 兼容接口，默认 DeepSeek），后台线程防抖 / 缓存 / 超时，`submit` / `poll` 非阻塞。
   `PredictConfig` 是配置的 `[predict]` 分节。只在组句中联想，一次请求给云端词（容错校验后补进候选第一页末尾 `[predict] slots` 格，缺省 2，不预留不占位，
   前面的本地候选不挪；排布在 Core `CandidateLayout`）和整句补全（preedit 右侧，Tab）；上屏后不联想，本地历史不进请求。
-  整句什么时候要由 `[predict] sentence_trigger` 定：`idle`（缺省）跟云端词同一拍、停键 `debounce_ms` 后自动联想；
-  `tab` 只问词，整句由壳按 Tab 现请一次（`PredictConfig::sentence_on_tab` → `policy().sentence` 为假，
-  壳再 `Engine::request_sentence_once` 把这一次补上）——**云端词两条路都照常自动**，不受这项影响。
 - `CloudGlossFiller`：释义兜底（Core `GlossFiller` trait，与 Predictor 分开的线程与通道，攒 1.5 秒 / 8 个词发一次，问过不再问）：
   随包释义表没有的词库词 / 云端词上屏后入队，结果壳每秒 `Engine::poll_glosses` 经 `Translator::learn` 写进 `qingjian-translate::PersonalGlossary`
   （`user-glossary-<语言>.tsv`，`LayeredTranslator` 个人表优先）；随云联想开关一起开。
@@ -77,21 +79,19 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 
 `BigramModel`，Core `sentence::LanguageModel` trait 的实现，从 `data/generated/lm.qj`（或 `lm-unigram.tsv` / `lm-bigram.tsv`）加载
 （没有这两个文件就退化为一元词频整句）。数据由 `tools/corpus/parquet_to_text.py`（uv 脚本，HF parquet → 简体纯文本）加
-`cargo run --release -p qingjian-dict-convert -- bigram --phrases assets/lexicon/phrases.tsv --brand assets/lexicon/brand.tsv data/corpus/*.txt` 生成；语料在 `data/corpus/`（gitignore）。
+`cargo run --release -p qingjian-dict-convert -- bigram --phrases assets/lexicon/phrases.tsv --phrases assets/lexicon/domain_words.tsv --brand assets/lexicon/brand.tsv --brand assets/lexicon/mixed_words.tsv data/corpus/*.txt` 生成；语料在 `data/corpus/`（gitignore）。
 短语层不当 token 统计（分词时摘掉、统计完按成分合成一元 / 二元，短语得分等于原来两个词的路径，见 `bigram.rs` 模块注释），品牌词按给定次数写进一元与句首二元。
 
 ## crates/qingjian-platform
 
 `Config`（TOML 配置文件，`[general]` / `[shortcut]` / `[fuzzy]` / `[dictionaries]` / `[apps]` / `[predict]` 分节，首次运行写模板，
-`set_value` 用 toml_edit 原地改键保留注释；`[model] enabled` 本地整句模型开关，`LocalModelConfig`；
-中英模式两项：`[shortcut] switch_mode`（`SwitchKey`：shift / control / none，单击切换键）与 `[general] english_mode`（内置英文模式总开关））；
-`extra_dictionaries` 列出 / 加载随包领域词库与用户 `dicts/`
+`set_value` 用 toml_edit 原地改键保留注释；`[model] enabled` 本地整句模型开关，`LocalModelConfig`）；`extra_dictionaries` 列出 / 加载随包领域词库与用户 `dicts/`
 （mac 壳与 Windows Server 共用，同名 `.qj` 优先于 `.tsv`）；`protocol` 模块是 Windows Server ↔ TSF DLL 的 IPC 协议类型
 （`ClientMessage` / `ServerMessage` / `Frame` / `PreeditSegment`，全 serde，两端共用，见 `docs/design/architecture.md`「Windows：TSF」）。
 
 ## crates/qingjian-render
 
-自绘渲染器（还在分支 renderer-spike 上，未合入 main）：候选窗一帧 + 主题 → 预乘 RGBA 位图，tiny-skia 栅格 + cosmic-text 文字（fontdb 按平台清单只加载几个字体文件、不扫系统），
+自绘渲染器：候选窗一帧 + 主题 → 预乘 RGBA 位图，tiny-skia 栅格 + cosmic-text 文字（fontdb 按平台清单只加载几个字体文件、不扫系统），
 自己解析 `trak` 字距表、按主题 gamma 加深笔画；cosmic-text 打了 `opsz` 光学字号补丁（qingjian-team/cosmic-text 分支 `qingjian-opsz`，workspace `[patch.crates-io]` 钉 rev）。
 `examples/preview.rs` 出 PNG 与真机截图并排比、`--measure` 与 AppKit 对宽度。mac 壳 `candidates/bitmap/` 贴位图，`[general] renderer = "system"` 切回 AppKit 绘制
 （过渡期退路，偏好设置「候选窗口」页可选）；`[general] font` 是候选窗字族名（空为系统字体，`bitmap/font_files.rs` 用 CoreText 按字族名找文件只加载那几个，没装就回系统字体；
@@ -103,6 +103,7 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 
 - `--predict` 强制开云联想并等结果打印，交互模式下上屏后也联想。
 - `--typing` 逐键计时（性能测试用 release 构建跑，目标每键 10 ms 以内）。
+- `--chinese-first` 打开中文优先（`[general] chinese_first = true` 的排法），配合 `--replay` 比两种英文词位置。
 - `--replay <input-log.jsonl>` 回放评测：把日志里每次上屏的键重新喂给引擎，按来源算首选 / 前五命中率、平均名次、不在候选的条数，打印没命中的例子（`--misses N`）；
   只在内存里学习不写文件，加 `--user-dict` 可带上现有学习数据。
 - `--tune 名=值`（逗号分隔）覆盖个人 n-gram 插值与敲错代价的常数扫网格（名字见 `apps/cli/src/tuning.rs`，Core 侧是 `Engine::set_interpolation` / `set_typo_costs`，壳只用缺省值）。
@@ -120,14 +121,21 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
   成品 `target/pkg/Qingjian-<版本>-<arm64|x86_64>.pkg`）；`scripts/uninstall.sh` 卸载。
 - 日志在 `~/Library/Logs/Qingjian/`（按天分文件留 7 天，删了会重建），用户数据与配置在 `~/Library/Application Support/Qingjian/`。
 - 配置项：云联想 `[predict]`（偏好设置「云服务」页有「测试连接」按钮：`qingjian_predict::ConnectionTest` 起线程发一条最小请求，`Host` 用独立定时器 `CloudTestMonitor` 轮询结果显示到窗口底部；
-  `reasoning_effort` 缺省 `none`，DeepSeek V4 默认思考，不关正文为空）；模糊音 `[fuzzy]` 默认都关；`[general]` 学习语言 / 每页候选数 / 翻页键 / 外观 / 竖排横排 / 拼音显示位置 /
-  英文模式候选开关 / 双拼方案 `shuangpin`（小鹤 / 自然码 / 微软 / 搜狗，空为全拼）/ 日志级别 `log_level`（缺省 info 不含敲的内容，debug 逐键记，热切换）/ 输入日志 `input_log`；
+  `reasoning_effort` 缺省 `none`，DeepSeek V4 默认思考，不关正文为空）；模糊音 `[fuzzy]` 默认都关；`[general]` 学习语言（`off` 不显示译文）/ 每页候选数 / 翻页键 / 外观 / 竖排横排 / 拼音显示位置 /
+  英文模式候选开关 / 中文优先 `chinese_first` / 双拼方案 `shuangpin`（小鹤 / 自然码 / 微软 / 搜狗，空为全拼）/ 日志级别 `log_level`（缺省 info 不含敲的内容，debug 逐键记，热切换）/ 输入日志 `input_log`；
   `[shortcut]` 模式键 v / u、`question_mark`（缺省关，开了空缓冲区敲 `?` 进问字）、上屏第一 / 第二个译词的修饰键 `translation` / `translation_second`、删候选 `delete_candidate`（缺省 shift，用户词整删、词库词清学习）、翻译选中文字 `translate_selection`；
   `[apps] english_candidates_off` 按 bundle identifier 列出英文模式不给候选的应用（缺省终端 / 编辑器 / IDE，`*` 前缀匹配）；
   `[dictionaries] domains` 打开随包的领域词库（`Resources/dicts/` 11 本，缺省只开 `idioms`），`disabled` 关掉用户目录 `dicts/` 里的某本导入词库；
   偏好设置「词库」页随包的可开关、导入的可开关 / 移除，可导入 TSV / Rime yaml / .qj。
+  Windows 设置页共用 `qingjian-dictionary::import` 转成 `.qj`，拒绝空词库，导入后自动启用并显示结果；
+  文件选择器支持多选，逐个转换、汇总结果，成功项的启用配置一次写回，失败不打断整批。
+  Server 每秒比较用户词库的路径 / mtime / 长度快照，配置没变时也能重载新增、同名更新和移除。
+  词库扫描独立于配置解析：配置损坏时沿用上次有效的词库开关，直到配置 mtime 变化才重新解析。
+- 系统文本替换（系统设置「键盘 → 文本替换」）：`host/config/text_replacements.rs` 从 `NSUserDefaults` 全局域读 `NSUserDictionaryReplacementItems`
+  （每条 `{ on, replace, with }`），激活输入法时重读，变了就经 Core `merge_replacements` 并进配置里的自定义短语再 `set_custom_phrases`；
+  `[general] system_text_replacements` 开关（缺省开，「自定义短语」页勾选框），内容可能含证件号、地址，日志只记条数。
 - 输入法进程由 launchd 拉起，看不到 shell 的环境变量：密钥写进配置同目录的 `.env`（`QINGJIAN_API_KEY=...`，输入法启动时 dotenvy 读入）或 `config.toml` 的 `api_key`。
-- 本地整句模型：`bundle.sh` 把 `data/model/`（或 `QINGJIAN_MODEL_DIR`）三件套打进 `Resources/model/`，用户目录 `model/` 优先；`host/model.rs` 在后台线程加载并预热（首次 Metal 编译）后
+- 本地整句模型：`bundle.sh` 把 `data/model/`（或 `QINGJIAN_MODEL_DIR`）三件套打进 `Resources/model/`，用户目录 `model/` 优先；`host/model/mod.rs` 在后台线程加载并预热（首次 Metal 编译）后
   `set_async_sentence_scorer` 接上，`refresh` 每键先读应用光标前 64 字给 Engine 当前文、查询后 `schedule_rescoring`，`RescoreMonitor` 停键 80 ms 请求、20 ms 轮询，
   结果到了重查一次只重画当前页（翻过页 / 动过高亮不动）；「云服务」页有开关（`[model] enabled`）。
 - 端到端验证可用 `osascript` 的 System Events 往 TextEdit 发按键再读回文本（终端需要辅助功能权限；输入法得在中文模式）。
@@ -137,52 +145,9 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
 一个产品两个 package：`server`（Server 进程：IPC 分派 + Engine + 命名管道 + 自绘候选窗与悬浮状态条）与 `tsf`（TSF 文本服务 DLL，lib 名固定 `qingjian_tsf`），
 外加 `settings`（WinUI 3 设置程序）与 `installer`（Inno Setup）。不合成一个 crate，因为 DLL 不能带 Engine 的依赖树，见 `apps/windows/README.md`；
 协议类型在 `qingjian-platform::protocol`，设计见 `docs/design/architecture.md`「Windows：TSF」。
-中英模式的两项设置（`[shortcut] switch_mode` 切换键：shift / control / ctrl+space / none，`[general] english_mode` 内置英文模式开关）
-由 DLL 自己读（`tsf/src/com/settings.rs`，与翻译快捷键同路）：激活时读一次，之后轮询定时器按 mtime 热加载（约 320 ms），改完立刻生效；
-`ctrl+space` 走 TSF 保留键登记（`com/key/preserved.rs` 的 `GUID_SWITCH_MODE`），但先读系统热键
-`Hot Keys\00000010`（「输入法/非输入法切换」，缺省就是 Ctrl+Space）：被系统占着时不重复登记、交给系统那条路
-（它的转换模式变化由 conversion compartment 回调同步成中 / 英），避免两边各切一次互相抵消。四条切换入口都汇到
-`service/mode.rs::set_english_mode` 一处拦住；状态条点击在 Server 侧（`dispatch/status/mod.rs`）按同一项拦，
-设置界面在 `settings/src/panel/pages/general.rs`。
-拼音显示位置（`[general] preedit`）在 Windows 上分两处落地：Server 把它读进 `RouterConfig.preedit` 并随 `Frame.preedit_mode`
-下发给 DLL，DLL（`com/service/key_sink.rs`）按 `inline()` 决定要不要放行内拼音，Server（`ui/candidates/render_data.rs::window_preedit`）
-按 `in_window()` 决定候选窗口顶部画不画拼音行；`window` 模式没有组句范围，光标矩形改从 `com/edit/anchor.rs::caret_rect`（当前选区）量。
-光标前后文（`ClientMessage::Surrounding` 的 `text` / `after`，DLL 起组句时读 64 / 32 字）进两条路：前文给本地整句模型当前文，
-整份给云联想当上下文（`Router.surrounding`，组句结束作废）；macOS 是每次请求现读，Windows 一段组句只读一次，第一键的请求还没有上下文。
-连不上 Server 时 DLL 自己拉起它（`tsf/src/com/service/launch.rs`）：`ShellExecuteW` 起与 DLL 同目录的 `qingjian-server.exe`
-（`uiAccess=true` 的 exe 用 `CreateProcess` 报 740），进程内 5 秒冷却 + 跨进程命名互斥体防止砸出一串 Server；
-起完清掉重连退避，下一键就试。Server 只在登录时由「启动」文件夹拉起，中途挂了以前只能等下次登录。
-状态条第四格「☁」是在线联想的隐私开关（`StatusEvent::ToggleCloud` → `dispatch/status`）：翻转 `Router.predict.enabled`、写回
-`[predict] enabled`，并**立刻** `attach_cloud` 换掉 Predictor（关着时连释义兜底一起停），不等热加载；热加载时 `apply_config` 也把
-`Router.predict` 跟着配置文件走，两边不会各说各话。
-候选窗支持鼠标点选（`ui/candidates/hits.rs`）：窗口过程收 `WM_MOUSEMOVE` / `WM_LBUTTONDOWN`（`WM_MOUSEACTIVATE` 回
-`MA_NOACTIVATE`，点它不抢宿主焦点、组句不断），按绘制时算好的命中范围（`ui/candidates/view.rs::hit_bands`：候选行竖排看 y、横排看 x，
-整句补全是顶部行右侧的一块矩形）定位，上报 `CandidateEvent::Pick(页内行号)` / `PickSentence` → `Work::Candidate` →
-`dispatch/candidates`。Router 那侧只**立刻**把词选掉（`commit_index`，Engine 状态前进、后续按键接在正确状态上）并把上屏文本攒进
-`Router.pending_commit`——文本得由 DLL 写进宿主文档，而传输一问一答、Server 不能主动推，所以攒到 DLL 下一次 `Poll`（组句期间
-80 ms 一拍）由 `ServerMessage::Update.commit` 带回，DLL 侧（`com/poll` → `com/service/document.rs::commit_picked`）再走一次编辑会话
-落定，与失焦上屏同一条路；拼音没吃完时 `apply` 会先结束旧组句落定这个词、再按新 preedit 起一段。整句补全走
-`Engine::accept_prediction`（与 Tab 同一条路）。放行的键（Passthrough）不带走 `pending_commit`（DLL 不碰文档，带了也丢），
-留给下一次轮询。`Frame` 不带 `page_size`，所以事件报页内行号、由 Router 换算全局下标；协议版本随之升到 5。
-鼠标悬停用比键盘高亮淡一档的底色（`Palette::hover`），候选行与整句补全都铺；状态条四格同样铺（`ui/status/mod.rs`，绘制 / 摆放 /
-命中合并成一份 `Bar`，窗口过程按 HWND 查到它才能重画）。状态条的命中带与那块悬停底色是同一块（左右各内缩半个 padding、
-上下也留出边距，`Bar::cell_at` 横竖都判）：看得见高亮的地方才点得着，鼠标挪到条子边缘那圈留白上高亮就收掉。
-整句「按 Tab 才联想」（`[predict] sentence_trigger = "tab"`）在 Windows 上的落地：`RouterConfig.sentence_on_tab` 跟着热加载走，
-`dispatch/key/input.rs` 的 Tab 分支在没有整句可接受时先 `Engine::request_sentence_once()` 现请一次云端（这一下吃掉，组句中的 Tab
-本来也不是缩进），结果到了画在候选窗右侧，再按一次 Tab 才采用；没配这一项时行为不变（无整句就把 Tab 交还应用做缩进 / 跳焦点）。
-没在组句时敲的数字 / `-` / `=` 由 Server 自己插进文档（`dispatch/key/input.rs::apply_punctuation`），不走 `Passthrough`：放行要等宿主
-把键交给自己处理，部分宿主里这些键根本到不了（先是「中文模式按 `-` 没反应」，2026-09-16 又是「微信里敲数字没反应」；日志里那些键
-都是 `consumed=false` 却什么都没发生）。插字符与全角标点同一条路，一定出得来。
-整句请求在路上时候选窗有等待提示：`Router.sentence_pending`（发出时记时刻，结果到了 / 组句结束 / 等超
-`SENTENCE_PENDING_TIMEOUT` 就清，`tick` 里清超时那份）经 `Frame.sentence_pending` 下发，候选窗在整句那块位置画 `☁ …`
-（`ui/candidates/view.rs`，宽度与量尺寸共用 `tail_width`），结果到了原地换成整句。协议版本随之升到 6。
-手动模式按 Tab 而这次联想根本发不出去（整句开关关着 / 云联想没开）时，吃掉这个键并借 `Router.notice`
-（画在拼音行下方那行小字）说一句为什么——「按了没反应」和「悄悄上个缩进」都不如直接讲清楚。
-云联想关掉 / 换掉 Predictor 时（状态条「☁」格、配置热加载两条路）一并 `Router::drop_sentence`：手里那段整句是上一个
-Predictor 给的，留着会被 Tab 当成新的上屏（关掉云联想之后再按 Tab 反而出来一段旧句子）。
-设置程序是单例：Server 点齿轮（`ui/status/mod.rs::open_settings`）先枚举顶层窗、按所属进程的 exe 名找已经开着的设置窗，找到就
-`SetForegroundWindow` 叫到前台——这一步必须由 Server 做，点齿轮的那一下输入落在它身上，Windows 的前台锁才不拦；找不到才起新进程。
-设置程序自己也拿一个 `Local\QingjianSettings` 命名互斥体兜底（开始菜单等入口重复启动时直接退出）。
+
+TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解析（bit 2 避免改变键盘状态），
+仅接受单个非代理项 UTF-16 单元。字母、小键盘和 AltGr 处理不变，不保证组合音符输入。
 
 ## assets
 
@@ -203,9 +168,8 @@ Predictor 给的，留着会被 Tab 当成新的上屏（关掉云联想之后�
 - `lexicon`：从 `assets/lexicon/`（自建词库源：规范字 + 常用词 + THUOCL 领域词）加 Unihan 读音（`data/unihan/Unihan_Readings.txt`）、LLM 多音字标注（`gloss-gen pinyin`，
   结果 `data/generated/pinyin-llm.jsonl`，不进 git）、语料词频（`lm-unigram.tsv`）建基础词库 `dict.tsv`（8.7 万条），并把 THUOCL 领域词按语料次数 < 50 拆成
   `dicts/<领域>.tsv` + `.qj`（11 本、13 万条，`--domain-keep-min`），流程见 `assets/lexicon/QINGJIAN.md`；`--extra-words` 并入人工挑的领域词 `assets/lexicon/domain_words.tsv`。
-- `english`：转 `assets/lexicon/05_english/00_all_words.tsv`；同编码优先保留含大写的专名写法（Windows ≠ windows），
-  展示写法补充表 `07_display_forms.tsv` 后置读入；`cedict`：释义表备用来源。中英混杂词源在 `assets/lexicon/mixed_words.tsv`（`lexicon --extra-words`）。
-- `bigram`：统计语料；`--phrases` 给短语层、`--brand` 给品牌词（`assets/lexicon/brand.tsv`，青简 210），领域词也走合成计数（语料里只有几十次的词当 token 统计会吸走成分词的二元证据）。
+- `english`：转 `assets/lexicon/05_english/00_all_words.tsv`；`cedict`：释义表备用来源。
+- `bigram`：统计语料；`--phrases` 给短语层、`--brand` 给品牌词（`assets/lexicon/brand.tsv`，青简 210）与中英混杂词（`mixed_words.tsv`，C盘 / B站：合成计数要成分词在语料里，C 不是 token，只能直接给一元，次数对着同音竞争词定），领域词也走合成计数（语料里只有几十次的词当 token 统计会吸走成分词的二元证据）。
 - `mine`：从语料挖词库没收的高频词并过滤（`oov_filter.rs`：虚词规则 + 相邻字对 PMI≥3，`--candidates` 只重过滤）。
 - `phrases`：挖短语层（两遍扫语料：相邻两词、两段二元都够频的相邻三词，总次数与对话语料次数都 ≥ 2000 + 边界规则，读音由成分词拼出；我的 / 不知道 / 有没有 这类常用词表不收的组合，
   `assets/lexicon/phrases.tsv`；词库已并入过短语时重跑加 `--refresh`）。

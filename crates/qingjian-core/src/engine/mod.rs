@@ -113,6 +113,9 @@ pub struct Engine {
     /// 用户定义的固定位置文本。
     custom_phrases: Vec<crate::CustomPhrase>,
 
+    /// 中英混输时中文候选总在英文词前面（缺省关：拼音不像话的输入英文词排第一，常在中文模式里打英文词的人靠它）。
+    chinese_first: bool,
+
     /// 联想提供方，缺省为 [`NoPredictor`]。
     predictor: Box<dyn Predictor>,
 
@@ -213,9 +216,6 @@ pub struct Engine {
     /// 最近一次联想请求的序号，0 表示还没发过。
     prediction_sequence: u64,
 
-    /// 下一次联想请求要整句补全（壳里按 Tab 手动触发，见 [`Self::request_sentence_once`]）；只生效一次。
-    sentence_once: bool,
-
     /// 最近一次联想请求的种类：只有组句联想的结果要按拼音校验。
     last_prediction_kind: PredictionKind,
 
@@ -240,13 +240,6 @@ pub struct Engine {
 
 /// 英文补全最多几条（`compa` → company / compare / …）。
 const ENGLISH_COMPLETIONS: usize = 3;
-
-/// 拼音不像话时，英文精确词要压过中文所需的最低 Zipf（词频表存 Zipf×1000）。
-/// hello / key / world 这类够格；MP（议员）、BM 不够，让位给 门票 / 编码。
-const ENGLISH_FIRST_MIN_ZIPF: f64 = 4.5;
-
-/// 英文前缀补全的最低 Zipf：挡掉 bimbo / bimonthly 这类冷僻词，免得挤掉避免。
-const ENGLISH_COMPLETION_MIN_ZIPF: f64 = 3.5;
 
 /// 原样上屏的字母串至少几个字母才当英文词学：单字母（`a`、`I`）不值得记。
 const MIN_ENGLISH_WORD_LETTERS: usize = 2;
@@ -330,6 +323,7 @@ impl Engine {
             punctuation: Punctuation::default(),
             full_width_punctuation: true,
             custom_phrases: Vec::new(),
+            chinese_first: false,
             predictor: Box::new(NoPredictor),
             language_model: Box::new(NoLanguageModel),
             sentence_scorer: None,
@@ -363,7 +357,6 @@ impl Engine {
             recording: Vec::new(),
             history: InputHistory::default(),
             prediction_sequence: 0,
-            sentence_once: false,
             last_prediction_kind: PredictionKind::Compose,
             last_question_guess: String::new(),
             chain: CommitChain::default(),

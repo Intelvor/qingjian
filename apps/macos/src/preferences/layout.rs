@@ -19,7 +19,7 @@ pub const LABEL_WIDTH: f64 = 110.0;
 pub const CONTROL_X: f64 = PAGE_PADDING + LABEL_WIDTH + 10.0;
 
 /// 每个标签页的内容宽度。
-pub const PAGE_WIDTH: f64 = 520.0;
+pub const PAGE_WIDTH: f64 = 600.0;
 
 /// 在一页里自上而下摆控件的简易布局：AppKit 坐标原点在左下，先按「离顶部多远」记下来，
 /// 最后知道页高了再一次性换算成 frame。

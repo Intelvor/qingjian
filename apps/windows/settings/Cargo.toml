@@ -1,7 +1,7 @@
 [package]
 name = "qingjian-windows-settings"
 description = "Windows 输入法的设置界面：左侧导航栏 + 各分节表单，读写 %APPDATA%\\Qingjian\\config.toml，对齐 macOS 偏好设置"
-version = "0.1.0-alpha.24-dev"
+version = "0.1.3-dev"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -18,11 +18,8 @@ toml_edit.workspace = true
 # UI 本体只在 Windows 编
 [target."cfg(windows)".dependencies]
 windows-reactor = "0.100"
-windows = { version = "0.62.2", features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_Threading",
-] }
+# 只用它的 system_fonts（DirectWrite 列字族）
+qingjian-render.workspace = true
 qingjian-learning.workspace = true
 qingjian-core.workspace = true
 qingjian-translate.workspace = true

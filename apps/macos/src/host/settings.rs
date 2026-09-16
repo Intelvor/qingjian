@@ -2,6 +2,7 @@
 
 use super::diagnostics::{copy_to_pasteboard, open_with_system};
 use super::*;
+use crate::preferences::DEFAULT_FONT_LABEL;
 
 impl Host {
     /// 写短语前读取文件；外部规则有变化时同步列表并请用户重新确认。
@@ -69,7 +70,7 @@ impl Host {
                 self.preferences.sync_usage(
                     &self.engine.usage_summary(),
                     &self.engine.vocabulary_summary(),
-                    self.engine.learning_language(),
+                    self.learning_language,
                 );
                 self.preferences.show();
             }
@@ -164,10 +165,13 @@ impl Host {
                     .set_bool("general", "full_width_punctuation", index == 0);
             }
             (Setting::LearningLanguage, SettingValue::Index(index)) => {
-                if let Some(language) = self.languages.get(index) {
-                    self.settings
-                        .set_value("general", "learning_language", language.code());
-                }
+                // 菜单最后一项是「不显示译文」
+                let code = self
+                    .languages
+                    .get(index)
+                    .map_or(LEARNING_LANGUAGE_OFF, |language| language.code());
+                self.settings
+                    .set_value("general", "learning_language", code);
             }
             (Setting::PageSize, SettingValue::Index(index)) => {
                 self.settings
@@ -182,6 +186,17 @@ impl Host {
                 if let Some(theme) = ThemeMode::ALL.get(index) {
                     self.settings.set_value("general", "theme", theme.key());
                 }
+            }
+            (Setting::Renderer, SettingValue::Index(index)) => {
+                if let Some(renderer) = CandidateRenderer::ALL.get(index) {
+                    self.settings
+                        .set_value("general", "renderer", renderer.key());
+                }
+            }
+            (Setting::Font, SettingValue::Text(text)) => {
+                let font = text.trim();
+                let font = if font == DEFAULT_FONT_LABEL { "" } else { font };
+                self.settings.set_value("general", "font", font);
             }
             (Setting::Layout, SettingValue::Index(index)) => {
                 if let Some(layout) = LayoutMode::ALL.get(index) {
@@ -324,6 +339,9 @@ impl Host {
             (Setting::EnglishCandidates, SettingValue::Bool(on)) => {
                 self.settings.set_bool("general", "english_candidates", on);
             }
+            (Setting::ChineseFirst, SettingValue::Bool(on)) => {
+                self.settings.set_bool("general", "chinese_first", on);
+            }
             // 勾上写缺省的终端 / 编辑器列表，去掉写空表；手改过的列表勾一下就回缺省
             (Setting::EnglishCandidatesOffInApps, SettingValue::Bool(on)) => {
                 let apps: toml_edit::Array = if on {
@@ -376,6 +394,13 @@ impl Host {
             }
             (Setting::InputLog, SettingValue::Bool(on)) => {
                 self.settings.set_bool("general", "input_log", on);
+            }
+            (Setting::Learning, SettingValue::Bool(on)) => {
+                self.settings.set_bool("general", "learning", on);
+            }
+            (Setting::SystemTextReplacements, SettingValue::Bool(on)) => {
+                self.settings
+                    .set_bool("general", "system_text_replacements", on);
             }
             (Setting::ClearInputLog, _) => {
                 self.clear_input_log();

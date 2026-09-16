@@ -27,6 +27,12 @@ impl Engine {
     }
 
     /// 設置是否啟用注音模式。開啟後鍵盤輸入按大千佈局解析。
+    /// 学习开关（`[general] learning`）：关掉后不再记词频、用户词、个人 n-gram 与敲错表，已学的照常参与排序；
+    /// 私密输入是另一个独立的开关（[`Self::set_private`]）。
+    pub fn set_learning(&mut self, enabled: bool) {
+        self.learner.set_disabled(!enabled);
+    }
+
     pub fn set_zhuyin_mode(&mut self, on: bool) {
         self.zhuyin = on;
         self.forget_span_cache();
@@ -277,6 +283,16 @@ impl Engine {
 
     pub fn mode_keys(&self) -> ModeKeys {
         self.modes
+    }
+
+    /// 中英混输里中文候选是否总排在英文词前面（配置 `[general] chinese_first`，缺省关）。
+    /// 关着时拼音「不像话」的输入英文词排第一（`hello` 先英文再 荷兰咯）；开了英文词固定第二。
+    pub fn set_chinese_first(&mut self, on: bool) {
+        self.chinese_first = on;
+    }
+
+    pub fn chinese_first(&self) -> bool {
+        self.chinese_first
     }
 
     pub fn with_learner(mut self, learner: Box<dyn Learner>) -> Self {

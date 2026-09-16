@@ -1,11 +1,11 @@
 use std::io::{Read, Write};
 
 use qingjian_platform::protocol::{
-    ClientMessage, KeyEvent, PROTOCOL_VERSION, ScreenRect, ServerMessage, SessionId, read_message,
-    write_message,
+    ClientMessage, Frame, KeyEvent, PROTOCOL_VERSION, ScreenRect, ServerMessage, SessionId,
+    read_message, write_message,
 };
 
-use super::{KeyReply, KeyResponse, PollReply};
+use super::{KeyReply, KeyResponse};
 use crate::error::ClientError;
 
 /// 连 Server 的一个会话客户端，开在一条已连好的双工流上（Windows 下是命名管道，测试里是内存流）。
@@ -105,12 +105,12 @@ impl<S: Read + Write> EngineClient<S> {
         }
     }
 
-    /// 组句期间定时拉一次：云联想的异步结果，以及用户在候选窗上点选的候选（Server 不能主动推，攒着等这一拍）。
-    pub fn poll(&mut self) -> Result<PollReply, ClientError> {
+    /// 组句期间定时拉一次云联想的异步结果，回最新一帧。
+    pub fn poll(&mut self) -> Result<Frame, ClientError> {
         match self.call(&ClientMessage::Poll {
             session: self.session,
         })? {
-            ServerMessage::Update { frame, commit, .. } => Ok(PollReply { frame, commit }),
+            ServerMessage::Update { frame, .. } => Ok(frame),
             _ => Err(ClientError::Unexpected("expected update for poll")),
         }
     }
@@ -125,12 +125,11 @@ impl<S: Read + Write> EngineClient<S> {
         }
     }
 
-    /// 组句起始时把应用光标前后的文字送给 Server（本地整句模型的前文 + 云联想的上下文）。不回话。
-    pub fn surrounding(&mut self, before: String, after: String) -> Result<(), ClientError> {
+    /// 组句起始时把应用光标前的文字送给 Server（本地整句模型的前文）。不回话。
+    pub fn surrounding(&mut self, text: String) -> Result<(), ClientError> {
         self.send(&ClientMessage::Surrounding {
             session: self.session,
-            text: before,
-            after,
+            text,
         })
     }
 

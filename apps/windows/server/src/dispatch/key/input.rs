@@ -1,11 +1,10 @@
 //! 按键怎么作用到 Engine / 高亮上。分流规则与 macOS 壳的 `handle_text` / `handle_command` 对齐。
 
-use qingjian_core::{Candidate, QUESTION_PREFIX, shortcut};
+use qingjian_core::{QUESTION_PREFIX, shortcut};
 use qingjian_platform::protocol::KeyEvent;
 
 use super::{Effect, codes, with_prefix};
 use crate::dispatch::Router;
-use crate::dispatch::composed::Composed;
 
 impl Router {
     /// 功能键靠键码，其余靠字符。组句中修饰键 + 数字是快捷键；带 Ctrl / Alt / Win 而没配到快捷键的键归应用。
@@ -107,11 +106,9 @@ impl Router {
             codes::TAB if self.engine.english_mode() => {
                 Effect::Changed(Some(self.commit_highlighted()))
             }
-            // 中文模式 Tab：有整句补全就接受；配成「按 Tab 才联想整句」时，没有就先请云端算一次
-            //（这一下吃掉，组句中的 Tab 本来也不是缩进）；其余交还应用（缩进 / 跳焦点）。
+            // 中文模式 Tab：有整句补全就接受，否则交还应用（缩进 / 跳焦点）。
             codes::TAB => match self.sentence.take() {
                 Some(sentence) => Effect::Changed(Some(self.engine.accept_prediction(&sentence))),
-                None if self.request_sentence() => Effect::Navigated,
                 None => Effect::Passthrough,
             },
             codes::DOWN => {
@@ -150,10 +147,15 @@ impl Router {
         }
     }
 
-    /// 中文模式：字母进拼音缓冲区，大小写都收（Shift 大写由 Core 按小写匹配、原样上屏时还原）；
+    /// 中文模式：小写字母进拼音；Shift 大写字母是临时打英文，组句中先把拼音原样上屏；
     /// 没在组句时的其他字符走全角标点（与 macOS 壳一致，组句中的标点仍进英文直输段）。
     fn apply_chinese(&mut self, c: char, event: &KeyEvent) -> Effect {
-        if c.is_ascii_alphabetic() {
+        if c.is_ascii_uppercase() {
+            let raw = self.composing().then(|| self.engine.take_raw());
+            self.engine.note_passthrough(c);
+            return with_prefix(raw, Effect::Passthrough, c);
+        }
+        if c.is_ascii_lowercase() {
             self.engine.push(c);
             return Effect::Changed(None);
         }
@@ -164,10 +166,6 @@ impl Router {
     }
 
     /// 当前模式开着全角就让 Core 转（数字后的 `.` 保持半角）；转不了的原样交给应用并告知 Core。
-    ///
-    /// `-` `=` 与数字例外：没有全角映射，但**不放行、由我们插入**——放行要等宿主把键交给自己处理，
-    /// 实测在部分宿主里这些键到不了（先是「中文模式按 `-` 没反应」，后来是「微信里敲数字没反应」：
-    /// 日志里那些键都是 `consumed=false` 放行出去的）。插入与全角标点同一条路，一定出得来。
     fn apply_punctuation(&mut self, c: char, event: &KeyEvent) -> Effect {
         let english = event.modifiers.caps || event.modifiers.english_mode;
         if self.full_width_for(english)
@@ -176,9 +174,6 @@ impl Router {
             return Effect::Changed(Some(text.to_owned()));
         }
         self.engine.note_passthrough(c);
-        if matches!(c, '-' | '=') || c.is_ascii_digit() {
-            return Effect::Changed(Some(c.to_string()));
-        }
         Effect::Passthrough
     }
 
@@ -255,42 +250,6 @@ impl Router {
             Some(text) => text,
             None => self.engine.take_raw(),
         }
-    }
-
-    /// 手动模式（`[predict] sentence_trigger = "tab"`）下按 Tab：请云端现在算一次整句补全。
-    /// 返回这个键吃掉没有——没请出去（配的不是手动模式、没在组句、拼音太短）就把键交还应用。
-    fn request_sentence(&mut self) -> bool {
-        if !self.config.sentence_on_tab || !self.composing() {
-            return false;
-        }
-        // 整句补全关着、或云联想没开：按了也不会有结果，这不是「等一会儿就好」，
-        // 说一句再把这个键吃掉（留在应用里就是个缩进，用户看不出为什么没反应）。
-        let hint = if !self.config.sentence_enabled {
-            Some("整句补全已关闭（设置 → 云服务）")
-        } else if !self.engine.prediction_enabled() {
-            Some("云联想未开启，整句补全会用到它")
-        } else {
-            None
-        };
-        if let Some(hint) = hint {
-            tracing::debug!(hint, "候选窗：Tab 请整句被挡下");
-            self.notice = Some(hint.to_owned());
-            return true;
-        }
-        let local: &[Candidate] = match &self.composed {
-            Some(Composed::Candidates { layout, .. }) => layout.local(),
-            _ => &[],
-        };
-        self.engine.request_sentence_once();
-        let sent = self
-            .engine
-            .request_prediction(self.surrounding.clone(), local)
-            .is_some();
-        if sent {
-            // 候选窗先显示「联想中」，结果到了再换成整句。
-            self.note_sentence_pending();
-        }
-        sent
     }
 
     fn composing(&self) -> bool {

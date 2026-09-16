@@ -8,7 +8,7 @@ use objc2_app_kit::{
     NSWindowLevel, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize};
-use qingjian_platform::{LayoutMode, ThemeMode};
+use qingjian_platform::{CandidateRenderer, LayoutMode, ThemeMode};
 
 use super::frame::Frame;
 use super::theme::Theme;
@@ -117,6 +117,16 @@ impl CandidateWindow {
     /// 竖排 / 横排。下一帧生效。
     pub fn set_layout(&self, layout: LayoutMode) {
         self.view.set_layout(layout);
+    }
+
+    /// 青简渲染器 / 系统绘制。下一帧生效。
+    pub fn set_renderer(&self, renderer: CandidateRenderer) {
+        self.view.set_renderer(renderer);
+    }
+
+    /// 候选窗字体（字族名，空为系统字体），只对青简渲染器生效。
+    pub fn set_font(&self, font: &str) {
+        self.view.set_font(font);
     }
 
     pub fn max_rows(&self) -> usize {

@@ -76,6 +76,7 @@ jobs:
         with:
           toolchain: 1.96.0
           components: clippy
+          targets: i686-pc-windows-msvc
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
@@ -84,3 +85,7 @@ jobs:
 
       - name: Test (Server, TSF DLL, Settings)
         run: cargo test -p qingjian-windows-server -p qingjian-windows-tsf -p qingjian-windows-settings --locked
+
+      # 安装包另带一份 32 位 DLL（企业微信 / WPS 这类 32 位应用只能加载它）
+      - name: Check (TSF DLL, 32-bit)
+        run: cargo check -p qingjian-windows-tsf --target i686-pc-windows-msvc --locked

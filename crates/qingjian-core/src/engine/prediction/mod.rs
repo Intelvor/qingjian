@@ -40,12 +40,6 @@ impl Engine {
         self.predictor.policy()
     }
 
-    /// 下一次联想请求要带上整句补全（壳里按 Tab 手动触发那一路）。只生效一次：
-    /// 自动模式本来每次都会要（策略里 `sentence` 为真），这一路是给「只在按 Tab 时联想整句」用的。
-    pub fn request_sentence_once(&mut self) {
-        self.sentence_once = true;
-    }
-
     /// 发一次联想请求，返回序号；没接 Predictor、私密输入中或拼音太短时不发，返回 `None`。
     ///
     /// 要的是「当前作用域拼音对应的词」和整句补全；`candidates` 是本地候选，只取前几个当提示。
@@ -127,9 +121,7 @@ impl Engine {
                 .collect(),
             guess,
             max_items: policy.max_items,
-            // 策略里不要整句（壳配成「按 Tab 才联想整句」）时，只有按过 Tab 请的那一次要。
-            want_sentence: (policy.sentence || std::mem::take(&mut self.sentence_once))
-                && !question,
+            want_sentence: policy.sentence && !question,
             text: String::new(),
             target_language: String::new(),
         };
@@ -217,7 +209,6 @@ impl Engine {
 
     /// 只留下拼音对得上的云端词：字数等于音节数、每个音节合法、全拼与用户敲的字母的编辑距离在容许范围内
     /// （简拼不算错，允许少量错字 / 漏字 / 多字，纠错就靠这个）。模型偶尔会给出根本不是这个拼音的词，这些不进候选。
-    /// 英文词与中英混词（`pinyin` 填的是英文原文，如 `Linux`、`Linux系统`）没有合法音节可言，直接拿那个字符串对 letters。
     pub(super) fn validate_cloud_words(&self, words: &mut Vec<CloudWord>) {
         let decoded = self.decode(self.composition.scope());
         let typed = decoded
@@ -226,23 +217,10 @@ impl Engine {
         let letters = typed.chars().filter(|c| *c != '\'').count();
         let allowed = tolerance(letters);
         words.retain(|word| {
-            // 英文词 / 中英混词（pinyin 填的是英文原文，如 `Linux`、`Linux系统`）不是合法音节，
-            // 不走「字数等于音节数」那一条，按整串对 letters——前缀匹配允许它比敲的长（linux → Linux系统），
-            // 这就是云端给的中英混输补全。
-            let pinyin = word.syllables.iter().all(|s| parser::is_syllable(s));
-            let joined = if pinyin {
-                String::new()
-            } else {
-                word.syllables.join("")
-            };
-            let segments: &[String] = if pinyin {
-                &word.syllables
-            } else {
-                std::slice::from_ref(&joined)
-            };
             let fits = !word.syllables.is_empty()
-                && (!pinyin || word.text.chars().count() == word.syllables.len())
-                && mismatch_count(typed, segments) <= allowed;
+                && word.text.chars().count() == word.syllables.len()
+                && word.syllables.iter().all(|s| parser::is_syllable(s))
+                && mismatch_count(typed, &word.syllables) <= allowed;
             if !fits {
                 tracing::debug!(text = %word.text, syllables = ?word.syllables, "云端词与拼音不符，丢弃");
             }

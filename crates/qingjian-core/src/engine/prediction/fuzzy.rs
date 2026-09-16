@@ -45,13 +45,12 @@ pub fn mismatch_count(typed: &str, syllables: &[String]) -> usize {
     dp[n]
 }
 
-/// 容许的错误数：不到 4 个字母不容错（`zt` 容 1 个错就什么词都对得上），4 个起容 1 个，之后每 4 个字母多容 1 个。
-/// （2026-09-16 放宽：原每 6 个字母多容 1 个，十几个字母的长输入只容 2–3 个错，模型纠出来的词经常被挡。）
+/// 容许的错误数：不到 4 个字母不容错（`zt` 容 1 个错就什么词都对得上），4 个起容 1 个，之后每 6 个字母多容 1 个。
 pub fn tolerance(letters: usize) -> usize {
     if letters < 4 {
         0
     } else {
-        1 + (letters - 4) / 4
+        1 + (letters - 4) / 6
     }
 }
 
@@ -91,10 +90,8 @@ mod tests {
     fn tolerance_grows_slowly_with_length() {
         assert_eq!(tolerance(2), 0);
         assert_eq!(tolerance(3), 0);
-        assert_eq!(tolerance(4), 1);
-        assert_eq!(tolerance(7), 1);
-        assert_eq!(tolerance(8), 2);
-        assert_eq!(tolerance(12), 3);
-        assert_eq!(tolerance(16), 4);
+        assert_eq!(tolerance(5), 1);
+        assert_eq!(tolerance(9), 1);
+        assert_eq!(tolerance(10), 2);
     }
 }

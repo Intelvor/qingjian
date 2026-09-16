@@ -32,6 +32,12 @@ pub enum Setting {
     /// `[general] theme`，弹出菜单。
     Theme,
 
+    /// `[general] renderer`，弹出菜单：青简渲染器 / 系统绘制。
+    Renderer,
+
+    /// `[general] font`，字体列表选中的字族名；「系统默认」为系统字体。
+    Font,
+
     /// `[shortcut] expression`，弹出菜单 v / u / i。
     ExpressionKey,
 
@@ -74,6 +80,9 @@ pub enum Setting {
     /// 关闭编辑表单。
     CancelPhraseEdit,
 
+    /// `[general] system_text_replacements`，勾选框：系统的文本替换并进自定义短语。
+    SystemTextReplacements,
+
     /// `[predict] base_url`。
     BaseUrl,
 
@@ -94,6 +103,9 @@ pub enum Setting {
 
     /// `[general] english_candidates`，勾选框。
     EnglishCandidates,
+
+    /// `[general] chinese_first`，勾选框：中英混输时中文候选排在英文词前。
+    ChineseFirst,
 
     /// `[shortcut] translation`，快捷键录制按钮（只记修饰键）。
     TranslationKeys,
@@ -140,6 +152,9 @@ pub enum Setting {
     /// `[general] input_log`，勾选框。
     InputLog,
 
+    /// 学习输入习惯开关。
+    Learning,
+
     /// 「高级」页「清空输入日志」按钮。
     ClearInputLog,
 
@@ -171,6 +186,7 @@ impl Setting {
             Self::Layout => 12,
             Self::Preedit => 13,
             Self::EnglishCandidates => 14,
+            Self::ChineseFirst => 42,
             Self::TranslationKeys => 15,
             Self::TranslationSecondKeys => 16,
             Self::TranslateSelectionKeys => 17,
@@ -184,6 +200,7 @@ impl Setting {
             Self::EnglishCandidatesOffInApps => 25,
             Self::DeleteCandidateKeys => 26,
             Self::InputLog => 27,
+            Self::Learning => 45,
             Self::ClearInputLog => 28,
             Self::TestCloud => 29,
             Self::OpenWebsite => 30,
@@ -197,6 +214,9 @@ impl Setting {
             Self::NewPhrase => 38,
             Self::EditPhrase => 39,
             Self::CancelPhraseEdit => 40,
+            Self::Renderer => 43,
+            Self::Font => 44,
+            Self::SystemTextReplacements => 46,
             Self::Fuzzy(index) => FUZZY_TAG_BASE + index as NSInteger,
             Self::DictionaryEnabled(index) => DICTIONARY_ENABLED_TAG_BASE + index as NSInteger,
             Self::DictionaryRemove(index) => DICTIONARY_REMOVE_TAG_BASE + index as NSInteger,
@@ -209,6 +229,8 @@ impl Setting {
             2 => Self::PageSize,
             3 => Self::PageKeys,
             4 => Self::Theme,
+            43 => Self::Renderer,
+            44 => Self::Font,
             5 => Self::ExpressionKey,
             6 => Self::QuestionKey,
             41 => Self::QuestionMark,
@@ -220,6 +242,7 @@ impl Setting {
             12 => Self::Layout,
             13 => Self::Preedit,
             14 => Self::EnglishCandidates,
+            42 => Self::ChineseFirst,
             15 => Self::TranslationKeys,
             16 => Self::TranslationSecondKeys,
             17 => Self::TranslateSelectionKeys,
@@ -233,6 +256,7 @@ impl Setting {
             25 => Self::EnglishCandidatesOffInApps,
             26 => Self::DeleteCandidateKeys,
             27 => Self::InputLog,
+            45 => Self::Learning,
             28 => Self::ClearInputLog,
             29 => Self::TestCloud,
             30 => Self::OpenWebsite,
@@ -246,6 +270,7 @@ impl Setting {
             38 => Self::NewPhrase,
             39 => Self::EditPhrase,
             40 => Self::CancelPhraseEdit,
+            46 => Self::SystemTextReplacements,
             _ if tag >= DICTIONARY_REMOVE_TAG_BASE => {
                 let index = usize::try_from(tag - DICTIONARY_REMOVE_TAG_BASE).ok()?;
                 (index < MAX_DICTIONARIES).then_some(Self::DictionaryRemove(index))?
@@ -273,6 +298,8 @@ mod tests {
             Setting::PageSize,
             Setting::PageKeys,
             Setting::Theme,
+            Setting::Renderer,
+            Setting::Font,
             Setting::ExpressionKey,
             Setting::QuestionKey,
             Setting::CloudEnabled,
@@ -297,6 +324,7 @@ mod tests {
             Setting::EnglishCandidatesOffInApps,
             Setting::DeleteCandidateKeys,
             Setting::InputLog,
+            Setting::SystemTextReplacements,
             Setting::ClearInputLog,
             Setting::TestCloud,
             Setting::OpenWebsite,

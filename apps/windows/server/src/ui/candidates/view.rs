@@ -3,6 +3,7 @@
 
 use qingjian_platform::LayoutMode;
 use qingjian_platform::protocol::PreeditKind;
+use qingjian_render::{Row, Tone};
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::{
     CreateRoundRectRgn, CreateSolidBrush, DeleteObject, FillRect, FillRgn, GetTextExtentPoint32W,
@@ -10,15 +11,10 @@ use windows::Win32::Graphics::Gdi::{
 };
 
 use super::RenderData;
-use super::hits::Target;
-use super::row::{Row, Tone};
 use super::theme::Theme;
 
 /// 云端候选词前的小云朵（macOS 用 SF Symbol `cloud`）。
 const CLOUD_GLYPH: &str = "☁";
-
-/// 整句还在路上时跟在云朵后面的省略号（与整句同一位置，结果到了就换掉）。
-const PENDING_DOTS: &str = "…";
 
 /// 竖排的列宽与统一行高。
 struct Columns {
@@ -102,122 +98,23 @@ fn highlighted_annotation_size(hdc: HDC, data: &RenderData) -> Option<(i32, i32)
     Some((width, height))
 }
 
-/// 画整帧；背景与阴影已由合成器铺好，`client` 是内容区。`hover` 是鼠标停住的地方，
-/// 用比键盘高亮淡一档的底色标出来。
-pub(super) fn paint(hdc: HDC, data: &RenderData, client: RECT, hover: Option<Target>) {
+/// 画整帧；背景与阴影已由合成器铺好，`client` 是内容区。
+pub(super) fn paint(hdc: HDC, data: &RenderData, client: RECT) {
     let theme = &data.theme;
     unsafe { SetBkMode(hdc, TRANSPARENT) };
 
     let mut y = theme.padding;
-    y += draw_top_line(hdc, data, y, hover);
+    y += draw_top_line(hdc, data, y);
     y += draw_notice(hdc, data, y);
     match data.layout {
-        LayoutMode::Vertical => draw_rows(hdc, data, y, client.right - client.left, hover),
-        LayoutMode::Horizontal => draw_horizontal(hdc, data, y, client.right - client.left, hover),
+        LayoutMode::Vertical => draw_rows(hdc, data, y, client.right - client.left),
+        LayoutMode::Horizontal => draw_horizontal(hdc, data, y, client.right - client.left),
     }
 }
 
-/// 一帧里可以点的地方：候选行（竖排是 y 区间、横排是 x 区间，元组末位是页内序号）与顶部整句补全的矩形。
-pub(super) struct Bands {
-    /// 各候选行的命中带。
-    pub(super) rows: Vec<(i32, i32, usize)>,
-
-    /// 整句补全的可点范围；没有整句时为 `None`。
-    pub(super) sentence: Option<RECT>,
-}
-
-/// 采集这一帧的可点范围，供鼠标命中。与 [`paint`] 用同一套度量，两处必须对得上。
-pub(super) fn hit_bands(hdc: HDC, data: &RenderData) -> Bands {
-    Bands {
-        rows: row_bands(hdc, data),
-        sentence: sentence_hit(hdc, data),
-    }
-}
-
-/// 各候选行在内容坐标里的命中带，供鼠标点选。
-fn row_bands(hdc: HDC, data: &RenderData) -> Vec<(i32, i32, usize)> {
-    let theme = &data.theme;
-    let top = body_top(hdc, data);
-    match data.layout {
-        LayoutMode::Vertical => {
-            let height = columns(hdc, theme, &data.rows).row_height;
-            (0..data.rows.len())
-                .map(|i| {
-                    let start = top + height * i as i32;
-                    (start, start + height, i)
-                })
-                .collect()
-        }
-        LayoutMode::Horizontal => {
-            let index_gap = theme.column_gap / 2;
-            let highlight_inset = theme.padding / 2;
-            let mut x = theme.padding + highlight_inset;
-            data.rows
-                .iter()
-                .enumerate()
-                .map(|(i, row)| {
-                    let index = measure(hdc, theme.index_font, &row.index);
-                    let text = measure(hdc, theme.text_font, &row.text);
-                    let width =
-                        index.cx + index_gap + cloud_prefix_width(hdc, theme, row) + text.cx;
-                    let band = (x - highlight_inset, x + width + highlight_inset, i);
-                    x += width + theme.column_gap;
-                    band
-                })
-                .collect()
-        }
-    }
-}
-
-/// 候选行从哪儿开始排：内边距 + 顶部拼音行 + 屏幕提示行。
-fn body_top(hdc: HDC, data: &RenderData) -> i32 {
-    let theme = &data.theme;
-    theme.padding + top_line_size(hdc, data).1 + notice_line_size(hdc, data).1
-}
-
-/// 拼音行画完后的 x（整句补全从它后面隔一段接上）。
-fn preedit_x(hdc: HDC, data: &RenderData) -> i32 {
-    let theme = &data.theme;
-    theme.padding
-        + data
-            .preedit
-            .iter()
-            .map(|(text, _)| measure(hdc, theme.annotation_font, text).cx)
-            .sum::<i32>()
-}
-
-/// 顶部整句补全（`☁ 文本`）在内容坐标里的文字范围；没有整句时为 `None`。
-fn sentence_rect(hdc: HDC, data: &RenderData) -> Option<RECT> {
-    let sentence = data.sentence.as_deref()?;
-    let theme = &data.theme;
-    let left = preedit_x(hdc, data) + theme.column_gap;
-    let width = cloud_glyph_width(hdc, theme) + measure(hdc, theme.annotation_font, sentence).cx;
-    let top = theme.padding + theme.row_padding;
-    Some(RECT {
-        left,
-        top,
-        right: left + width,
-        bottom: top + line_height(hdc, theme.annotation_font),
-    })
-}
-
-/// 整句补全的可点范围：比文字松一圈，点起来不必像素级对准；悬停底色也用这一块。
-fn sentence_hit(hdc: HDC, data: &RenderData) -> Option<RECT> {
-    let rect = sentence_rect(hdc, data)?;
-    let theme = &data.theme;
-    let (x, y) = (theme.padding / 2, theme.row_padding);
-    Some(RECT {
-        left: rect.left - x,
-        top: rect.top - y,
-        right: rect.right + x,
-        bottom: rect.bottom + y,
-    })
-}
-
-/// 顶部拼音行：各段按样式画、自己画光标、右侧整句补全（可点）。返回占用高度。
-/// 「只在行内」时没有拼音行，但整句补全仍要画（占用同一条线）。
-fn draw_top_line(hdc: HDC, data: &RenderData, y: i32, hover: Option<Target>) -> i32 {
-    if data.preedit.is_empty() && data.sentence.is_none() && !data.sentence_pending {
+/// 顶部拼音行：各段按样式画、自己画光标、右侧整句补全。返回占用高度。
+fn draw_top_line(hdc: HDC, data: &RenderData, y: i32) -> i32 {
+    if data.preedit.is_empty() {
         return 0;
     }
     let theme = &data.theme;
@@ -242,30 +139,23 @@ fn draw_top_line(hdc: HDC, data: &RenderData, y: i32, hover: Option<Target>) -> 
         }
         x += width;
     }
-    if !data.preedit.is_empty() {
-        let before = concat_before_cursor(&data.preedit, data.cursor);
-        let caret_x = theme.padding + measure(hdc, theme.annotation_font, &before).cx;
-        let caret = RECT {
-            left: caret_x,
-            top,
-            right: caret_x + scale_line(theme),
-            bottom: top + height,
-        };
-        fill_rect(hdc, caret, theme.text_color);
-    }
-    let tail_x = x + theme.column_gap;
-    let cloud = cloud_glyph_width(hdc, theme);
+    let before = concat_before_cursor(&data.preedit, data.cursor);
+    let caret_x = theme.padding + measure(hdc, theme.annotation_font, &before).cx;
+    let caret = RECT {
+        left: caret_x,
+        top,
+        right: caret_x + scale_line(theme),
+        bottom: top + height,
+    };
+    fill_rect(hdc, caret, theme.text_color);
     if let Some(sentence) = &data.sentence {
-        if hover == Some(Target::Sentence)
-            && let Some(hit) = sentence_hit(hdc, data)
-        {
-            fill_round_rect(hdc, hit, theme.hover, theme.corner_radius / 2);
-        }
+        let sentence_x = x + theme.column_gap;
+        let cloud = cloud_glyph_width(hdc, theme);
         draw_text(
             hdc,
             theme.annotation_font,
             theme.cloud_color,
-            tail_x,
+            sentence_x,
             top,
             CLOUD_GLYPH,
         );
@@ -273,27 +163,9 @@ fn draw_top_line(hdc: HDC, data: &RenderData, y: i32, hover: Option<Target>) -> 
             hdc,
             theme.annotation_font,
             theme.gloss_color,
-            tail_x + cloud,
+            sentence_x + cloud,
             top,
             sentence,
-        );
-    } else if data.sentence_pending {
-        // 整句还在路上：先在同一个位置放一朵云加几个点，结果到了原地换掉。
-        draw_text(
-            hdc,
-            theme.annotation_font,
-            theme.cloud_color,
-            tail_x,
-            top,
-            CLOUD_GLYPH,
-        );
-        draw_text(
-            hdc,
-            theme.annotation_font,
-            theme.pos_color,
-            tail_x + cloud,
-            top,
-            PENDING_DOTS,
         );
     }
     height + theme.row_padding * 2
@@ -328,29 +200,20 @@ fn notice_line_size(hdc: HDC, data: &RenderData) -> (i32, i32) {
     )
 }
 
-fn draw_rows(hdc: HDC, data: &RenderData, mut y: i32, width: i32, hover: Option<Target>) {
+fn draw_rows(hdc: HDC, data: &RenderData, mut y: i32, width: i32) {
     let theme = &data.theme;
     let columns = columns(hdc, theme, &data.rows);
     let text_x = theme.padding + columns.index_width + theme.column_gap;
     let annotation_x = text_x + columns.text_width + theme.column_gap;
     for (i, row) in data.rows.iter().enumerate() {
-        let band = |color| {
-            fill_round_rect(
-                hdc,
-                RECT {
-                    left: theme.padding / 2,
-                    top: y,
-                    right: width - theme.padding / 2,
-                    bottom: y + columns.row_height,
-                },
-                color,
-                theme.corner_radius / 2,
-            );
-        };
         if i == data.highlight {
-            band(theme.highlight);
-        } else if hover == Some(Target::Row(i)) {
-            band(theme.hover);
+            let rect = RECT {
+                left: theme.padding / 2,
+                top: y,
+                right: width - theme.padding / 2,
+                bottom: y + columns.row_height,
+            };
+            fill_round_rect(hdc, rect, theme.highlight, theme.corner_radius / 2);
         }
         let baseline = y + theme.row_padding;
         let text_size = measure(hdc, theme.text_font, &row.text);
@@ -390,7 +253,7 @@ fn draw_rows(hdc: HDC, data: &RenderData, mut y: i32, width: i32, hover: Option<
     }
 }
 
-fn draw_horizontal(hdc: HDC, data: &RenderData, y: i32, width: i32, hover: Option<Target>) {
+fn draw_horizontal(hdc: HDC, data: &RenderData, y: i32, width: i32) {
     if data.rows.is_empty() {
         return;
     }
@@ -410,23 +273,14 @@ fn draw_horizontal(hdc: HDC, data: &RenderData, y: i32, width: i32, hover: Optio
         let text_size = measure(hdc, theme.text_font, &row.text);
         let item_width =
             index_width + index_gap + cloud_prefix_width(hdc, theme, row) + text_size.cx;
-        let band = |color| {
-            fill_round_rect(
-                hdc,
-                RECT {
-                    left: x - highlight_inset,
-                    top: y,
-                    right: x + item_width + highlight_inset,
-                    bottom: y + row_height,
-                },
-                color,
-                theme.corner_radius / 2,
-            );
-        };
         if i == data.highlight {
-            band(theme.highlight);
-        } else if hover == Some(Target::Row(i)) {
-            band(theme.hover);
+            let rect = RECT {
+                left: x - highlight_inset,
+                top: y,
+                right: x + item_width + highlight_inset,
+                bottom: y + row_height,
+            };
+            fill_round_rect(hdc, rect, theme.highlight, theme.corner_radius / 2);
         }
         let small_offset = small_offset(hdc, theme, text_size.cy);
         draw_text(
@@ -476,37 +330,19 @@ fn draw_horizontal(hdc: HDC, data: &RenderData, y: i32, width: i32, hover: Optio
 }
 
 fn top_line_size(hdc: HDC, data: &RenderData) -> (i32, i32) {
-    if data.preedit.is_empty() && data.sentence.is_none() && !data.sentence_pending {
+    if data.preedit.is_empty() {
         return (0, 0);
     }
     let theme = &data.theme;
     let height = line_height(hdc, theme.annotation_font);
-    // 没有拼音行时那段宽度为 0，但整句补全前面的间隔照旧。
-    let mut width = if data.preedit.is_empty() {
-        0
-    } else {
-        let full: String = data.preedit.iter().map(|(t, _)| t.as_str()).collect();
-        measure(hdc, theme.annotation_font, &full).cx + scale_line(theme)
-    };
-    let tail = tail_width(hdc, data);
-    if tail > 0 {
-        width += theme.column_gap + tail;
+    let full: String = data.preedit.iter().map(|(t, _)| t.as_str()).collect();
+    let mut width = measure(hdc, theme.annotation_font, &full).cx + scale_line(theme);
+    if let Some(sentence) = &data.sentence {
+        width += theme.column_gap
+            + cloud_glyph_width(hdc, theme)
+            + measure(hdc, theme.annotation_font, sentence).cx;
     }
     (width, height + theme.row_padding * 2)
-}
-
-/// 顶部行右侧那一块的宽度：整句补全，或还没到时的那几个点；都没有为 0。
-/// [`draw_top_line`] 与 [`top_line_size`] 都走这里，画出来的和量出来的不会对不上。
-fn tail_width(hdc: HDC, data: &RenderData) -> i32 {
-    let theme = &data.theme;
-    let cloud = cloud_glyph_width(hdc, theme);
-    if let Some(sentence) = data.sentence.as_deref() {
-        cloud + measure(hdc, theme.annotation_font, sentence).cx
-    } else if data.sentence_pending {
-        cloud + measure(hdc, theme.annotation_font, PENDING_DOTS).cx
-    } else {
-        0
-    }
 }
 
 fn columns(hdc: HDC, theme: &Theme, rows: &[Row]) -> Columns {
@@ -628,7 +464,7 @@ pub(crate) fn fill_rect(hdc: HDC, rect: RECT, color: COLORREF) {
     }
 }
 
-pub(crate) fn fill_round_rect(hdc: HDC, rect: RECT, color: COLORREF, radius: i32) {
+fn fill_round_rect(hdc: HDC, rect: RECT, color: COLORREF, radius: i32) {
     let diameter = (radius * 2).max(1);
     unsafe {
         let region = CreateRoundRectRgn(

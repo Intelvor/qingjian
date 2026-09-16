@@ -3,40 +3,24 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]
+mod log;
+#[cfg(windows)]
 mod panel;
 
 #[cfg(windows)]
 fn main() {
-    // 已经开着一个就不再开第二个（状态条齿轮那条路会先把已有窗口叫到前台，见 Server 的 `open_settings`）。
-    if already_running() {
-        return;
-    }
     if let Err(error) = windows_reactor::App::run_component::<panel::Settings>(()) {
-        eprintln!("设置界面启动失败: {error:?}");
+        // GUI 子系统没有控制台：记文件日志，再弹个框让用户知道发生了什么（最常见是运行库文件缺失）。
+        log::error(format!("设置界面启动失败: {error:?}"));
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("青简设置")
+            .set_description(format!(
+                "设置界面启动失败，请重新安装青简；仍不行请把日志目录发给作者。\n\n{error}"
+            ))
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
     }
-}
-
-/// 本登录会话（`Local\`）里已经有一个设置程序在跑？互斥体拿到手就活到进程结束，不显式关。
-#[cfg(windows)]
-fn already_running() -> bool {
-    use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS};
-    use windows::Win32::System::Threading::CreateMutexW;
-    use windows::core::{PCWSTR, w};
-
-    /// 只有设置程序用的名字。
-    const INSTANCE: PCWSTR = w!("Local\\QingjianSettings");
-
-    let Ok(handle) = (unsafe { CreateMutexW(None, false, INSTANCE) }) else {
-        // 建不出来（权限之类）就别拦着用户用设置。
-        return false;
-    };
-    if unsafe { windows::Win32::Foundation::GetLastError() } == ERROR_ALREADY_EXISTS {
-        let _ = unsafe { CloseHandle(handle) };
-        return true;
-    }
-    // 拿到手的句柄故意不关：「关了互斥体就没了」，下次启动就挡不住了。`HANDLE` 是 Copy，
-    // 出了作用域也不会自动关，进程活着的这段它就是那面旗子。
-    false
 }
 
 #[cfg(not(windows))]

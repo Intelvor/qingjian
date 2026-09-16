@@ -29,6 +29,9 @@ pub struct GeneralPage {
     /// 终端 / 编辑器里不给英文候选。
     english_off_in_apps: Retained<NSButton>,
 
+    /// 中英混输时中文候选排在英文词前。
+    chinese_first: Retained<NSButton>,
+
     /// 学习语言弹出菜单里各项对应的语言。
     languages: Vec<Language>,
 
@@ -44,9 +47,11 @@ impl GeneralPage {
         target: &PreferencesTarget,
         languages: &[Language],
     ) -> Self {
+        // 最后一项是关
         let language_titles: Vec<String> = languages
             .iter()
             .map(|l| language_label(*l).to_owned())
+            .chain(std::iter::once("不显示译文".to_owned()))
             .collect();
         let learning_language = row_popup(
             layout,
@@ -59,7 +64,7 @@ impl GeneralPage {
         note(
             layout,
             mtm,
-            "候选词右侧显示哪种语言的译词，只列出安装了释义表的语言。",
+            "候选词右侧显示哪种语言的译词，只列出安装了释义表的语言；「不显示译文」同时关掉生词标记与释义兜底。",
         );
         let page_size_titles: Vec<String> = (1..=MAX_PAGE_SIZE).map(|n| n.to_string()).collect();
         let page_size = row_popup(
@@ -123,12 +128,25 @@ impl GeneralPage {
             mtm,
             "终端、iTerm、Warp、Ghostty、VS Code、Cursor、Zed、JetBrains、Xcode 等，那里的候选窗口会挡住应用自己的补全；名单可在配置文件里改。",
         );
+        let chinese_first = checkbox(
+            mtm,
+            "输入拼音时中文候选排在英文词前面",
+            Setting::ChineseFirst,
+            target,
+        );
+        row_checkbox(layout, &chinese_first);
+        note(
+            layout,
+            mtm,
+            "勾上后整段输入是英文词时（hello、key）英文词排第二，空格上屏的仍是中文；不勾（缺省）拼音不成立的输入英文词排第一。",
+        );
         Self {
             learning_language,
             page_size,
             shuangpin,
             english,
             english_off_in_apps,
+            chinese_first,
             languages: languages.to_vec(),
             punctuation,
         }
@@ -142,9 +160,13 @@ impl GeneralPage {
         );
         select(
             &self.learning_language,
-            self.languages
-                .iter()
-                .position(|l| l.code() == general.learning_language),
+            if general.learning_language_off() {
+                Some(self.languages.len())
+            } else {
+                self.languages
+                    .iter()
+                    .position(|l| l.code() == general.learning_language)
+            },
         );
         select(&self.page_size, Some(general.page_size() - 1));
         select(
@@ -163,5 +185,6 @@ impl GeneralPage {
         );
         self.english_off_in_apps
             .setEnabled(general.english_candidates);
+        set_checked(&self.chinese_first, general.chinese_first);
     }
 }

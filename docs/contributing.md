@@ -32,7 +32,7 @@
 ## 命名与注释
 
 - 代码标识符一律英文，注释与文档用中文；`thiserror` 的 `#[error]` 文案用英文，日志与 UI 文案用中文。
-- 新文件都要有 `//!` 文件头；结构体 / 枚举字段逐条 `///` 注释，字段之间空一行。
+- 新文件都要有 `//!` 文件头；结构体 / 枚举字段之间空一行，字段名说不清的加 `///`（`r` / `g` / `b`、`width` 这类不用，`a`「255 为不透明」这类要）。
 - 不写装饰性分隔注释（`// ====`），提交钩子会拦。
 
 ## 依赖与配置
@@ -43,12 +43,20 @@
 ## 版本号
 
 - `crates/*` 用 `version.workspace = true`；**`apps/*` 各壳是独立发布的产品，写死自己的 `version`**（Windows 读 `server/Cargo.toml`）。
-- 发版之间带 `-dev`（mac `0.1.3-dev`、win `0.1.0-alpha.3-dev`），打包脚本再接 git 短哈希成 `0.1.3-dev-1a2b3c4`（脏加 `+`，Cargo.toml 里只写 `-dev`）。
+- 发版之间带 `-dev`（两端都是 `0.1.3-dev`），打包脚本再接 git 短哈希成 `0.1.3-dev-1a2b3c4`（脏加 `+`，Cargo.toml 里只写 `-dev`）。
 - 发版提交去掉 `-dev` 打标签（`macos-v<版本>` / `windows-v<版本>`），标签后再改成下一个 `-dev`；带 `-dev` 的标签 CI 拒绝；pkg / Inno 只认数字点号。
 
 ## 提交信息
 
-- 中文冒号格式：`macOS：……` / `Windows：……` / `Core：……` / `仓库：……` / `文档：……`；不加 AI 署名。
+- [Conventional Commits](https://www.conventionalcommits.org/zh-hans/)：第一行 `<类型>(<范围>): <说明>`，类型与范围英文小写，说明用中文，例如
+  `fix(core): 修自绘输入框吞数字`、`feat(windows): 三进程日志统一到 %LOCALAPPDATA%\Qingjian\logs`、`docs(changelog): 补 0.1.3 条目`。
+  - 类型：`feat` 新功能 / `fix` 修 bug / `docs` 只改文档 / `refactor` 不改行为的整理 / `perf` 性能 / `test` 只改测试 /
+    `build` 打包与构建脚本 / `ci` 工作流 / `chore` 版本号、依赖、仓库杂务 / `style` 只改格式 / `revert` 还原。
+  - 范围：crate 或壳的名字——`core` `platform` `render` `dictionary` `translate` `learning` `predict` `lm` `neural` `format` `cli`
+    `macos` `windows`（Server / DLL / 设置程序细分时用 `server` `tsf` `settings`）`installer` `linux` `tools` `docs` `ci` `deps` `release`；
+    跨好几处的可以省略。不兼容的改动在范围后加 `!`。
+  - 正文写「为什么」与取舍，一行一条；不加 AI 署名。`.githooks/commit-msg` 会拦第一行不合格式的提交。
+  - 2026-09-16 之前的历史是「`macOS：……` / `Core：……`」的中文冒号格式，不重写。
 
 ## 文档同步
 
@@ -58,7 +66,7 @@
 
 ## 提交前检查
 
-- 钩子：`.githooks/pre-commit`（禁装饰性分隔注释 + fmt + clippy），`.githooks/pre-push`（全 workspace 测试）；`git config core.hooksPath .githooks` 启用一次。
+- 钩子：`.githooks/pre-commit`（禁装饰性分隔注释 + fmt + clippy）、`.githooks/commit-msg`（提交信息格式）、`.githooks/pre-push`（全 workspace 测试）；`git config core.hooksPath .githooks` 启用一次。
 - 排序 / 整句 / 纠错的改动先跑 `apps/cli` 再合。
 
 ## CI 与发版
@@ -71,3 +79,4 @@
 
 - 从 main 开分支，一个 PR 只做一件事、只碰一个平台（Core 改动单独一个）。
 - 维护者对着 main 审，squash 合并保留作者署名。PR 模板里的合并前清单就是审核标准。
+- 主题与自绘渲染器（`crates/qingjian-render`、各壳的贴图路径、主题文件）还在测试，这部分暂不接受 PR；稳定一版后再开。

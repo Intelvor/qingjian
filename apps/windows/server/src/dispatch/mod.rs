@@ -18,12 +18,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use qingjian_core::{Engine, SurroundingText};
+use qingjian_core::Engine;
 use qingjian_platform::LocalModelConfig;
 use qingjian_platform::protocol::{ClientMessage, Frame, ScreenRect, ServerMessage, SessionId};
-use qingjian_predict::PredictConfig;
 
-pub use self::candidates::{CandidateEvent, CandidateSink, NoopSink};
+pub use self::candidates::{CandidateSink, NoopSink, RenderSettings};
 use self::composed::Composed;
 pub use self::config::RouterConfig;
 use self::reload::ConfigReload;
@@ -37,9 +36,6 @@ use self::translate::Translation;
 /// 学习数据落盘间隔（与 macOS 壳一致）；Server 没有定时器，借消息节拍看时间。
 const LEARNING_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 
-/// 整句请求最长等多久就不再显示「联想中」（云端那边超时是 5 秒，再留点余量）。
-const SENTENCE_PENDING_TIMEOUT: Duration = Duration::from_secs(6);
-
 /// 同一时刻只有一个应用有键盘焦点，所以一个 Engine 持当前组句；焦点切到别的会话时先清掉上一个的残留。
 pub struct Router {
     /// 输入内核，进程内唯一。
@@ -47,9 +43,6 @@ pub struct Router {
 
     /// 每页候选数 / 云端槽位 / 排布 / 外观 / 翻页键等。
     config: RouterConfig,
-
-    /// 云联想配置：状态条上的「☁」格翻转 `enabled` 后按它换掉 Predictor，热加载时跟着配置文件走。
-    predict: PredictConfig,
 
     /// 活跃会话及各自的宿主应用。
     sessions: HashMap<SessionId, SessionInfo>,
@@ -66,18 +59,11 @@ pub struct Router {
     /// 已发出、等 DLL 回选区的请求号；对不上的 `Selection` 丢弃。
     pending_selection: Option<u64>,
 
-    /// 候选窗上点选、还没被 DLL 取走的上屏文本：传输一问一答，只能攒着等下一次轮询带回。
-    pending_commit: Option<String>,
-
     /// 「翻译选中文字」请求号计数器。
     selection_seq: u64,
 
     /// 整句补全（preedit 右侧、Tab 上屏）；缓冲变化时清空。
     sentence: Option<String>,
-
-    /// 整句请求发出去了、结果还没到（发出时刻）：候选窗据此显示「联想中」，
-    /// 结果到了 / 组句结束 / 等超（[`SENTENCE_PENDING_TIMEOUT`]）就清。
-    sentence_pending: Option<Instant>,
 
     /// 删候选后的屏幕提示，随下一帧下发、下一次按键清。
     notice: Option<String>,
@@ -110,10 +96,6 @@ pub struct Router {
     /// 聚焦会话最近报来的光标矩形；云联想异步到达时按它原地重摆候选窗口。
     last_rect: Option<ScreenRect>,
 
-    /// 聚焦会话这次组句的光标前后文本（DLL 在组句起始送来的）：给本地整句模型当前文，也给云联想当上下文。
-    /// 组句结束就作废。
-    surrounding: Option<SurroundingText>,
-
     /// 上次真正显示的帧与位置：没变就不重画（组字期间的空转 Poll 很多）。
     last_shown: Option<(Frame, ScreenRect)>,
 
@@ -138,16 +120,13 @@ impl Router {
                 page_size: config.page_size.max(1),
                 ..config
             },
-            predict: PredictConfig::default(),
             sessions: HashMap::new(),
             focused: None,
             composed: None,
             translation: None,
             pending_selection: None,
-            pending_commit: None,
             selection_seq: 0,
             sentence: None,
-            sentence_pending: None,
             notice: None,
             highlight: 0,
             navigated: false,
@@ -158,7 +137,6 @@ impl Router {
             status_mode: None,
             pending_mode: None,
             last_rect: None,
-            surrounding: None,
             last_shown: None,
             model_path: None,
             model_loader: None,
@@ -168,6 +146,7 @@ impl Router {
     }
 
     pub fn set_candidate_sink(&mut self, sink: Box<dyn CandidateSink>) {
+        sink.configure(self.config.render_settings());
         self.candidates = sink;
     }
 
@@ -178,16 +157,6 @@ impl Router {
 
     pub fn set_status_sink(&mut self, sink: Box<dyn StatusSink>) {
         self.status = sink;
-    }
-
-    /// 启动时记下云联想配置（缺省关闭）；状态条上的「☁」格按它翻转 `enabled` 并重新接入。
-    pub fn configure_predict(&mut self, predict: PredictConfig) {
-        self.predict = predict;
-    }
-
-    /// 在线联想开着没有；状态条的「☁」格据此上色，也决定这一格点下去往哪边翻。
-    pub fn cloud_enabled(&self) -> bool {
-        self.predict.enabled
     }
 
     /// 处理一条消息；`None` 表示不用回话。到点顺带把学习数据落盘。

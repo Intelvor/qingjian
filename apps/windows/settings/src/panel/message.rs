@@ -12,19 +12,21 @@ pub(crate) enum Message {
     Shuangpin(Option<usize>),
     Zhuyin(bool),
     EnglishCandidates(bool),
+    ChineseFirst(bool),
     FullWidthPunctuation(bool),
     EnglishFullWidthPunctuation(bool),
     /// 开=写入平台默认名单，关=清空。
     EnglishOffInApps(bool),
-    /// 中英切换键（[`qingjian_platform::SwitchKey`] 的下标）。
-    SwitchMode(Option<usize>),
-    /// 内置英文模式总开关。
-    EnglishMode(bool),
 
     // 候选窗口页
     Theme(Option<usize>),
     Layout(Option<usize>),
     Preedit(Option<usize>),
+    Renderer(Option<usize>),
+    /// 字体框里的文字变了：空或正好是某个字族名就落盘。
+    FontQuery(String),
+    /// 从提示里选了一个字族。
+    Font(String),
     StatusBar(bool),
 
     // 云服务页
@@ -35,7 +37,6 @@ pub(crate) enum Message {
     CloudBaseUrl(String),
     CloudSlots(Option<f64>),
     CloudSentence(bool),
-    CloudSentenceTrigger(Option<usize>),
     TestConnection,
     CloudTestDone(Result<String, String>),
 
@@ -64,9 +65,13 @@ pub(crate) enum Message {
     // 高级页
     VerboseLog(bool),
     InputLog(bool),
+    /// 学习输入习惯开关。
+    Learning(bool),
     OpenConfigFile,
     OpenDataDir,
     OpenLogDir,
+    /// 日志目录 + config.toml 打成 zip 放桌面。
+    ExportLogs,
     ClearInputLog,
 
     // 关于页

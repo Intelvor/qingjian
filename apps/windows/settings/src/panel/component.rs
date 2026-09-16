@@ -1,12 +1,13 @@
 //! 根组件的 Reactor 生命周期：建状态、按消息落盘、画左侧导航 + 当前页。
 
 use qingjian_platform::{
-    Config, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, LayoutMode, LogLevel, PreeditMode, ThemeMode,
+    CandidateRenderer, Config, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, LayoutMode, LogLevel,
+    PreeditMode, ThemeMode,
 };
 use windows_reactor::*;
 
 use super::cloud_status::CloudStatus;
-use super::controls::{open_in_editor, open_with_explorer};
+use super::controls::{export_logs, log_dir, open_in_editor, open_with_explorer};
 use super::pages::{about, cloud, dictionaries, general, shortcut};
 use super::{Message, Settings};
 
@@ -22,6 +23,9 @@ impl Component for Settings {
             path,
             page: "general".to_string(),
             cloud_status: CloudStatus::Idle,
+            dictionary_status: String::new(),
+            families: qingjian_render::system_fonts::families(),
+            font_query: None,
         }
     }
 
@@ -43,6 +47,7 @@ impl Component for Settings {
             }
             Message::Zhuyin(on) => self.save("general", "zhuyin", on),
             Message::EnglishCandidates(on) => self.save("general", "english_candidates", on),
+            Message::ChineseFirst(on) => self.save("general", "chinese_first", on),
             Message::FullWidthPunctuation(on) => {
                 self.save("general", "full_width_punctuation", on);
             }
@@ -60,10 +65,6 @@ impl Component for Settings {
                 };
                 self.save_array("apps", "english_candidates_off", &list);
             }
-            Message::SwitchMode(Some(i)) if i < general::SWITCH_KEYS.len() => {
-                self.save("shortcut", "switch_mode", general::SWITCH_KEYS[i].1);
-            }
-            Message::EnglishMode(on) => self.save("general", "english_mode", on),
 
             // 候选窗口页
             Message::Theme(Some(i)) if i < ThemeMode::ALL.len() => {
@@ -74,6 +75,32 @@ impl Component for Settings {
             }
             Message::Preedit(Some(i)) if i < PreeditMode::ALL.len() => {
                 self.save("general", "preedit", PreeditMode::ALL[i].key());
+            }
+            Message::Renderer(Some(i)) if i < CandidateRenderer::ALL.len() => {
+                self.save("general", "renderer", CandidateRenderer::ALL[i].key());
+            }
+            Message::FontQuery(text) => {
+                let text = text.trim().to_owned();
+                let exact = self
+                    .families
+                    .iter()
+                    .find(|family| family.eq_ignore_ascii_case(&text))
+                    .cloned();
+                match exact {
+                    Some(family) => {
+                        self.font_query = None;
+                        self.save("general", "font", family);
+                    }
+                    None if text.is_empty() => {
+                        self.font_query = None;
+                        self.save("general", "font", "");
+                    }
+                    None => self.font_query = Some(text),
+                }
+            }
+            Message::Font(family) => {
+                self.font_query = None;
+                self.save("general", "font", family);
             }
             Message::StatusBar(on) => self.save("status_bar", "enabled", on),
 
@@ -88,9 +115,6 @@ impl Component for Settings {
                 self.save("predict", "slots", slots);
             }
             Message::CloudSentence(on) => self.save("predict", "sentence", on),
-            Message::CloudSentenceTrigger(Some(i)) if i < cloud::SENTENCE_TRIGGERS.len() => {
-                self.save("predict", "sentence_trigger", cloud::SENTENCE_TRIGGERS[i].1);
-            }
             Message::TestConnection => {
                 if matches!(self.cloud_status, CloudStatus::Testing) {
                     return;
@@ -174,21 +198,23 @@ impl Component for Settings {
                 self.save("general", "log_level", level.key());
             }
             Message::InputLog(on) => self.save("general", "input_log", on),
+            Message::Learning(on) => self.save("general", "learning", on),
             Message::OpenConfigFile => open_in_editor(&self.path),
             Message::OpenDataDir => {
                 open_with_explorer(&self.data_dir().to_string_lossy());
             }
             Message::OpenLogDir => {
-                let logs = self.data_dir().join("logs");
-                let _ = std::fs::create_dir_all(&logs);
-                open_with_explorer(&logs.to_string_lossy());
+                if let Some(logs) = log_dir() {
+                    open_with_explorer(&logs.to_string_lossy());
+                }
             }
+            Message::ExportLogs => export_logs(),
             Message::ClearInputLog => {
                 let log = self.data_dir().join("input-log.jsonl");
                 if let Err(error) = std::fs::remove_file(&log)
                     && error.kind() != std::io::ErrorKind::NotFound
                 {
-                    eprintln!("清空输入日志失败: {error}");
+                    crate::log::warn(format!("清空输入日志失败: {error}"));
                 }
             }
 

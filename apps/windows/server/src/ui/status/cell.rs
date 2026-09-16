@@ -3,7 +3,7 @@
 use windows::Win32::Foundation::COLORREF;
 use windows::Win32::Graphics::Gdi::HFONT;
 
-use super::StatusAction;
+use super::placement::StatusAction;
 
 /// 一格：文字、字体、颜色、点下去做什么。
 pub(super) struct CellSpec {

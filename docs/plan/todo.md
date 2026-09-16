@@ -44,8 +44,7 @@
 - [ ] 候选窗口里超长释义要截断（CEDICT 表时 你 那条能拉到整屏宽；LLM 表已短，仍要兜底）
 - [ ] 翻译选中文字：译文很长时候选窗口的折行（读不到选区的提示已做）
 - [ ] 英文模式候选：把数据包的误拼对照表（typos，10 万对）喂进纠正，技术词（kubectl）没有 wordfreq 词频要给底值，两处编辑的纠正
-- [ ] 全角 / 半角切换，`。` 与 `．`（`-` `=` 非组句时的行为 2026-09-15 已定：仍是半角，但改由壳自己插入，
-  不再靠放行——放行在部分宿主里到不了应用，见 `candidate-ui.md` 的标点一节）
+- [ ] 全角 / 半角切换，`。` 与 `．`，`-` `=` 非组句时的行为
 - [ ] 快捷短语（`i` 前缀）：编码 → 短语表，用户可增删
 - [ ] 问字模式离线版：拆字表（IDS 数据）按部件查字，云端版已有
 - [ ] 双拼收尾：菜单栏增加方案切换
@@ -59,9 +58,6 @@
   边界规则，5400 条：我的 / 好的 / 不知道 / 有没有 / 那我），品牌词 `brand.tsv`（青简 210）；词典词头收不到的这一层以后按同一方法补
 - [x] 语料里少的领域词（对齐 / 后端 / 词库 / 候选框）：2026-09-12 从日志人工挑 48 条进 `assets/lexicon/domain_words.tsv`，语言模型走合成计数（`docs/notes/domain-words.md`）；
   语料 0 次的（微软拼音 / 悬浮条）按规矩没进，要进得另立白名单
-- [x] 中英混杂词与英文专名（2026-09-15）：`assets/lexicon/mixed_words.tsv`（C盘 / B站 / U盘 / T恤 / A股…，`cpan`→C盘，`youpan`→U盘，
-  可进整句 `wozaibzhan`→我在B站）；`dict-convert english` 同编码优先大写专名（Windows ≠ windows），`07_display_forms.tsv` 补 VSCode / Bilibili 等；
-  产品 `dict.tsv` / `english.tsv` 已更新。句中英文仍只支持句末尾段，见「中英混输」。
 - [ ] 按输入串记的选择只认字面：`wod` 下选的 我的 惠及不到 `wode`；考虑同时按候选全拼记一份、查询取两者最大
 - [ ] 已经学进用户词的错读音云端词（`我的 wo di`、`我的哦 wo di e` 这类）没有清理入口：偏好设置词库页给「按读音核对用户词」，或一次性脚本
 - [ ] 正式版前的发布可信性（2026-09-12 外部 CI 检查，测试版先不做）：产品数据改不可变 tag 并在仓库锁版本 + SHA（现在滚动 `data` Release，只校验 SHA256SUMS）；
@@ -79,6 +75,11 @@
 - [ ] 可选复习（Phase 4）：输入统计、生词识别、词汇统计（含 CEFR / JLPT 等级分布）已做（2026-09-06）；复习容易变成打扰，先不急
 - [ ] 云联想收尾（Phase 6）：密钥进钥匙串（等签名定了再做，ad-hoc 签名每次重装都弹授权）、按应用禁用、限流与用量统计
 - [ ] 个人模型（Phase 7）：小 Transformer 实验（有评测门槛），见 roadmap
+
+- [ ] ★ **主题与自绘渲染器 spike**（2026-09-13 定向，分支 `renderer-spike`，见 [design/rendering.md](../design/rendering.md)）：
+  tiny-skia + cosmic-text 画一行「青简 hello 🙂 日本語」+ 圆角阴影，Windows / macOS 与原生并排截图，验四条：彩色 emoji（sbix / COLRv0）、
+  中日字形回退按 locale、字体按需加载（不扫全系统）、灰度抗锯齿观感；首帧耗时与内存不劣于 GDI / AppKit。过了 Windows + macOS 一起换渲染器、主题文件 TOML；
+  不过退回各平台各自渲染（Windows 走 D2D）。设置程序不自绘。
 
 ## 三、其他平台
 
@@ -103,12 +104,6 @@
   - [~] **⑤ 任务栏点中/英反同步**（★☆☆ / 低 / 0.5 天）：**代码完成，待真机测**（2026-09-11）。
     激活时对转换模式 compartment 挂 `ITfCompartmentEventSink`（`com/conversion.rs`），`OnChange` 读回 `NATIVE` 位、与当前模式不同才翻转
     （防回环），顺带刷指示器 + 上报 Server 让悬浮状态条也同步。纯 DLL 改动、无新协议。
-  - [~] **⑥ 候选窗鼠标点选**（★★☆ / 中 / 1 天）：**代码完成，待真机测**（2026-09-16）。
-    候选窗窗口过程收 `WM_MOUSEMOVE` / `WM_LBUTTONDOWN`（`WM_MOUSEACTIVATE` 回 `MA_NOACTIVATE`，点它不抢宿主焦点、组句不断），
-    命中范围在绘制时算出（`ui/candidates/view.rs::hit_bands`，候选行竖排看 y、横排看 x，整句补全是顶部右侧一块矩形），
-    悬停铺比键盘高亮淡一档的底色（状态条四格同样铺）；点中上报 `CandidateEvent::Pick(页内行号)` / `PickSentence` →
-    `Work::Candidate` → Router 立刻选词（整句走 `accept_prediction`，与 Tab 同路）、文本攒进 `pending_commit`，
-    由 DLL 下一次 `Poll` 取回（`ServerMessage::Update.commit`，协议版本升到 5）再走编辑会话落进文档；拼音没吃完接着显示后面的候选。
   - [ ] 发版：换 **Certum 开源代码签名证书**重签（开发全程自签 + 本机受信任根，见 `installer/sign-local.ps1`）、
     `windows-v<版本>` 标签与 CI。
   - [ ] **本地整句模型上 Windows**：Server 已接（`dispatch/rescore/`，CPU 推理，设置「云服务」页有开关，安装包带 `data\model`），待真机验：每次重排的耗时（前文 + 几条路径一次前向，CPU 上可能几十到一百多毫秒，超了就缩前文长度）、模型加载时间；

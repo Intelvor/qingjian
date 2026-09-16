@@ -38,10 +38,6 @@ pub struct PredictConfig {
     /// 组句中要不要整句补全。
     pub sentence: bool,
 
-    /// 整句补全什么时候要：`idle` 停止输入后自动联想（配合 `debounce_ms`），`tab` 只在按 Tab 键时要。
-    /// 云端词不受它影响，两种模式下都照常自动联想。
-    pub sentence_trigger: String,
-
     /// 推理强度，随请求发 `reasoning_effort`：`none` 关掉模型的思考（联想要的是快，不是想），
     /// 其余 minimal / low / medium / high / xhigh 照传；留空则不发（给不认这个参数的接口）。
     /// DeepSeek V4 这类默认带思考的模型不关会把 token 预算全花在思考上，正文为空。
@@ -62,7 +58,6 @@ impl Default for PredictConfig {
             lookahead: 32,
             slots: 2,
             sentence: true,
-            sentence_trigger: "idle".to_owned(),
             reasoning_effort: "none".to_owned(),
         }
     }
@@ -87,13 +82,7 @@ impl PredictConfig {
             slots: self.slots,
             // 比槽位多要两条，与本地候选重复的去掉后还能填满；问字模式的答案也按这个数要
             max_items: self.slots.max(1) + 2,
-            // 「按 Tab 才联想整句」时自动请求只问词；按 Tab 那一次由壳另外请（`Engine::request_sentence_once`）。
-            sentence: self.sentence && !self.sentence_on_tab(),
+            sentence: self.sentence,
         }
-    }
-
-    /// 整句补全是不是只在按 Tab 键时才要（`sentence_trigger = "tab"`）。
-    pub fn sentence_on_tab(&self) -> bool {
-        self.sentence_trigger == "tab"
     }
 }

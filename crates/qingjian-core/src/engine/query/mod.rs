@@ -9,7 +9,6 @@ mod snapshot;
 pub(crate) use english_tail::EnglishTail;
 pub use result::Query;
 pub(super) use result::join_marked;
-pub(super) use result::join_marked_typed;
 pub(super) use snapshot::QuerySnapshot;
 
 impl Engine {
@@ -236,18 +235,29 @@ impl Engine {
                 translation: None,
             })
             .collect();
-        self.insert_english(&mut items, unlikely);
+        // 中文优先：整句先进去占第一，英文词紧跟其后（第二）；关掉时英文词先进、整句排在开头的英文后面
+        if self.chinese_first {
+            self.insert_sentence(
+                &mut items,
+                &segmentations,
+                correction.is_none(),
+                english_tail.as_ref().filter(|_| correction.is_none()),
+                head_wins,
+            );
+            self.insert_english(&mut items, unlikely);
+        } else {
+            self.insert_english(&mut items, unlikely);
+            self.insert_sentence(
+                &mut items,
+                &segmentations,
+                correction.is_none(),
+                english_tail.as_ref().filter(|_| correction.is_none()),
+                head_wins,
+            );
+        }
         // 快捷候选按敲的键认（`rq` 日期），双拼下也是
         self.insert_shortcuts(&mut items, keys);
-        self.insert_sentence(
-            &mut items,
-            &segmentations,
-            correction.is_none(),
-            english_tail.as_ref().filter(|_| correction.is_none()),
-            head_wins,
-        );
         self.insert_emoji(&mut items);
-        self.insert_media_formats(&mut items, keys);
         let rank = start.elapsed();
 
         // 按头段算时英文尾段不参与拼音候选，显示上跟在切分后面：`wo'xiang'xue'hao'rust`
@@ -255,11 +265,7 @@ impl Engine {
             .as_ref()
             .filter(|_| head_wins)
             .map_or(tail, |t| &keys[t.head_len..]);
-        let typed_display = decoded.as_ref().map(|d| d.marked()).or_else(|| {
-            // 中文模式下 Shift 敲的大写：匹配按小写算，拼音行仍按敲的样子显示（`Cpan`）
-            (correction.is_none() && self.composition.has_shifted())
-                .then(|| join_marked_typed(&self.composition.typed_scope(), &segmentations, tail))
-        });
+        let typed_display = decoded.as_ref().map(|d| d.marked());
         Ok(Query {
             segmentations,
             candidates: CandidateList { items },
