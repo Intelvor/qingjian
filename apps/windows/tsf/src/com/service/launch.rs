@@ -7,13 +7,22 @@
 //!
 //! 两道闸门防重复启动：进程内的冷却时间（同一应用连敲只试一次），与跨进程的命名互斥体
 //! （多个应用同时发现 Server 不在，只起一个）。找不到 exe / 起失败记日志返回 `false`，调用方退回原来的退避重连。
+//!
+//! 另一道门是宿主的完整性级别：输入法会被加载进登录界面（LogonUI）、UAC 的 consent.exe 这类
+//! 以 SYSTEM 跑在安全桌面上的进程，也会进 AppContainer 的商店应用（Low）。在这些宿主里
+//! `ShellExecute` 要么起出一个 SYSTEM 权限、挂在安全桌面上的 Server，要么干脆起不来——
+//! 只在普通桌面应用（Medium）里拉，其余照旧退避重连。
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
-use windows::Win32::System::Threading::CreateMutexW;
+use windows::Win32::Security::{
+    GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL,
+    TOKEN_QUERY, TokenIntegrityLevel,
+};
+use windows::Win32::System::Threading::{CreateMutexW, GetCurrentProcess, OpenProcessToken};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{HSTRING, PCWSTR, w};
@@ -27,12 +36,20 @@ const LAUNCH_COOLDOWN: Duration = Duration::from_secs(5);
 /// 跨进程互斥体：多个应用的 DLL 同时发现 Server 不在时只起一个（第二个起来的抢不到管道会自己退出）。
 const LAUNCH_MUTEX: windows::core::PCWSTR = w!("Local\\QingjianServerLaunch");
 
+/// 普通桌面应用的完整性级别 RID（UAC 未提升的用户进程）。低一档是 AppContainer / 浏览器沙箱，
+/// 高一档是管理员提升、SYSTEM 与安全桌面上的进程——那些里都不拉 Server。
+const MEDIUM_INTEGRITY_RID: u32 = 0x2000;
+
 /// 上次尝试拉起的时间；本进程内所有文本服务实例共用。
 static LAST_LAUNCH: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// 连不上 Server 时拉起它。已请求启动返回 `true`（下一键就该连上），没试 / 失败返回 `false`。
 pub(super) fn launch_server() -> bool {
     if !cooldown_passed() {
+        return false;
+    }
+    if !host_is_plain_desktop_app() {
+        log("宿主进程不是普通桌面应用（完整性级别非 Medium），不拉起 Server");
         return false;
     }
     let Some(exe) = server_exe() else {
@@ -82,6 +99,51 @@ fn cooldown_passed() -> bool {
     }
     *last = Some(Instant::now());
     true
+}
+
+/// 宿主进程是不是普通桌面应用（完整性级别为 Medium）。
+///
+/// 读当前进程令牌的 `TokenIntegrityLevel`，SID 最后一个子授权值就是级别 RID。
+/// 读不到一律当成「不是」：宁可不拉（退回退避重连，下次登录时由启动文件夹的快捷方式起），
+/// 也不能在安全桌面上起出一个 SYSTEM 权限的 Server。
+fn host_is_plain_desktop_app() -> bool {
+    let mut token = HANDLE::default();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.is_err() {
+        return false;
+    }
+    let mut needed = 0u32;
+    // 两段式：第一次只问要多少字节（总是报缓冲区不够，属正常）。
+    unsafe {
+        let _ = GetTokenInformation(token, TokenIntegrityLevel, None, 0, &mut needed);
+    }
+    let mut buffer = vec![0u8; needed as usize];
+    let queried = needed > 0
+        && unsafe {
+            GetTokenInformation(
+                token,
+                TokenIntegrityLevel,
+                Some(buffer.as_mut_ptr().cast()),
+                needed,
+                &mut needed,
+            )
+        }
+        .is_ok();
+    let _ = unsafe { CloseHandle(token) };
+    if !queried {
+        return false;
+    }
+    let label = unsafe { buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>().read() };
+    let sid = label.Label.Sid;
+    let count_ptr = unsafe { GetSidSubAuthorityCount(sid) };
+    if count_ptr.is_null() {
+        return false;
+    }
+    let count = unsafe { *count_ptr };
+    if count == 0 {
+        return false;
+    }
+    let rid_ptr = unsafe { GetSidSubAuthority(sid, u32::from(count) - 1) };
+    !rid_ptr.is_null() && unsafe { *rid_ptr } == MEDIUM_INTEGRITY_RID
 }
 
 /// 跨进程互斥体；已被别的进程持有（对方正在起 Server）返回 `None`。
