@@ -209,6 +209,7 @@ impl Engine {
 
     /// 只留下拼音对得上的云端词：字数等于音节数、每个音节合法、全拼与用户敲的字母的编辑距离在容许范围内
     /// （简拼不算错，允许少量错字 / 漏字 / 多字，纠错就靠这个）。模型偶尔会给出根本不是这个拼音的词，这些不进候选。
+    /// 英文词与中英混词（`pinyin` 填的是英文原文，如 `Linux`、`Linux系统`）没有合法音节可言，直接拿那个字符串对 letters。
     pub(super) fn validate_cloud_words(&self, words: &mut Vec<CloudWord>) {
         let decoded = self.decode(self.composition.scope());
         let typed = decoded
@@ -217,10 +218,23 @@ impl Engine {
         let letters = typed.chars().filter(|c| *c != '\'').count();
         let allowed = tolerance(letters);
         words.retain(|word| {
+            // 英文词 / 中英混词（pinyin 填的是英文原文，如 `Linux`、`Linux系统`）不是合法音节，
+            // 不走「字数等于音节数」那一条，按整串对 letters——前缀匹配允许它比敲的长（linux → Linux系统），
+            // 这就是云端给的中英混输补全。
+            let pinyin = word.syllables.iter().all(|s| parser::is_syllable(s));
+            let joined = if pinyin {
+                String::new()
+            } else {
+                word.syllables.join("")
+            };
+            let segments: &[String] = if pinyin {
+                &word.syllables
+            } else {
+                std::slice::from_ref(&joined)
+            };
             let fits = !word.syllables.is_empty()
-                && word.text.chars().count() == word.syllables.len()
-                && word.syllables.iter().all(|s| parser::is_syllable(s))
-                && mismatch_count(typed, &word.syllables) <= allowed;
+                && (!pinyin || word.text.chars().count() == word.syllables.len())
+                && mismatch_count(typed, segments) <= allowed;
             if !fits {
                 tracing::debug!(text = %word.text, syllables = ?word.syllables, "云端词与拼音不符，丢弃");
             }

@@ -231,6 +231,42 @@ fn cloud_words_tolerate_typos_but_not_unrelated_words() {
     assert!(engine.composition().is_empty());
 }
 
+/// 英文词与中英混词（pinyin 填的是英文原文）不走「字数等于音节数」，直接对 letters——中英混输就靠它进云端候选。
+#[test]
+fn cloud_words_validation_accepts_english_and_mixed_terms() {
+    let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut engine = engine().with_predictor(Box::new(EchoPredictor {
+        submitted: submitted.clone(),
+        replies: vec![Prediction {
+            sequence: 1,
+            words: vec![
+                cloud("Linux", &["linux"]),
+                cloud("Linux系统", &["linux", "xi", "tong"]),
+                cloud("关系", &["guan", "xi"]),
+                cloud("乱来", &["luan", "lai"]),
+            ],
+            sentence: None,
+        }],
+        sentence: false,
+    }));
+    engine.set_input("linux");
+    let query = engine.query().unwrap();
+    assert_eq!(
+        engine.request_prediction(None, &query.candidates.items),
+        Some(1)
+    );
+    let prediction = engine.poll_prediction().unwrap();
+    let texts: Vec<&str> = prediction.words.iter().map(|w| w.text.as_str()).collect();
+    assert!(
+        texts.contains(&"Linux") && texts.contains(&"Linux系统"),
+        "英文词与中英混词该进候选，实际 {texts:?}"
+    );
+    assert!(
+        !texts.contains(&"关系") && !texts.contains(&"乱来"),
+        "对不上 letters 的中文词仍要拦，实际 {texts:?}"
+    );
+}
+
 #[test]
 fn cloud_words_are_validated_against_abbreviated_pinyin() {
     let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
