@@ -102,7 +102,17 @@ impl Router {
                 self.engine.clear();
                 Effect::Changed(None)
             }
-            codes::RETURN => Effect::Changed(Some(self.engine.take_raw())),
+            codes::RETURN => {
+                if self.engine.is_zhuyin_mode() {
+                    if event.modifiers.shift {
+                        Effect::Changed(Some(self.engine.take_raw()))
+                    } else {
+                        Effect::Changed(Some(self.commit_highlighted()))
+                    }
+                } else {
+                    Effect::Changed(Some(self.engine.take_raw()))
+                }
+            }
             codes::TAB if self.engine.english_mode() => {
                 Effect::Changed(Some(self.commit_highlighted()))
             }
@@ -155,6 +165,13 @@ impl Router {
             let raw = self.composing().then(|| self.engine.take_raw());
             self.engine.note_passthrough(c);
             return with_prefix(raw, Effect::Passthrough, c);
+        }
+        // 注音模式下数字与大千布局的声调符号键进缓冲区组字，不拿来选词。
+        let is_zhuyin_key = self.engine.is_zhuyin_mode()
+            && (c.is_ascii_digit() || matches!(c, '-' | ';' | ',' | '.' | '/'));
+        if is_zhuyin_key {
+            self.engine.push(c);
+            return Effect::Changed(None);
         }
         if !self.composing() {
             return self.apply_punctuation(c, event);
@@ -226,6 +243,7 @@ impl Router {
         }
         if let Some(digit) = codes::digit(event)
             && self.candidate_count() > 0
+            && (!self.engine.is_zhuyin_mode() || self.navigated)
         {
             let page_size = self.config.page_size;
             let page = self.highlight / page_size;
@@ -236,6 +254,10 @@ impl Router {
             return Effect::Navigated;
         }
         if c == ' ' {
+            if self.engine.zhuyin_needs_tone() {
+                self.engine.push(c);
+                return Effect::Changed(None);
+            }
             return Effect::Changed(Some(self.commit_highlighted()));
         }
         // 表达式 / 问字模式下的其他字符不进缓冲区（与 macOS 壳一致）：先把高亮候选上屏，再按没在组句处理这个键。

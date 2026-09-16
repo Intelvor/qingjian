@@ -23,6 +23,9 @@ pub struct GeneralPage {
     /// 双拼方案（第 0 项是关）。
     shuangpin: Retained<NSPopUpButton>,
 
+    /// 繁体输出模式。
+    traditional: Retained<NSButton>,
+
     /// 英文模式也给候选。
     english: Retained<NSButton>,
 
@@ -104,6 +107,8 @@ impl GeneralPage {
             mtm,
             "仅影响标点，字母和数字保持半角；自定义短语原样输出。设置会保存。 ",
         );
+        let traditional = checkbox(mtm, "繁体输出", Setting::Traditional, target);
+        row_checkbox(layout, &traditional);
         let english = checkbox(
             mtm,
             "英文模式（Caps Lock）也给候选",
@@ -144,6 +149,7 @@ impl GeneralPage {
             learning_language,
             page_size,
             shuangpin,
+            traditional,
             english,
             english_off_in_apps,
             chinese_first,
@@ -178,6 +184,7 @@ impl GeneralPage {
                     .map_or(0, |i| i + 1)
             })),
         );
+        set_checked(&self.traditional, general.traditional);
         set_checked(&self.english, general.english_candidates);
         set_checked(
             &self.english_off_in_apps,

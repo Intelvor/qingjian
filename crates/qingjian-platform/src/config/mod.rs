@@ -186,6 +186,9 @@ font = ""
 preedit = "both"
 # 英文模式（Caps Lock 亮着）是否给英文候选：Tab 或方向键选词，空格、回车、标点仍原样上屏敲的字母；false 就是纯直通
 english_candidates = true
+
+# 繁体输出模式。开启后上屏繁体，不影响词库和个人词频的简体记录。
+traditional = false
 # 中文模式下整段输入是英文词时（hello / key）是否让中文候选排第一、英文词第二；缺省 false：拼音不像话的输入英文词排第一
 chinese_first = false
 # 中文模式下按住 Shift 敲的字母：passthrough 拼音原样上屏、字母交给应用（缺省，与以前一致）/ compose 收进组句
@@ -523,6 +526,7 @@ mod tests {
         assert_eq!(config.general.preedit, PreeditMode::Window);
         assert_eq!(config.general.learning_language, "en");
         assert!(config.general.english_candidates);
+        assert!(!config.general.traditional);
         assert_eq!(config.general.shuangpin(), None);
         assert_eq!(config.general.log_level, LogLevel::Info);
         assert_eq!(config.shortcut.mode.expression, 'i');

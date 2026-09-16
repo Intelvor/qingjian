@@ -72,6 +72,13 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
                 .is_on(g.zhuyin)
                 .on_toggled(context.callback(Message::Zhuyin)),
         ),
+        field(
+            "繁体输出",
+            "打字时将候选词转换为繁体中文。",
+            ToggleSwitch::new()
+                .is_on(g.traditional)
+                .on_toggled(context.callback(Message::Traditional)),
+        ),
     ];
     page("通用", StackPanel::new().spacing(16.0).children(rows))
 }

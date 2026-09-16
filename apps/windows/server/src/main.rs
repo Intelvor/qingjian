@@ -177,6 +177,7 @@ fn main() {
     engine.set_fuzzy(config.fuzzy);
     engine.set_shuangpin(config.general.shuangpin());
     engine.set_zhuyin_mode(config.general.zhuyin);
+    engine.set_traditional_mode(config.general.traditional);
     engine.set_mode_keys(config.shortcut.mode);
     engine.set_chinese_first(config.general.chinese_first);
     engine.set_shift_letter_compose(config.general.shift_letter.compose());

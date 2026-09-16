@@ -24,6 +24,7 @@ repository = "https://github.com/qingjian-team/qingjian"
 all = "warn"
 
 [workspace.dependencies]
+ferrous-opencc = "0.4.0"
 # 内部 crate
 qingjian-core = { path = "crates/qingjian-core" }
 qingjian-dictionary = { path = "crates/qingjian-dictionary" }

@@ -11,6 +11,7 @@ pub(crate) enum Message {
     PageSize(Option<f64>),
     Shuangpin(Option<usize>),
     Zhuyin(bool),
+    Traditional(bool),
     EnglishCandidates(bool),
     ChineseFirst(bool),
     /// 中文模式下 Shift+字母：交给应用（缺省）还是进组句缓冲区。
