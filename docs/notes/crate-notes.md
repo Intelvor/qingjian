@@ -151,7 +151,10 @@ TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解
 
 候选窗与悬浮状态条默认由 `qingjian-render` 自绘（`ui/painter/` 把 `Frame` / `StatusView` 交出去，`[general] renderer = "system"` 才回落 GDI）。
 鼠标命中用的矩形是渲染器给回来的——候选行 `Rendered.rows`、状态条每格 `RenderedStatus.cell_rects`——不在客户区上另算一套：
-两套算法一错位就会出现「看得见高亮却点不着」。悬停底色与可点范围是同一块，格子边缘那圈留白自然点不着。
+两套算法一错位就会出现「看得见高亮却点不着」。这些矩形相对**内容区**左上角，而窗口为了四周的阴影比内容区往左上多出一圈，
+所以鼠标的客户区坐标得先减掉 `Rendered.content_x/content_y`（顺手按内容区边界判一脚），
+漏了这一步命中整体偏右下：竖排看着是「高亮跑到鼠标下面那一行」，只有一行高的整句补全则完全点不中。
+悬停底色与可点范围是同一块，格子边缘那圈留白自然点不着。
 状态条的「☁」「⚙」也自绘（`crates/qingjian-render/src/{cloud,gear}.rs`）：这两个码位会被 Segoe UI Emoji 接走画成彩色的，不认我们给的颜色。
 整句补全的时机在 `[predict] sentence_trigger`：`idle` 是停键自动请，`tab` 是按下 Tab 现请一次（`Engine::request_sentence_once` 让这一拍破例要句子）；
 请出去到结果回来的这段由 `Router.sentence_pending` 驱动候选窗摆「☁ …」。云联想关着时按 Tab 交还应用（缩进 / 跳焦点）。
