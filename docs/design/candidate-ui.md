@@ -355,7 +355,12 @@ Core `correction` 模块只产生候选纠正，挑选与学习在 Engine 里。
 
 拼音显示在哪由 `[general] preedit` 定：`both`（缺省）行内 marked text 与窗口顶部都显示；`inline` 只在行内，窗口不带拼音行
 （云联想的整句补全仍在窗口顶部单独一行）；`window` 只在窗口，应用里放空的 marked text——终端与部分 Electron 应用行内拼音画得难看时用，
-光标矩形仍从应用的插入点取。
+光标矩形仍从应用的插入点取（macOS 拿插入点，Windows 拿当前选区）。
+
+Windows 上这条设置由 Server 读、随 `Frame.preedit_mode` 下发（2026-09-16）：DLL 按 `inline()` 决定要不要起 TSF 组句，
+Server 按 `in_window()` 决定窗口顶部画不画拼音行；帧里始终带着拼音分段，两边各取所需。`window` 模式下应用里没有组句范围，
+光标矩形改从 `GetSelection` 的插入点量（`com/edit/anchor.rs::caret_rect`），一段组句里问一次输入框状态（私密 / 光标前文）
+靠 `Shared::context_reported` 记账，不以「组句刚起」为准。
 
 组句期间其余编辑动作一律吞掉，否则应用会动光标、丢 marked text。
 
