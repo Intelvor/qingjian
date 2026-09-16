@@ -1,6 +1,8 @@
 use qingjian_core::ShuangpinScheme;
 use qingjian_platform::protocol::KeyModifiers;
-use qingjian_platform::{AppsConfig, CandidateRenderer, Config, KeyCombo, LayoutMode, ThemeMode};
+use qingjian_platform::{
+    AppsConfig, CandidateRenderer, Config, KeyCombo, LayoutMode, PreeditMode, ThemeMode,
+};
 
 use super::RenderSettings;
 
@@ -28,6 +30,9 @@ pub struct RouterConfig {
 
     /// 候选窗口字体的字族名（`[general] font`），空为系统字体；只对青简渲染器生效。
     pub font: String,
+
+    /// 拼音显示位置（`[general] preedit`）。
+    pub preedit: PreeditMode,
 
     /// 翻页键对（`[general] page_keys`，上一页 / 下一页）。
     pub page_keys: (char, char),
@@ -91,6 +96,7 @@ impl From<&Config> for RouterConfig {
             theme: config.general.theme,
             renderer: config.general.renderer,
             font: config.general.font.trim().to_owned(),
+            preedit: config.general.preedit,
             page_keys: config.general.page_keys(),
             english_candidates: config.general.english_candidates,
             full_width: config.general.full_width_punctuation,
