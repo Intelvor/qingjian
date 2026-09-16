@@ -4,9 +4,11 @@ mod state;
 
 use qingjian_core::{Candidate, CandidateLayout, CandidateList, CloudWord};
 use qingjian_platform::protocol::{Frame, PreeditKind, PreeditSegment};
+use std::time::Instant;
 
 pub(super) use self::state::Composed;
 use super::Router;
+use super::SENTENCE_PENDING_TIMEOUT;
 
 impl Router {
     /// 缓冲变化后：按 Engine 状态重建 [`Composed`]，发一次云联想请求，归零高亮与整句补全。
@@ -14,6 +16,9 @@ impl Router {
         self.highlight = 0;
         self.navigated = false;
         self.sentence = None;
+        // 换了拼音就是新一轮：上一轮的「用户请过整句」与等待提示都不作数了。
+        self.sentence_requested = false;
+        self.sentence_pending = None;
         if self.engine.composition().is_empty() {
             self.composed = None;
             self.cancel_prediction();
@@ -33,7 +38,12 @@ impl Router {
                 let layout =
                     CandidateLayout::new(items, self.config.page_size, self.config.cloud_slots);
                 if self.engine.prediction_enabled() {
-                    self.engine.request_prediction(None, layout.local());
+                    let sent = self.engine.request_prediction(None, layout.local());
+                    // 这一拍自动就要整句（`sentence_trigger = "idle"`）且真发出去了：
+                    // 候选窗先摆「☁ …」。云端词那一路不提示（它一直在问，闪起来太吵）。
+                    self.sentence_pending = (sent.is_some()
+                        && self.engine.prediction_policy().sentence)
+                        .then(Instant::now);
                 }
                 Composed::Candidates {
                     preedit,
@@ -60,6 +70,8 @@ impl Router {
         let Some(prediction) = self.engine.poll_prediction() else {
             return;
         };
+        // 这一拍的结果到了（给没给整句都算到了）：收掉「☁ …」。
+        self.sentence_pending = None;
         if self.translation.is_some() {
             match prediction.sentence {
                 Some(text) => {
@@ -75,13 +87,17 @@ impl Router {
             return;
         }
         if let Some(Composed::Candidates { layout, .. }) = self.composed.as_mut() {
+            // 「按 Tab 才联想」时自动那一路没要句子，模型不守指令也不要采用：
+            // 只有这结果是用户请过的那一次带回来的，才拿去显示与自动上屏。
+            let wanted = self.engine.prediction_policy().sentence || self.sentence_requested;
+            self.sentence_requested = false;
             let words: Vec<Candidate> = prediction
                 .words
                 .into_iter()
                 .map(CloudWord::into_candidate)
                 .collect();
             layout.set_cloud(words);
-            self.sentence = prediction.sentence;
+            self.sentence = wanted.then_some(prediction.sentence).flatten();
         }
     }
 
@@ -89,6 +105,39 @@ impl Router {
         if self.engine.prediction_enabled() {
             self.engine.cancel_prediction();
         }
+    }
+
+    /// 现请一次整句（手动模式按 Tab / 点整句那块）：让 Engine 这一次破例带上整句。
+    /// 返回请出去没有。先判掉「没接联想 / 私密输入 / 没在组句」这几个不会发的入口，
+    /// 免得置了的标志没被消费、污染下一次请求。
+    pub(super) fn request_sentence_now(&mut self) -> bool {
+        if !self.composing() || !self.engine.prediction_enabled() || self.is_private() {
+            return false;
+        }
+        let local: &[qingjian_core::Candidate] = match &self.composed {
+            Some(Composed::Candidates { layout, .. }) => layout.local(),
+            _ => &[],
+        };
+        self.engine.request_sentence_once();
+        self.sentence_requested = true;
+        let sent = self.engine.request_prediction(None, local).is_some();
+        if sent {
+            self.sentence_pending = Some(Instant::now());
+        }
+        sent
+    }
+
+    /// 云联想关掉 / 换掉 Predictor 时作废手里那份整句：它是上一个 Predictor 给的，
+    /// 留着会被 Tab 或点选当成新结果上屏（关掉云联想后再按 Tab 反而冒出一段旧句子）。
+    pub(super) fn drop_sentence(&mut self) {
+        self.sentence = None;
+        self.sentence_pending = None;
+    }
+
+    /// 整句请求发出去了、结果还没到（没等超）：这一拍按 Tab 不再重复请，等它回来。
+    pub(super) fn sentence_waiting(&self) -> bool {
+        self.sentence_pending
+            .is_some_and(|at| at.elapsed() < SENTENCE_PENDING_TIMEOUT)
     }
 
     /// 高亮移动 `delta`，夹在 `[0, 末尾]`，到页边自然换页。
@@ -146,6 +195,8 @@ impl Router {
         if let Some(translation) = &self.translation {
             return self.translation_frame(translation);
         }
+        // 等超了就当没在等（真正清在 `tick` 里），提示不会一直挂着。
+        let sentence_pending = self.sentence_waiting();
         match &self.composed {
             None => Frame::default(),
             Some(Composed::Raw { text, cursor }) => Frame {
@@ -161,6 +212,7 @@ impl Router {
                 layout: self.config.layout,
                 theme: self.config.theme,
                 sentence: None,
+                sentence_pending,
                 notice: self.notice.clone(),
             },
             Some(Composed::Candidates {
@@ -188,6 +240,7 @@ impl Router {
                     layout: self.config.layout,
                     theme: self.config.theme,
                     sentence: self.sentence.clone(),
+                    sentence_pending: sentence_pending && self.sentence.is_none(),
                     notice: self.notice.clone(),
                 }
             }

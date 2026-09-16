@@ -21,7 +21,7 @@ use crate::shadow::Shadow;
 use crate::text::{TextPainter, TextSize, TextStyle};
 use crate::theme::{FontSpec, Theme};
 
-pub use rendered::Rendered;
+pub use rendered::{Rect, Rendered};
 pub use status::{RenderedStatus, StatusCell};
 
 /// preedit 光标的宽度（点）。
@@ -155,15 +155,22 @@ impl Renderer {
             theme.colors.background,
         );
         let mut y = margin + metrics.padding();
-        y += self.draw_top_line(&mut canvas, frame, &metrics, margin, y);
-        match layout {
+        let (top_height, sentence) = self.draw_top_line(&mut canvas, frame, &metrics, margin, y);
+        y += top_height;
+        let rows = match layout {
             Layout::Vertical => {
-                self.draw_vertical(&mut canvas, frame, &metrics, margin, y, content_width);
+                self.draw_vertical(&mut canvas, frame, &metrics, margin, y, content_width)
             }
             Layout::Horizontal => {
-                self.draw_horizontal(&mut canvas, frame, &metrics, margin, y, content_width);
+                self.draw_horizontal(&mut canvas, frame, &metrics, margin, y, content_width)
             }
-        }
+        };
+        // 矩形换回相对内容区左上角的坐标，壳按内容区做鼠标命中。
+        let shift = |r: Rect| Rect {
+            x: r.x - margin,
+            y: r.y - margin,
+            ..r
+        };
         Ok(Rendered {
             pixmap: canvas.into_pixmap(),
             content_x: margin as u32,
@@ -171,6 +178,8 @@ impl Renderer {
             content_width: content_width.ceil() as u32,
             content_height: content_height.ceil() as u32,
             scale,
+            rows: rows.into_iter().map(shift).collect(),
+            sentence: sentence.map(shift),
         })
     }
 
@@ -259,22 +268,15 @@ impl Renderer {
         self.draw_text(canvas, &row.text, &style, word_x, top);
     }
 
-    fn fill_highlight(
-        &mut self,
-        canvas: &mut Canvas,
-        m: &Metrics,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-    ) {
+    /// 给一行或整句补全那块铺底色：键盘高亮与鼠标悬停同一形状，颜色不同。
+    pub(super) fn fill_band(&mut self, canvas: &mut Canvas, m: &Metrics, color: Color, band: Rect) {
         canvas.fill_round_rect(
-            x,
-            y,
-            width,
-            height,
+            band.x,
+            band.y,
+            band.width,
+            band.height,
             m.corner_radius() / 2.0,
-            m.theme.colors.highlight,
+            color,
         );
     }
 }

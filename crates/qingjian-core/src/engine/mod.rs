@@ -216,6 +216,9 @@ pub struct Engine {
     /// 最近一次联想请求的序号，0 表示还没发过。
     prediction_sequence: u64,
 
+    /// 下一次请求要不要整句补全：策略不要（按 Tab 才联想）时，壳按 Tab 前置一次，只生效一次。
+    sentence_once: bool,
+
     /// 最近一次联想请求的种类：只有组句联想的结果要按拼音校验。
     last_prediction_kind: PredictionKind,
 
@@ -357,6 +360,7 @@ impl Engine {
             recording: Vec::new(),
             history: InputHistory::default(),
             prediction_sequence: 0,
+            sentence_once: false,
             last_prediction_kind: PredictionKind::Compose,
             last_question_guess: String::new(),
             chain: CommitChain::default(),

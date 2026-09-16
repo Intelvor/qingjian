@@ -464,7 +464,7 @@ pub(crate) fn fill_rect(hdc: HDC, rect: RECT, color: COLORREF) {
     }
 }
 
-fn fill_round_rect(hdc: HDC, rect: RECT, color: COLORREF, radius: i32) {
+pub(crate) fn fill_round_rect(hdc: HDC, rect: RECT, color: COLORREF, radius: i32) {
     let diameter = (radius * 2).max(1);
     unsafe {
         let region = CreateRoundRectRgn(

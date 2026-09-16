@@ -4,13 +4,15 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use qingjian_core::sentence::SentenceScorer;
-use qingjian_core::{Language, ModeKeys, ShuangpinScheme};
+use qingjian_core::{
+    Language, ModeKeys, Prediction, PredictionPolicy, PredictionRequest, Predictor, ShuangpinScheme,
+};
 use qingjian_platform::protocol::{
     ClientMessage, Frame, KeyEvent, KeyModifiers, KeyOutcome, PROTOCOL_VERSION, ServerMessage,
     SessionId,
 };
 use qingjian_platform::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS};
-use qingjian_windows_server::dispatch::{StatusEvent, StatusSink, StatusView};
+use qingjian_windows_server::dispatch::{CandidateEvent, StatusEvent, StatusSink, StatusView};
 use qingjian_windows_server::{AssemblySpec, Router, RouterConfig, assembly};
 
 const SESSION: SessionId = SessionId(1);
@@ -1252,4 +1254,212 @@ fn privacy_follows_the_focused_session() {
 
 fn press_in(router: &mut Router, session: SessionId, event: KeyEvent) {
     let _ = router.handle(ClientMessage::Key { session, event });
+}
+
+/// 候选窗点选候选：Router 立刻把词选掉，但要上屏的文本得等 DLL 下一次轮询取走
+///（传输一问一答，Server 不能主动推）。
+#[test]
+fn candidate_click_hands_the_text_to_the_next_poll() {
+    let mut router = router();
+    let (_, _, frame) = type_letters(&mut router, "nihao");
+    let first = frame.candidates.items.first().unwrap().text.clone();
+
+    router.handle_candidate_event(CandidateEvent::Pick(0));
+
+    match router.handle(ClientMessage::Poll { session: SESSION }) {
+        Some(ServerMessage::Update { commit, frame, .. }) => {
+            assert_eq!(
+                commit.as_deref(),
+                Some(first.as_str()),
+                "点选的词由轮询带回"
+            );
+            assert!(frame.is_empty(), "整段拼音吃完，该收起候选窗");
+        }
+        other => panic!("expected update, got {other:?}"),
+    }
+    // 取走即清，别把同一个词上屏两次。
+    match router.handle(ClientMessage::Poll { session: SESSION }) {
+        Some(ServerMessage::Update { commit, .. }) => assert_eq!(commit, None),
+        other => panic!("expected update, got {other:?}"),
+    }
+}
+
+/// 假云联想：请求照收，结果要测试这边点头（`deliver`）才到——真实那条链路是网络的异步延迟，
+/// 这样才看得见「☁ …」那一拍。
+#[derive(Default)]
+struct FakeCloud {
+    /// 每次请求的 `want_sentence`，按提交顺序。
+    asked: Vec<bool>,
+    /// 最近一次请求的序号：`deliver` 用它造结果。
+    last_request: Option<u64>,
+    /// 备好、等轮询取走的结果。
+    reply: Option<Prediction>,
+}
+
+struct FakePredictor {
+    /// 自动那一路（`sentence_trigger = "idle"`）要不要句子，对应 `[predict] sentence`。
+    auto_sentence: bool,
+    cloud: Arc<Mutex<FakeCloud>>,
+}
+
+impl Predictor for FakePredictor {
+    fn policy(&self) -> PredictionPolicy {
+        PredictionPolicy {
+            sentence: self.auto_sentence,
+            ..PredictionPolicy::default()
+        }
+    }
+
+    fn submit(&mut self, request: PredictionRequest) {
+        let mut cloud = self.cloud.lock().unwrap();
+        cloud.asked.push(request.want_sentence);
+        cloud.last_request = Some(request.sequence);
+    }
+
+    fn poll(&mut self) -> Option<Prediction> {
+        self.cloud.lock().unwrap().reply.take()
+    }
+}
+
+const CLOUD_SENTENCE: &str = "你好，很高兴认识你！";
+
+/// 备一条整句，等下一次轮询取走；得先有请求才知道序号。
+fn deliver(cloud: &Arc<Mutex<FakeCloud>>, sentence: &str) {
+    let mut cloud = cloud.lock().unwrap();
+    let sequence = cloud.last_request.expect("还没有请求，哪来的结果");
+    cloud.reply = Some(Prediction {
+        sequence,
+        words: Vec::new(),
+        sentence: Some(sentence.to_owned()),
+    });
+}
+
+/// 装了假云联想的 Router（`sentence_on_tab` 决定自动那一路要不要句子）。
+fn router_with_cloud(
+    sentence_on_tab: bool,
+    auto_sentence: bool,
+) -> (Router, Arc<Mutex<FakeCloud>>) {
+    let config = RouterConfig {
+        sentence_on_tab,
+        ..RouterConfig::default()
+    };
+    let cloud = Arc::new(Mutex::new(FakeCloud::default()));
+    let mut router = router_in(config, None);
+    router.engine_mut().set_predictor(Box::new(FakePredictor {
+        auto_sentence,
+        cloud: cloud.clone(),
+    }));
+    (router, cloud)
+}
+
+fn tab() -> KeyEvent {
+    KeyEvent::new(0x09, None, Default::default())
+}
+
+fn poll(router: &mut Router) -> Frame {
+    match router.handle(ClientMessage::Poll { session: SESSION }) {
+        Some(ServerMessage::Update { frame, .. }) => frame,
+        other => panic!("expected update, got {other:?}"),
+    }
+}
+
+/// 「按 Tab 才联想」：敲拼音那一拍不问句子，按 Tab 才现请，请出去先摆「☁ …」等结果。
+#[test]
+fn tab_asks_for_the_sentence_and_shows_the_waiting_hint() {
+    let (mut router, cloud) = router_with_cloud(true, false);
+    type_letters(&mut router, "nihao");
+
+    let (outcome, commit, frame) = press(&mut router, tab());
+    assert_eq!(outcome, KeyOutcome::Consumed, "Tab 被吃掉，别去缩进");
+    assert_eq!(commit, None, "结果还没到，这一拍不上屏");
+    assert!(frame.sentence.is_none());
+    assert!(frame.sentence_pending, "候选窗摆出「☁ …」");
+    let asked = cloud.lock().unwrap().asked.clone();
+    assert_eq!(asked.last(), Some(&true), "Tab 这一拍才破例要句子");
+    assert!(
+        asked[..asked.len() - 1].iter().all(|want| !want),
+        "自动那一路按配置不带句子：{asked:?}"
+    );
+
+    deliver(&cloud, CLOUD_SENTENCE);
+    let frame = poll(&mut router);
+    assert_eq!(frame.sentence.as_deref(), Some(CLOUD_SENTENCE));
+    assert!(!frame.sentence_pending, "结果到了，提示收掉");
+}
+
+/// 结果回来后再按一次 Tab：整句上屏，拼音清空。
+#[test]
+fn second_tab_commits_the_sentence() {
+    let (mut router, cloud) = router_with_cloud(true, false);
+    type_letters(&mut router, "nihao");
+    press(&mut router, tab());
+    deliver(&cloud, CLOUD_SENTENCE);
+    poll(&mut router);
+
+    let (outcome, commit, frame) = press(&mut router, tab());
+    assert_eq!(outcome, KeyOutcome::Consumed);
+    assert_eq!(commit.as_deref(), Some(CLOUD_SENTENCE));
+    assert!(frame.is_empty(), "整段拼音吃完，候选窗收起");
+}
+
+/// 没配「按 Tab 才联想」：句子照样能用 Tab 接受（自动那一路请回来的）。
+#[test]
+fn tab_accepts_a_sentence_that_arrived_automatically() {
+    let (mut router, cloud) = router_with_cloud(false, true);
+    type_letters(&mut router, "nihao");
+    assert_eq!(
+        cloud.lock().unwrap().asked.last(),
+        Some(&true),
+        "自动那一路本来就带句子"
+    );
+
+    deliver(&cloud, CLOUD_SENTENCE);
+    poll(&mut router);
+
+    let (_, commit, _) = press(&mut router, tab());
+    assert_eq!(commit.as_deref(), Some(CLOUD_SENTENCE));
+}
+
+/// 云联想关着：Tab 交还应用（缩进 / 跳焦点），不吞键也不去现请。
+#[test]
+fn tab_passes_through_when_cloud_is_off() {
+    let config = RouterConfig {
+        sentence_on_tab: true,
+        ..RouterConfig::default()
+    };
+    let mut router = router_in(config, None);
+    type_letters(&mut router, "nihao");
+
+    let (outcome, commit, frame) = press(&mut router, tab());
+    assert_eq!(outcome, KeyOutcome::Passthrough);
+    assert_eq!(commit, None);
+    assert!(!frame.sentence_pending, "没接联想，不该摆等待提示");
+}
+
+/// 放行的按键不能把攒着的点选文本吞掉（DLL 不碰文档），要留给下一次轮询。
+#[test]
+fn a_passthrough_key_keeps_the_picked_text_for_the_next_poll() {
+    let mut router = router();
+    type_letters(&mut router, "ni");
+    router.handle_candidate_event(CandidateEvent::Pick(0));
+
+    // 带 Win 的组合键归应用：这一下是 Passthrough。
+    let win_l = KeyEvent::new(
+        0x4C,
+        Some('l'),
+        KeyModifiers {
+            win: true,
+            ..Default::default()
+        },
+    );
+    let (outcome, commit, _) = press(&mut router, win_l);
+    assert_eq!(outcome, KeyOutcome::Passthrough);
+    assert_eq!(commit, None, "放行的键自己不带上屏文本");
+
+    match router.handle(ClientMessage::Poll { session: SESSION }) {
+        Some(ServerMessage::Update { commit, .. }) => {
+            assert!(commit.is_some(), "攒着的点选文本还在，等这一拍带回")
+        }
+        other => panic!("expected update, got {other:?}"),
+    }
 }

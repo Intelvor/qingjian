@@ -165,6 +165,8 @@ impl Router {
         self.engine.set_chinese_first(config.general.chinese_first);
         let previous = self.config.render_settings();
         self.config = RouterConfig::from(config);
+        // 「☁」格显示开不开、点下去往哪边翻，都跟配置文件走，两边不会各说各话。
+        self.predict = config.predict.clone();
         let settings = self.config.render_settings();
         if settings != previous {
             self.candidates.configure(settings);
@@ -175,9 +177,11 @@ impl Router {
         let Some(reload) = &mut self.reload else {
             return;
         };
+        let mut predict_changed = false;
         if config.predict != reload.applied_predict {
             attach_cloud(&mut self.engine, &config.predict);
             reload.applied_predict = config.predict.clone();
+            predict_changed = true;
         }
         let language = assembly::learning_language(config);
         if language != reload.applied_language
@@ -194,6 +198,11 @@ impl Router {
             reload.applied_dictionaries = config.dictionaries.clone();
             self.engine
                 .set_extra_dictionaries(reload.load_dictionaries());
+        }
+        // 换了（或关了）Predictor：手里那份整句作废，别让 Tab 或点选上屏旧句子。
+        // 放在 `reload` 借用结束之后，两条借用才不打架。
+        if predict_changed {
+            self.drop_sentence();
         }
     }
 }

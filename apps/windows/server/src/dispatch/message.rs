@@ -129,8 +129,14 @@ impl Router {
                 self.recompose();
                 (commit, KeyOutcome::Consumed)
             }
-            Effect::Navigated => (None, KeyOutcome::Consumed),
+            Effect::Navigated | Effect::Waiting => (None, KeyOutcome::Consumed),
             Effect::Passthrough => (None, KeyOutcome::Passthrough),
+        };
+        // 点选的词还没被 DLL 取走就又敲了个键：并进这次的上屏文本，顺序也是点选在前。
+        // 放行的键 DLL 不碰文档，带了也丢，所以留着等下一次轮询。
+        let commit = match outcome {
+            KeyOutcome::Consumed => merge_commit(self.take_pending_commit(session), commit),
+            KeyOutcome::Passthrough => commit,
         };
         self.poll_prediction();
         let frame = self.current_frame();
@@ -158,6 +164,22 @@ impl Router {
         } else {
             Frame::default()
         };
-        ServerMessage::Update { session, frame }
+        ServerMessage::Update {
+            session,
+            frame,
+            commit: self.take_pending_commit(session),
+        }
+    }
+}
+
+/// 把攒着的点选文本接到本次上屏前面（点选在前、这次按键在后）。
+fn merge_commit(pending: Option<String>, commit: Option<String>) -> Option<String> {
+    match (pending, commit) {
+        (None, commit) => commit,
+        (Some(pending), None) => Some(pending),
+        (Some(mut pending), Some(commit)) => {
+            pending.push_str(&commit);
+            Some(pending)
+        }
     }
 }

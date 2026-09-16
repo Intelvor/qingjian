@@ -106,11 +106,7 @@ impl Router {
             codes::TAB if self.engine.english_mode() => {
                 Effect::Changed(Some(self.commit_highlighted()))
             }
-            // 中文模式 Tab：有整句补全就接受，否则交还应用（缩进 / 跳焦点）。
-            codes::TAB => match self.sentence.take() {
-                Some(sentence) => Effect::Changed(Some(self.engine.accept_prediction(&sentence))),
-                None => Effect::Passthrough,
-            },
+            codes::TAB => self.chinese_tab(),
             codes::DOWN => {
                 self.move_highlight(1);
                 Effect::Navigated
@@ -244,6 +240,24 @@ impl Router {
         Effect::Changed(None)
     }
 
+    /// 中文模式 Tab：整句补全在手上就接受；没有就先现请一次（`[predict] sentence_trigger = "tab"`），
+    /// 这一拍把键吞掉、候选窗跟着摆「☁ …」，结果回来再按一次才上屏。
+    /// 没配「按 Tab 才联想」又不缺句子时，照旧交还应用（缩进 / 跳焦点）。
+    fn chinese_tab(&mut self) -> Effect {
+        if let Some(sentence) = self.sentence.take() {
+            return Effect::Changed(Some(self.engine.accept_prediction(&sentence)));
+        }
+        if !self.config.sentence_on_tab {
+            return Effect::Passthrough;
+        }
+        // 请过一次、结果还在路上：吞掉这个键等它，别重复请、也别让应用收到缩进。
+        // 等超了当没在等（`sentence_waiting`）就再请一次。
+        if self.sentence_waiting() || self.request_sentence_now() {
+            return Effect::Waiting;
+        }
+        Effect::Passthrough
+    }
+
     /// 上屏高亮候选；没有候选时缓冲原样上屏。
     fn commit_highlighted(&mut self) -> String {
         match self.commit_index(self.highlight) {
@@ -252,7 +266,7 @@ impl Router {
         }
     }
 
-    fn composing(&self) -> bool {
+    pub(in crate::dispatch) fn composing(&self) -> bool {
         !self.engine.composition().is_empty()
     }
 }

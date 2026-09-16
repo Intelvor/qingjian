@@ -7,8 +7,9 @@ mod rendered;
 pub use cell::StatusCell;
 pub use rendered::RenderedStatus;
 
-use super::{Metrics, Rendered, Renderer};
+use super::{CLOUD_SIZE, Metrics, Rect, Rendered, Renderer};
 use crate::canvas::Canvas;
+use crate::cloud::draw_cloud;
 use crate::error::RenderError;
 use crate::gear::draw_gear;
 use crate::shadow::Shadow;
@@ -21,13 +22,15 @@ const GEAR_SIZE: f32 = 15.0;
 const SEPARATOR_WIDTH: f32 = 1.0;
 
 impl Renderer {
-    /// 画状态条。每格宽 = 内容宽 + 两侧内边距，高 = 候选词行高 + 内边距；返回位图与各格右边界（供点击命中）。
+    /// 画状态条。每格宽 = 内容宽 + 两侧内边距，高 = 候选词行高 + 内边距；
+    /// 返回位图与各格的可点矩形（供悬停高亮与点击命中）。`hovered` 是那格的序号。
     pub fn render_status(
         &mut self,
         cells: &[StatusCell],
         theme: &Theme,
         scale: f32,
         shadow: Option<&Shadow>,
+        hovered: Option<usize>,
     ) -> Result<RenderedStatus, RenderError> {
         let metrics = Metrics { theme, scale };
         let padding = metrics.padding();
@@ -64,7 +67,7 @@ impl Renderer {
         );
         let inset = padding / 2.0;
         let mut x = margin;
-        let mut edges = Vec::with_capacity(cells.len());
+        let mut rects = Vec::with_capacity(cells.len());
         for (i, (cell, width)) in cells.iter().zip(&widths).enumerate() {
             if i > 0 {
                 canvas.fill_rect(
@@ -75,10 +78,26 @@ impl Renderer {
                     theme.colors.pos,
                 );
             }
+            // 可点范围与悬停底色同一块：格子左右各留半个内边距（让开分隔线），上下也留一点。
+            let band = Rect {
+                x: x - margin + inset,
+                y: inset / 2.0,
+                width: width - inset * 2.0,
+                height: content_height - inset,
+            };
+            if Some(i) == hovered {
+                let hover = theme.colors.hover;
+                let at = Rect {
+                    x: band.x + margin,
+                    y: band.y + margin,
+                    ..band
+                };
+                self.fill_band(&mut canvas, &metrics, hover, at);
+            }
             let slot = (x, margin, *width, content_height);
             self.draw_status_cell(&mut canvas, cell, &metrics, slot);
             x += width;
-            edges.push(x - margin);
+            rects.push(band);
         }
         Ok(RenderedStatus {
             rendered: Rendered {
@@ -88,8 +107,10 @@ impl Renderer {
                 content_width: content_width as u32,
                 content_height: content_height as u32,
                 scale,
+                rows: Vec::new(),
+                sentence: None,
             },
-            cell_edges: edges,
+            cell_rects: rects,
         })
     }
 
@@ -97,6 +118,7 @@ impl Renderer {
     fn status_cell_width(&mut self, cell: &StatusCell, m: &Metrics) -> f32 {
         match cell {
             StatusCell::Text { text, .. } => self.measure(text, &m.text_style()).width,
+            StatusCell::Cloud { .. } => m.px(CLOUD_SIZE),
             StatusCell::Gear => m.px(GEAR_SIZE),
         }
     }
@@ -123,6 +145,21 @@ impl Renderer {
                 let top = y + (height - size.height) / 2.0;
                 self.draw_text(canvas, text, &style, left, top);
             }
+            StatusCell::Cloud { emphasized } => {
+                let size = m.px(CLOUD_SIZE);
+                let color = if *emphasized {
+                    m.theme.colors.cloud
+                } else {
+                    m.theme.colors.gloss
+                };
+                draw_cloud(
+                    canvas,
+                    x + (width - size) / 2.0,
+                    y + (height - size) / 2.0,
+                    size,
+                    color,
+                );
+            }
             StatusCell::Gear => {
                 let size = m.px(GEAR_SIZE);
                 draw_gear(
@@ -146,7 +183,7 @@ mod tests {
     use crate::theme::Theme;
 
     #[test]
-    fn cells_have_increasing_edges_ending_at_content_width() {
+    fn cell_rects_increase_and_clear_both_edges() {
         // 没有系统字体的环境（CI 容器）跳过
         let Ok(library) = FontLibrary::system("zh-CN") else {
             return;
@@ -155,16 +192,27 @@ mod tests {
         let cells = [
             StatusCell::text("中 · 小鹤", true),
             StatusCell::text(",.", false),
+            StatusCell::cloud(true),
             StatusCell::Gear,
         ];
         let out = renderer
-            .render_status(&cells, &Theme::light(), 2.0, Some(&Shadow::mac_panel()))
+            .render_status(
+                &cells,
+                &Theme::light(),
+                2.0,
+                Some(&Shadow::mac_panel()),
+                None,
+            )
             .unwrap();
-        assert_eq!(out.cell_edges.len(), 3);
-        assert!(out.cell_edges.windows(2).all(|pair| pair[0] < pair[1]));
-        assert_eq!(
-            out.cell_edges.last().map(|edge| edge.round() as u32),
-            Some(out.rendered.content_width)
+        assert_eq!(out.cell_rects.len(), 4);
+        let (first, last) = (out.cell_rects[0], *out.cell_rects.last().unwrap());
+        // 命中矩形两端都让开了边（那圈留白点不着），相邻两格之间也让开——留的就是那条分隔线。
+        assert!(first.x > 0.0);
+        assert!(last.x + last.width < out.rendered.content_width as f32);
+        assert!(
+            out.cell_rects
+                .windows(2)
+                .all(|pair| pair[0].x + pair[0].width < pair[1].x)
         );
         assert!(out.rendered.pixmap.width() > out.rendered.content_width);
         assert!(out.rendered.content_x > 0);

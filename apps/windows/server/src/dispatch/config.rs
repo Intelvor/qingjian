@@ -13,6 +13,10 @@ pub struct RouterConfig {
     /// 云端候选在第一页预留的格数（`[predict] slots`）。
     pub cloud_slots: usize,
 
+    /// 整句补全只在按 Tab 键 / 点整句那块时才联想（`[predict] sentence_trigger = "tab"`）；
+    /// 缺省 `idle` 是停止输入后自动联想。云端词两种模式下都照常自动。
+    pub sentence_on_tab: bool,
+
     /// 候选排布（`[general] layout`）。
     pub layout: LayoutMode,
 
@@ -82,6 +86,7 @@ impl From<&Config> for RouterConfig {
         Self {
             page_size: config.general.page_size(),
             cloud_slots: config.predict.slots,
+            sentence_on_tab: config.predict.sentence_on_tab(),
             layout: config.general.layout,
             theme: config.general.theme,
             renderer: config.general.renderer,

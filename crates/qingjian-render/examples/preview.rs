@@ -113,25 +113,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Windows 的悬浮状态条：三格
-    let cells = [
-        StatusCell::text("中 · 小鹤", true),
-        StatusCell::text("，。", true),
-        StatusCell::Gear,
-    ];
+    // Windows 的悬浮状态条：四格，云联想开 / 关各一张
     for (theme_name, theme) in [("light", Theme::light()), ("dark", Theme::dark())] {
-        let status = renderer.render_status(&cells, &theme, args.scale, shadow.as_ref())?;
-        let path = args.out.join(format!("status-{theme_name}.png"));
-        status.rendered.pixmap.save_png(&path)?;
-        let (w, h) = status.rendered.content_size_points();
-        println!(
-            "{:<28} {:>4.0}×{:<4.0}pt  格边界 {:?}  {}",
-            format!("status-{theme_name}"),
-            w,
-            h,
-            status.cell_edges,
-            path.display()
-        );
+        for (suffix, cloud) in [("", true), ("-cloud-off", false)] {
+            let cells = [
+                StatusCell::text("中 · 小鹤", true),
+                StatusCell::text("，。", true),
+                StatusCell::cloud(cloud),
+                StatusCell::Gear,
+            ];
+            let status =
+                renderer.render_status(&cells, &theme, args.scale, shadow.as_ref(), None)?;
+            let path = args.out.join(format!("status-{theme_name}{suffix}.png"));
+            status.rendered.pixmap.save_png(&path)?;
+            let (w, h) = status.rendered.content_size_points();
+            println!(
+                "{:<28} {:>4.0}×{:<4.0}pt  格边界 {:?}  {}",
+                format!("status-{theme_name}{suffix}"),
+                w,
+                h,
+                status
+                    .cell_rects
+                    .iter()
+                    .map(|r| r.x + r.width)
+                    .collect::<Vec<_>>(),
+                path.display()
+            );
+        }
     }
 
     for probe in [
@@ -200,6 +208,8 @@ fn nihao() -> Frame {
         footer: Some("1/6".to_owned()),
         sentence: None,
         status: None,
+        hovered: None,
+        sentence_pending: false,
     }
 }
 
@@ -270,6 +280,8 @@ fn corrected_japanese() -> Frame {
         footer: None,
         sentence: None,
         status: Some("已删除「开放」".to_owned()),
+        hovered: None,
+        sentence_pending: false,
     }
 }
 
@@ -282,6 +294,8 @@ fn probe() -> Frame {
         footer: None,
         sentence: None,
         status: None,
+        hovered: None,
+        sentence_pending: false,
     }
 }
 

@@ -149,6 +149,13 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
 TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解析（bit 2 避免改变键盘状态），
 仅接受单个非代理项 UTF-16 单元。字母、小键盘和 AltGr 处理不变，不保证组合音符输入。
 
+候选窗与悬浮状态条默认由 `qingjian-render` 自绘（`ui/painter/` 把 `Frame` / `StatusView` 交出去，`[general] renderer = "system"` 才回落 GDI）。
+鼠标命中用的矩形是渲染器给回来的——候选行 `Rendered.rows`、状态条每格 `RenderedStatus.cell_rects`——不在客户区上另算一套：
+两套算法一错位就会出现「看得见高亮却点不着」。悬停底色与可点范围是同一块，格子边缘那圈留白自然点不着。
+状态条的「☁」「⚙」也自绘（`crates/qingjian-render/src/{cloud,gear}.rs`）：这两个码位会被 Segoe UI Emoji 接走画成彩色的，不认我们给的颜色。
+整句补全的时机在 `[predict] sentence_trigger`：`idle` 是停键自动请，`tab` 是按下 Tab 现请一次（`Engine::request_sentence_once` 让这一拍破例要句子）；
+请出去到结果回来的这段由 `Router.sentence_pending` 驱动候选窗摆「☁ …」。云联想关着时按 Tab 交还应用（缩进 / 跳焦点）。
+
 ## assets
 
 - `assets/sample/`：手写样例词库与释义表，不是产品数据。

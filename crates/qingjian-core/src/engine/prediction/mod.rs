@@ -40,6 +40,11 @@ impl Engine {
         self.predictor.policy()
     }
 
+    /// 下一次请求要整句补全（壳按 Tab 现请那一路）：策略平时不要，这一次破例，发完即清。
+    pub fn request_sentence_once(&mut self) {
+        self.sentence_once = true;
+    }
+
     /// 发一次联想请求，返回序号；没接 Predictor、私密输入中或拼音太短时不发，返回 `None`。
     ///
     /// 要的是「当前作用域拼音对应的词」和整句补全；`candidates` 是本地候选，只取前几个当提示。
@@ -121,7 +126,8 @@ impl Engine {
                 .collect(),
             guess,
             max_items: policy.max_items,
-            want_sentence: policy.sentence && !question,
+            want_sentence: (policy.sentence || std::mem::take(&mut self.sentence_once))
+                && !question,
             text: String::new(),
             target_language: String::new(),
         };

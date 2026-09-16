@@ -109,6 +109,8 @@ impl Router {
             layout: self.config.layout,
             theme: self.config.theme,
             sentence: None,
+            // 翻译自己用「翻译中…」那条候选表示进度，不用整句那个占位。
+            sentence_pending: false,
             notice: None,
         }
     }

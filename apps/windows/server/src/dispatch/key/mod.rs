@@ -19,7 +19,7 @@ fn with_prefix(prefix: Option<String>, effect: Effect, c: char) -> Effect {
         Effect::Changed(commit) => {
             prefix.push_str(commit.as_deref().unwrap_or_default());
         }
-        Effect::Navigated => {}
+        Effect::Navigated | Effect::Waiting => {}
         Effect::Passthrough => prefix.push(c),
     }
     Effect::Changed(Some(prefix))

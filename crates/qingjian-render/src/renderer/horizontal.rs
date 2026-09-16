@@ -1,9 +1,9 @@
 //! 横排：候选排成一行，高亮那个下面单独一行译文，页码在行尾。
 
 use super::item::Item;
-use super::{HIGHLIGHT_INSET, INDEX_GAP, Metrics, Renderer};
+use super::{HIGHLIGHT_INSET, INDEX_GAP, Metrics, Rect, Renderer};
 use crate::canvas::Canvas;
-use crate::frame::{Frame, Row};
+use crate::frame::{Frame, Hover, Row};
 
 impl Renderer {
     pub(super) fn horizontal_size(&mut self, frame: &Frame, m: &Metrics) -> (f32, f32) {
@@ -76,9 +76,9 @@ impl Renderer {
         left: f32,
         y: f32,
         content_width: f32,
-    ) {
+    ) -> Vec<Rect> {
         if frame.rows.is_empty() {
-            return;
+            return Vec::new();
         }
         // 量尺寸时已整形过一遍，这里再整形一遍；等渲染器定型再把结果从 render 传下来。
         let (items, row_height) = self.items(&frame.rows, m);
@@ -86,18 +86,33 @@ impl Renderer {
         let text_height = m.px(m.theme.text_font.line_height);
         let inset = m.px(HIGHLIGHT_INSET);
         let mut x = left + m.padding() + inset;
+        // 每项的命中带与高亮底色同一块，壳按它做鼠标点选 / 悬停。
+        let mut rects = Vec::with_capacity(frame.rows.len());
         for (i, (row, item)) in frame.rows.iter().zip(&items).enumerate() {
             let item_width = item.index_width + m.px(INDEX_GAP) + item.text_width;
-            if Some(i) == frame.highlighted {
-                self.fill_highlight(
-                    canvas,
-                    m,
-                    x - inset,
+            let band_x = x - inset;
+            let band_width = item_width + inset * 2.0;
+            // 键盘高亮优先，鼠标悬停同一块上用淡一档的底色。
+            let shade = match (Some(i) == frame.highlighted, frame.hovered) {
+                (true, _) => Some(m.theme.colors.highlight),
+                (false, Some(Hover::Row(hovered))) if i == hovered => Some(m.theme.colors.hover),
+                _ => None,
+            };
+            if let Some(color) = shade {
+                let rect = Rect {
+                    x: band_x,
                     y,
-                    item_width + inset * 2.0,
-                    row_height,
-                );
+                    width: band_width,
+                    height: row_height,
+                };
+                self.fill_band(canvas, m, color, rect);
             }
+            rects.push(Rect {
+                x: band_x,
+                y,
+                width: band_width,
+                height: row_height,
+            });
             self.draw_text(
                 canvas,
                 &row.index,
@@ -135,5 +150,6 @@ impl Renderer {
                 x += self.draw_text(canvas, segment, &style, x, annotation_top);
             }
         }
+        rects
     }
 }

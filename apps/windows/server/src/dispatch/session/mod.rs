@@ -69,6 +69,9 @@ impl Router {
         self.translation = None;
         self.pending_selection = None;
         self.sentence = None;
+        // 还没被 DLL 取走的点选文本 / 等待提示：换会话、换输入法了就别带给下一个应用。
+        self.pending_commit = None;
+        self.sentence_pending = None;
         self.notice = None;
         self.highlight = 0;
         self.navigated = false;

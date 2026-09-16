@@ -183,6 +183,8 @@ fn main() {
     dispatch::attach_cloud(&mut engine, &config.predict);
     let router_config = RouterConfig::from(&config);
     let mut router = Router::new(engine, router_config.clone());
+    // 状态条「☁」格按这份翻转 enabled 并当场换 Predictor，热加载时跟着配置文件走。
+    router.configure_predict(config.predict.clone());
     let model_path = dispatch::find_model(user_dir().as_deref(), &root);
     router.configure_local_model(model_path.clone(), &config.model);
     if let Some(path) = config_path() {
@@ -237,13 +239,17 @@ fn serve(mut router: Router) {
     use qingjian_windows_server::ipc::{Work, pipe};
     use qingjian_windows_server::ui::UiHandle;
     grant_appcontainer_log_access();
-    // 工人循环的活：各连接的消息 + 状态条上的操作（UI 线程投进来）。
+    // 工人循环的活：各连接的消息 + 候选窗 / 状态条上的操作（UI 线程投进来）。
     let (work_tx, work_rx) = std::sync::mpsc::channel::<Work>();
     let status_events = work_tx.clone();
     let on_status = Box::new(move |event| {
         let _ = status_events.send(Work::Status(event));
     });
-    match UiHandle::spawn(on_status) {
+    let candidate_events = work_tx.clone();
+    let on_candidate = Box::new(move |event| {
+        let _ = candidate_events.send(Work::Candidate(event));
+    });
+    match UiHandle::spawn(on_status, on_candidate) {
         Ok(ui) => {
             router.set_candidate_sink(Box::new(ui.clone()));
             router.set_status_sink(Box::new(ui));

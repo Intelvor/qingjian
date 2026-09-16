@@ -25,9 +25,9 @@ pub use error::RenderError;
 #[cfg(target_os = "windows")]
 pub use fonts::directwrite as system_fonts;
 pub use fonts::{FontLibrary, UiFont};
-pub use frame::{Frame, Preedit, PreeditSegment, PreeditStyle, Row, Tone};
+pub use frame::{Frame, Hover, Preedit, PreeditSegment, PreeditStyle, Row, Tone, Trailing};
 pub use layout::Layout;
-pub use renderer::{Rendered, RenderedStatus, Renderer, StatusCell};
+pub use renderer::{Rect, Rendered, RenderedStatus, Renderer, StatusCell};
 pub use shadow::Shadow;
 pub use theme::{FontSpec, Palette, Theme};
 

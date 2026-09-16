@@ -7,6 +7,9 @@ pub enum StatusEvent {
     /// 点了「，。」格：翻转当前模式的全角标点（中英各记一份）。
     TogglePunctuation,
 
+    /// 点云朵格：开 / 关在线联想（隐私开关：写回 `[predict] enabled` 并当场换 Predictor）。
+    ToggleCloud,
+
     /// 拖动结束，内容左上角的新位置（物理像素）。
     Moved(i32, i32),
 }

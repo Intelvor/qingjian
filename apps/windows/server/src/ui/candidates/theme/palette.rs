@@ -14,6 +14,9 @@ pub(super) struct Palette {
     pub(super) cloud_color: COLORREF,
     pub(super) background: COLORREF,
     pub(super) highlight: COLORREF,
+
+    /// 鼠标悬停那一格的底色：同一支蓝淡一档，与键盘高亮同时出现也分得清。
+    pub(super) hover: COLORREF,
 }
 
 impl Palette {
@@ -29,6 +32,7 @@ impl Palette {
             background: rgb(0xf8, 0xf8, 0xf8),
             // sRGB(0,0.48,1.0) @16% 叠在浅背景上。
             highlight: rgb(0xcf, 0xe4, 0xf9),
+            hover: rgb(0xe4, 0xee, 0xff),
         }
     }
 
@@ -44,6 +48,7 @@ impl Palette {
             background: rgb(0x2a, 0x2a, 0x2c),
             // 深背景上按约 28% 预混才够醒目。
             highlight: rgb(0x2f, 0x4d, 0x72),
+            hover: rgb(0x24, 0x35, 0x4a),
         }
     }
 }

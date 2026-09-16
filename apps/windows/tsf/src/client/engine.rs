@@ -1,11 +1,11 @@
 use std::io::{Read, Write};
 
 use qingjian_platform::protocol::{
-    ClientMessage, Frame, KeyEvent, PROTOCOL_VERSION, ScreenRect, ServerMessage, SessionId,
-    read_message, write_message,
+    ClientMessage, KeyEvent, PROTOCOL_VERSION, ScreenRect, ServerMessage, SessionId, read_message,
+    write_message,
 };
 
-use super::{KeyReply, KeyResponse};
+use super::{KeyReply, KeyResponse, PollReply};
 use crate::error::ClientError;
 
 /// 连 Server 的一个会话客户端，开在一条已连好的双工流上（Windows 下是命名管道，测试里是内存流）。
@@ -106,11 +106,12 @@ impl<S: Read + Write> EngineClient<S> {
     }
 
     /// 组句期间定时拉一次云联想的异步结果，回最新一帧。
-    pub fn poll(&mut self) -> Result<Frame, ClientError> {
+    /// 组句期间定时拉一次：云联想的异步结果，以及用户在候选窗上点选的候选。
+    pub fn poll(&mut self) -> Result<PollReply, ClientError> {
         match self.call(&ClientMessage::Poll {
             session: self.session,
         })? {
-            ServerMessage::Update { frame, .. } => Ok(frame),
+            ServerMessage::Update { frame, commit, .. } => Ok(PollReply { frame, commit }),
             _ => Err(ClientError::Unexpected("expected update for poll")),
         }
     }

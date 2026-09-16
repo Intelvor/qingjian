@@ -74,6 +74,7 @@ pub fn serve_pipe(
                 let _ = reply.send(router.handle(message));
             }
             Ok(Work::Status(event)) => router.handle_status_event(event),
+            Ok(Work::Candidate(event)) => router.handle_candidate_event(event),
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break,
         }

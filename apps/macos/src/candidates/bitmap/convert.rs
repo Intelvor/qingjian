@@ -9,6 +9,8 @@ pub(super) fn frame(frame: &Frame) -> qingjian_render::Frame {
         preedit: frame.preedit.as_ref().map(preedit),
         rows: frame.rows.iter().map(row).collect(),
         highlighted: Some(frame.highlighted),
+        // macOS 侧不做鼠标悬停，这一档留着给 Windows 用。
+        hovered: None,
         footer: frame.footer.clone(),
         sentence: frame.sentence.clone(),
         status: frame.status.clone(),

@@ -1,9 +1,9 @@
 //! 竖排：一行一个候选，序号 / 候选词 / 译文三列，页码在右下角。
 
 use super::columns::Columns;
-use super::{Metrics, Renderer};
+use super::{Metrics, Rect, Renderer};
 use crate::canvas::Canvas;
-use crate::frame::{Frame, Row};
+use crate::frame::{Frame, Hover, Row};
 
 impl Renderer {
     pub(super) fn vertical_size(&mut self, frame: &Frame, m: &Metrics) -> (f32, f32) {
@@ -58,23 +58,38 @@ impl Renderer {
         left: f32,
         mut y: f32,
         content_width: f32,
-    ) {
+    ) -> Vec<Rect> {
         // 量尺寸时已整形过一遍，这里再整形一遍；等渲染器定型再把结果从 render 传下来。
         let columns = self.columns(&frame.rows, m);
         let text_x = left + m.padding() + columns.index_width + m.column_gap();
         let annotation_x = text_x + columns.text_width + m.column_gap();
         let text_height = m.px(m.theme.text_font.line_height);
+        // 每行的命中带与高亮底色同一块，壳按它做鼠标点选 / 悬停。
+        let band_x = left + m.padding() / 2.0;
+        let band_width = content_width - m.padding();
+        let mut rects = Vec::with_capacity(frame.rows.len());
         for (i, row) in frame.rows.iter().enumerate() {
-            if Some(i) == frame.highlighted {
-                self.fill_highlight(
-                    canvas,
-                    m,
-                    left + m.padding() / 2.0,
+            // 键盘高亮优先，鼠标悬停同一块上用淡一档的底色。
+            let band = match (Some(i) == frame.highlighted, frame.hovered) {
+                (true, _) => Some(m.theme.colors.highlight),
+                (false, Some(Hover::Row(hovered))) if i == hovered => Some(m.theme.colors.hover),
+                _ => None,
+            };
+            if let Some(color) = band {
+                let rect = Rect {
+                    x: band_x,
                     y,
-                    content_width - m.padding(),
-                    columns.row_height,
-                );
+                    width: band_width,
+                    height: columns.row_height,
+                };
+                self.fill_band(canvas, m, color, rect);
             }
+            rects.push(Rect {
+                x: band_x,
+                y,
+                width: band_width,
+                height: columns.row_height,
+            });
             let top = y + m.row_padding();
             let small_offset = m.small_offset(text_height);
             self.draw_text(
@@ -103,5 +118,6 @@ impl Renderer {
                 y + m.row_padding(),
             );
         }
+        rects
     }
 }

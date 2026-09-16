@@ -56,6 +56,20 @@ impl Router {
                 tracing::debug!(english, full_width, "状态条：切换全角标点");
                 self.persist("general", key, full_width);
             }
+            StatusEvent::ToggleCloud => {
+                // 隐私开关：翻转 `[predict] enabled`、写回配置文件，并**立刻**换掉 Predictor
+                //（关着时连释义兜底一起停，不再向服务商发任何请求），不等热加载。
+                let enabled = !self.predict.enabled;
+                self.predict.enabled = enabled;
+                tracing::info!(enabled, "状态条：切换在线联想");
+                self.persist("predict", "enabled", enabled);
+                if !enabled {
+                    // 在飞的作废、回来的结果不认，手里那段整句也一并作废。
+                    self.cancel_prediction();
+                    self.drop_sentence();
+                }
+                super::reload::attach_cloud(&mut self.engine, &self.predict);
+            }
             StatusEvent::Moved(x, y) => {
                 self.config.status_pos = Some((x, y));
                 self.persist("status_bar", "x", i64::from(x));
@@ -96,6 +110,7 @@ impl Router {
                         .shuangpin
                         .map(|scheme| scheme.label().to_owned()),
                     full_width: self.full_width_for(english),
+                    cloud: self.predict.enabled,
                     theme: self.config.theme,
                     anchor: self.config.status_pos,
                 });

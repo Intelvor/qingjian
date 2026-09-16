@@ -49,6 +49,9 @@ pub(crate) struct Theme {
     /// 当前候选的高亮底色（mac 的半透明蓝预混成不透明值，GDI 无 alpha）。
     pub highlight: COLORREF,
 
+    /// 鼠标悬停的底色，比 [`highlight`](Self::highlight) 淡一档。
+    pub hover_color: COLORREF,
+
     /// 窗口内边距（已按 DPI 缩放）。
     pub padding: i32,
 
@@ -86,6 +89,7 @@ impl Theme {
             cloud_color: palette.cloud_color,
             background: palette.background,
             highlight: palette.highlight,
+            hover_color: palette.hover,
             padding: scale(8),
             row_padding: scale(4),
             column_gap: scale(8),

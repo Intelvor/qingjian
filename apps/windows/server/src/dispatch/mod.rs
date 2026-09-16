@@ -21,8 +21,9 @@ use std::time::{Duration, Instant};
 use qingjian_core::Engine;
 use qingjian_platform::LocalModelConfig;
 use qingjian_platform::protocol::{ClientMessage, Frame, ScreenRect, ServerMessage, SessionId};
+use qingjian_predict::PredictConfig;
 
-pub use self::candidates::{CandidateSink, NoopSink, RenderSettings};
+pub use self::candidates::{CandidateEvent, CandidateSink, NoopSink, RenderSettings};
 use self::composed::Composed;
 pub use self::config::RouterConfig;
 use self::reload::ConfigReload;
@@ -35,6 +36,9 @@ use self::translate::Translation;
 
 /// 学习数据落盘间隔（与 macOS 壳一致）；Server 没有定时器，借消息节拍看时间。
 const LEARNING_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
+
+/// 整句请求最长等多久就不再显示「联想中」（云端那边超时是 5 秒，再留点余量）。
+const SENTENCE_PENDING_TIMEOUT: Duration = Duration::from_secs(6);
 
 /// 同一时刻只有一个应用有键盘焦点，所以一个 Engine 持当前组句；焦点切到别的会话时先清掉上一个的残留。
 pub struct Router {
@@ -65,6 +69,17 @@ pub struct Router {
     /// 整句补全（preedit 右侧、Tab 上屏）；缓冲变化时清空。
     sentence: Option<String>,
 
+    /// 用户这轮是否主动请过整句（按 Tab / 点整句那块）。策略是「按 Tab 才联想」时，
+    /// 只有请过之后回来的句子才自动采用，免得模型不守指令时就悄悄上了屏。缓冲一变即清。
+    sentence_requested: bool,
+
+    /// 候选窗上点选、还没被 DLL 取走的上屏文本：传输一问一答、Server 不能主动推，只能攒到下一次轮询带回。
+    pending_commit: Option<String>,
+
+    /// 整句请求发出去了、结果还没到（记发出时刻）：候选窗在那块位置显示 `☁ …`。
+    /// 结果到了 / 组句结束 / 等超（[`SENTENCE_PENDING_TIMEOUT`]）就清，别让它挂着。
+    sentence_pending: Option<Instant>,
+
     /// 删候选后的屏幕提示，随下一帧下发、下一次按键清。
     notice: Option<String>,
 
@@ -92,6 +107,9 @@ pub struct Router {
 
     /// 状态条上点出来、还没被 DLL 用 `SyncMode` 取走的目标模式。
     pending_mode: Option<bool>,
+
+    /// 云联想配置：「☁」格翻转 `enabled` 后按它换 Predictor，热加载时跟着 `[predict]` 走。
+    predict: PredictConfig,
 
     /// 聚焦会话最近报来的光标矩形；云联想异步到达时按它原地重摆候选窗口。
     last_rect: Option<ScreenRect>,
@@ -127,6 +145,9 @@ impl Router {
             pending_selection: None,
             selection_seq: 0,
             sentence: None,
+            sentence_requested: false,
+            pending_commit: None,
+            sentence_pending: None,
             notice: None,
             highlight: 0,
             navigated: false,
@@ -136,6 +157,7 @@ impl Router {
             status: Box::new(NoopStatusSink),
             status_mode: None,
             pending_mode: None,
+            predict: PredictConfig::default(),
             last_rect: None,
             last_shown: None,
             model_path: None,
@@ -153,6 +175,11 @@ impl Router {
     /// 直接碰 Engine：测试里改模式键这类启动时才设的开关。
     pub fn engine_mut(&mut self) -> &mut Engine {
         &mut self.engine
+    }
+
+    /// 启动时记下云联想配置（缺省关）；「☁」格按它翻转 `enabled` 并当场重新接入。
+    pub fn configure_predict(&mut self, predict: PredictConfig) {
+        self.predict = predict;
     }
 
     pub fn set_status_sink(&mut self, sink: Box<dyn StatusSink>) {

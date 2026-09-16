@@ -99,15 +99,16 @@ impl Painter {
         Some(rendered)
     }
 
-    /// 画状态条。
+    /// 画状态条；`hovered` 是鼠标停住的那格（画一层比键盘高亮淡一档的底色）。
     pub(super) fn render_status(
         &mut self,
         cells: &[StatusCell],
         dark: bool,
         dpi: u32,
+        hovered: Option<usize>,
     ) -> Option<RenderedStatus> {
         self.renderer
-            .render_status(cells, &theme(dark), scale(dpi), Some(&SHADOW))
+            .render_status(cells, &theme(dark), scale(dpi), Some(&SHADOW), hovered)
             .inspect_err(|error| tracing::warn!(%error, "状态条渲染失败"))
             .ok()
     }

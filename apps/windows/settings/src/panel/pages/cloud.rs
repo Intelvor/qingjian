@@ -5,6 +5,12 @@ use windows_reactor::*;
 
 use crate::panel::cloud_status::CloudStatus;
 use crate::panel::controls::{field, labeled, note, page};
+
+use super::general;
+
+/// 整句补全的触发方式：界面名 + 配置写法（与 `[predict] sentence_trigger` 同值）。
+pub(crate) const SENTENCE_TRIGGERS: [(&str, &str); 2] =
+    [("停止输入后自动联想", "idle"), ("按 Tab 键时才联想", "tab")];
 use crate::panel::{Message, Settings};
 
 /// 后台跑一次连通性测试，轮询到有结果或被取消。
@@ -70,6 +76,15 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
             ToggleSwitch::new()
                 .is_on(p.sentence)
                 .on_toggled(context.callback(Message::CloudSentence)),
+        ),
+        field(
+            "整句联想时机",
+            "「停止输入后」与云端词同一趟请求，停手就自动取回；「按 Tab 键」平时只问云端词，按一次 Tab 才开始算整句，算好了再按一次 Tab 采用。云端词两种选择下都照常自动取回。",
+            general::string_combo(
+                &SENTENCE_TRIGGERS,
+                p.sentence_trigger.key(),
+                context.callback(Message::CloudSentenceTrigger),
+            ),
         ),
         field(
             "接口地址",

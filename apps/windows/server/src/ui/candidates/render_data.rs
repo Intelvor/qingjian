@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use qingjian_platform::protocol::{Frame, PreeditKind};
 use qingjian_platform::{LayoutMode, ThemeMode};
-use qingjian_render::{Preedit, PreeditSegment, PreeditStyle, Row};
+use qingjian_render::{Hover, Preedit, PreeditSegment, PreeditStyle, Row};
 
 use super::row;
 use super::theme::Theme;
@@ -32,6 +32,9 @@ pub(crate) struct RenderData {
     /// 整句补全，画在拼音行右侧。
     pub(super) sentence: Option<String>,
 
+    /// 整句请求在路上：那一块先摆 `☁ …`。
+    pub(super) sentence_pending: bool,
+
     /// 屏幕提示（删候选后的「已删除…」），画在拼音行下方。
     pub(super) notice: Option<String>,
 
@@ -52,6 +55,7 @@ impl RenderData {
             highlight: usize::MAX,
             footer: None,
             sentence: None,
+            sentence_pending: false,
             notice: None,
             layout: LayoutMode::default(),
             theme_mode: ThemeMode::default(),
@@ -78,11 +82,13 @@ impl RenderData {
         self.footer =
             (frame.page_count > 1).then(|| format!("{}/{}", frame.page + 1, frame.page_count));
         self.sentence = frame.sentence.clone();
+        self.sentence_pending = frame.sentence_pending;
         self.notice = frame.notice.clone();
     }
 
     /// 渲染器要的帧。提示（删了什么词）在渲染器里画在拼音行右侧，与 macOS 一致。
-    pub(super) fn render_frame(&self) -> qingjian_render::Frame {
+    /// `hovered` 是鼠标停在哪儿（UI 侧的命中状态，不属于帧数据），渲染器给它铺淡一档的底色。
+    pub(super) fn render_frame(&self, hovered: Option<Hover>) -> qingjian_render::Frame {
         let preedit = (!self.preedit.is_empty()).then(|| Preedit {
             segments: self
                 .preedit
@@ -103,9 +109,16 @@ impl RenderData {
             rows: self.rows.clone(),
             // 协议里 usize::MAX 表示不高亮。
             highlighted: (self.highlight != usize::MAX).then_some(self.highlight),
+            hovered,
+            sentence_pending: self.sentence_pending,
             footer: self.footer.clone(),
             sentence: self.sentence.clone(),
             status: self.notice.clone(),
         }
+    }
+
+    /// 候选行是竖排还是横排：竖排按 y 判命中、横排按 x。
+    pub(super) fn vertical(&self) -> bool {
+        self.layout == LayoutMode::Vertical
     }
 }

@@ -23,7 +23,7 @@ pub(crate) const SHUANGPIN: [(&str, &str); 5] = [
     ("搜狗双拼", "sogou"),
 ];
 
-fn string_combo(
+pub(crate) fn string_combo(
     options: &'static [(&str, &str)],
     current: &str,
     callback: Callback<Option<usize>>,
