@@ -313,10 +313,12 @@ impl Learner for WordLearner {
 
     fn learn_word(&mut self, text: &str, syllables: &[String]) {
         self.words.push((text.to_owned(), syllables.to_vec()));
+        // 词频与 `qingjian-learning` 的 `USER_WORD_FREQUENCY` 同一档：学进去的词要排在
+        // 词库同音词前面，靠的就是这一项（刚学时 `weight` 是 0）。
         let tsv: String = self
             .words
             .iter()
-            .map(|(t, s)| format!("{t}\t{}\t100\n", s.join(" ")))
+            .map(|(t, s)| format!("{t}\t{}\t10000\n", s.join(" ")))
             .collect();
         self.dictionary = Some(Dictionary::parse(&tsv).unwrap());
         self.shared.lock().unwrap().0.push(text.to_owned());

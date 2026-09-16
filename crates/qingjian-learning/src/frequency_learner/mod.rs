@@ -17,8 +17,12 @@ use crate::error::LearningError;
 /// 用户词文件名，与词频文件放同一目录；格式与主词库 TSV 相同（`词\t拼音\t词频`）。
 const USER_WORDS_FILE: &str = "user-words.tsv";
 
-/// 用户词在小词库里的词频。排序主要靠 weight，这个值只在同 weight 时起作用。
-const USER_WORD_FREQUENCY: u32 = 100;
+/// 用户词在小词库里的词频。词库里没有的词学进来时用这个值。
+///
+/// 刚学、还没在候选里选过时它的 `weight` 是 0，唯一撑腰的就是这一项，所以它得高于词库常见的
+/// 词频才排得上（真实词库的中位数是 194、p90 是 2734，「开发」这类是几千）。用得多了另有
+/// `weight` 的对数加分把它继续抬高（见 `ranking::weight_bonus`，对数且封顶）。
+const USER_WORD_FREQUENCY: u32 = 10_000;
 
 /// 个人 n-gram 文件名，与词频文件同目录：`前词\t后词\t次数`，句首用 `<s>`。
 const USER_NGRAM_FILE: &str = "user-ngram.tsv";

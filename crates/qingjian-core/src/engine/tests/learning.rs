@@ -3,6 +3,40 @@
 use super::*;
 
 #[test]
+fn a_learned_user_word_beats_dictionary_homophones() {
+    // 学进用户词库的词（词库里没有）再打同样的拼音要排在词库同音词前面。
+    // 刚学时 `weight` 是 0，撑腰的只有它在用户词库里的固定词频（`USER_WORD_FREQUENCY`）——
+    // 它得高于词库常见的词频，否则「开发」这类词库词会把刚造的词压到后面，
+    // 表现就是「第二次打不出来」。
+    let mut engine = engine().with_learner(Box::new(WordLearner::default()));
+    engine.set_input("kaifa");
+    let before: Vec<String> = engine
+        .query()
+        .unwrap()
+        .candidates
+        .items
+        .iter()
+        .map(|c| c.text.clone())
+        .collect();
+    assert_eq!(before[0], "开发", "学词之前是词库的词在前：{before:?}");
+
+    engine
+        .learner_mut()
+        .learn_word("开阀", &["kai".to_owned(), "fa".to_owned()]);
+
+    engine.set_input("kaifa");
+    let after: Vec<String> = engine
+        .query()
+        .unwrap()
+        .candidates
+        .items
+        .iter()
+        .map(|c| c.text.clone())
+        .collect();
+    assert_eq!(after[0], "开阀", "学过的词下次要直接排第一：{after:?}");
+}
+
+#[test]
 fn erasing_the_last_commit_and_choosing_another_word_retracts_its_learning() {
     let mut engine = engine().with_learner(Box::new(CountingLearner(HashMap::new())));
     let pick = |engine: &mut Engine, input: &str, text: &str| {
