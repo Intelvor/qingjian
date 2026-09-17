@@ -41,31 +41,6 @@ impl Icon {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::Icon;
-    use windows_reactor::Symbol;
-
-    /// 「关于」一栏：目标字形是「ⓘ 圆圈包 i」= Segoe MDL2 Assets **E946（Info）**，
-    /// 用 FontIcon 的字面 glyph，不用 WinUI `Symbol::Help`（那是问号）。
-    #[test]
-    fn about_uses_info_glyph() {
-        match Icon::glyph("\u{E946}") {
-            Icon::Glyph(glyph) => assert_eq!(glyph, "\u{E946}"),
-            Icon::Symbol(_) => panic!("关于应该用 FontIcon 的 E946（Info 圆圈包 i）"),
-        }
-    }
-
-    /// 「使用说明」应避开 `Symbol::Help`，否则导航里会出现两个一样的问号。
-    #[test]
-    fn guide_does_not_use_help_symbol() {
-        match Icon::symbol(Symbol::Message) {
-            Icon::Symbol(symbol) => assert_ne!(symbol, Symbol::Help),
-            Icon::Glyph(_) => {}
-        }
-    }
-}
-
 impl Component for Settings {
     type Input = ();
     type Message = Message;
@@ -351,5 +326,30 @@ impl Component for Settings {
                 SlotView::collection(NavigationViewSlot::MenuItems, items),
                 SlotView::new(NavigationViewSlot::Content, self.page_content(context)),
             ])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Icon;
+    use windows_reactor::Symbol;
+
+    /// 「关于」一栏：目标字形是「ⓘ 圆圈包 i」= Segoe MDL2 Assets **E946（Info）**，
+    /// 用 FontIcon 的字面 glyph，不用 WinUI `Symbol::Help`（那是问号）。
+    #[test]
+    fn about_uses_info_glyph() {
+        match Icon::glyph("\u{E946}") {
+            Icon::Glyph(glyph) => assert_eq!(glyph, "\u{E946}"),
+            Icon::Symbol(_) => panic!("关于应该用 FontIcon 的 E946（Info 圆圈包 i）"),
+        }
+    }
+
+    /// 「使用说明」应避开 `Symbol::Help`，否则导航里会出现两个一样的问号。
+    #[test]
+    fn guide_does_not_use_help_symbol() {
+        match Icon::symbol(Symbol::Message) {
+            Icon::Symbol(symbol) => assert_ne!(symbol, Symbol::Help),
+            Icon::Glyph(_) => {}
+        }
     }
 }
