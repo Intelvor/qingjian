@@ -91,28 +91,14 @@ impl Router {
                 }
                 None
             }
-            ClientMessage::ModeChanged {
-                session,
-                english,
-                background,
-            } => {
+            ClientMessage::ModeChanged { session, english } => {
                 tracing::debug!(?session, english, "中英模式");
-                // 只采纳前台应用的上报：每个加载了输入法的应用都在轮询，后台上报会覆盖状态条
-                // （中英横跳、在状态条上切了又被改回去）。前台由 DLL 判断（前台窗口在本进程 /
-                // 是本进程的子孙），这里照它给的结果筛。
-                if !background {
-                    self.handle_mode_changed(english);
-                }
+                self.handle_mode_changed(english);
                 None
             }
-            ClientMessage::SyncMode {
+            ClientMessage::SyncMode { session } => Some(ServerMessage::ModeSync {
                 session,
-                background,
-            } => Some(ServerMessage::ModeSync {
-                session,
-                // 后台应用不该取走「待切模式」：谁先到谁拿走的话，用户在悬浮状态条上点的切换会
-                // 落到后台应用头上，界面又自己变回去。前台由 DLL 判断（前台窗口在本进程 / 是它的子孙）。
-                english: (!background).then(|| self.take_pending_mode()).flatten(),
+                english: self.take_pending_mode(),
                 input: self.input_settings(),
             }),
             ClientMessage::ImeSwitched { session } => {

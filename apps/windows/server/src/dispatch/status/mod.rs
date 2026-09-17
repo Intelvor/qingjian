@@ -16,10 +16,6 @@ use super::Router;
 
 impl Router {
     pub(super) fn handle_mode_changed(&mut self, english: bool) {
-        // 轮询每拍都报同一个值，值没变就别重画——重复 show_status 会让状态条闪。
-        if self.status_mode == Some(english) {
-            return;
-        }
         self.status_mode = Some(english);
         self.reconcile_status();
     }

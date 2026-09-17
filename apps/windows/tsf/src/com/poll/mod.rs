@@ -163,7 +163,7 @@ fn sync_mode(context: &PollContext) {
     let Some(client) = guard.as_mut() else {
         return;
     };
-    let reply = match client.sync_mode(!super::service::is_foreground_app()) {
+    let reply = match client.sync_mode() {
         Ok(reply) => reply,
         Err(error) => {
             log(&format!("同步中英模式失败，断开，下一键重连: {error}"));
@@ -172,17 +172,6 @@ fn sync_mode(context: &PollContext) {
         }
     };
     drop(guard);
-    // 顺手把本应用当前的中英模式推给 Server（悬浮状态条）。只在**本应用是前台**时推：
-    // 每个加载了输入法的应用都在轮询，后台上报会覆盖状态条（横跳、在状态条上切了又被改回去）。
-    // 获焦那条路（refresh_mode_indicator）在 Chromium 系上不触发，所以这里必须补上，
-    // 否则切回 Edge 之后不打字状态条就不更新。
-    if super::service::is_foreground_app()
-        && let Some(english) = super::service::current_english()
-        && let Some(client) = context.engine.borrow_mut().as_mut()
-        && let Err(error) = client.mode_changed(english, false)
-    {
-        log(&format!("上报中英模式失败: {error}"));
-    }
     // 按键行为设置每一拍都带（DLL 不读配置文件），切换键与内置英文模式开关改完靠它生效。
     super::service::on_input_settings(reply.input);
     if let Some(english) = reply.english {

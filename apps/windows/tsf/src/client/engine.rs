@@ -166,11 +166,9 @@ impl<S: Read + Write> EngineClient<S> {
     }
 
     /// 问 Server 有没有待处理的目标模式，顺路取回最新的按键行为设置（每一拍都带）。
-    /// `background` 为真时 Server 不会给出「待切模式」——后台应用不该取走它。
-    pub fn sync_mode(&mut self, background: bool) -> Result<ModeSyncReply, ClientError> {
+    pub fn sync_mode(&mut self) -> Result<ModeSyncReply, ClientError> {
         match self.call(&ClientMessage::SyncMode {
             session: self.session,
-            background,
         })? {
             ServerMessage::ModeSync { english, input, .. } => Ok(ModeSyncReply { english, input }),
             _ => Err(ClientError::Unexpected("expected mode sync")),
@@ -178,12 +176,10 @@ impl<S: Read + Write> EngineClient<S> {
     }
 
     /// 把当前会话的中英模式推给 Server（悬浮状态条）。不回话。
-    /// `background` 为真表示本应用不在前台——轮询那一拍会带上它，Server 不采纳（见协议里的说明）。
-    pub fn mode_changed(&mut self, english: bool, background: bool) -> Result<(), ClientError> {
+    pub fn mode_changed(&mut self, english: bool) -> Result<(), ClientError> {
         self.send(&ClientMessage::ModeChanged {
             session: self.session,
             english,
-            background,
         })
     }
 
