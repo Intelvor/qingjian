@@ -61,6 +61,14 @@ impl TextService_Impl {
         });
     }
 
+    /// 激活 / 切到本应用后的一小段时间里，msctf 会把 profile 存着的转换模式写回来，那不是用户操作。
+    /// 采纳它的话，切到每个应用都会被打回上次那个模式（表现：一换应用中英模式就自己变），
+    /// 而状态条显示的是 DLL 报上来的模式，看起来就像「状态条没跟上」。这段时间内忽略写入。
+    pub(super) fn guard_conversion_mode(&self) {
+        self.conversion_guard_until
+            .set(Some(Instant::now() + std::time::Duration::from_millis(500)));
+    }
+
     /// 语言栏按钮换图标、写转换模式 compartment、把模式推给 Server（悬浮状态条）。
     pub(super) fn refresh_mode_indicator(&self) {
         let english = self.mode_state.english();

@@ -30,6 +30,8 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         }
 
         self.client_id.set(tid);
+        // 接下来 msctf 会把 profile 存的转换模式写回来，那不是用户操作，别采纳（见 guard_conversion_mode）
+        self.guard_conversion_mode();
         // 连不上 Server、没定时器都不致命。
         match PollTimer::new(self.engine.clone(), self.shared.clone()) {
             Ok(timer) => *self.poll_timer.borrow_mut() = Some(timer),

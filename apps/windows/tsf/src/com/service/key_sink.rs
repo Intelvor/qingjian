@@ -22,6 +22,8 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     fn OnSetFocus(&self, fforeground: BOOL) -> Result<()> {
         if fforeground.as_bool() {
             self.ensure_connected();
+            // 切到本应用同样会把 profile 存的转换模式写回来，别采纳（见 guard_conversion_mode）
+            self.guard_conversion_mode();
             self.refresh_mode_indicator();
         } else {
             self.commit_pending();
