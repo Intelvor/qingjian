@@ -46,6 +46,8 @@ sentence：want_sentence 为 true 时给一段文字，它**只替换这段拼�
 - **数字与符号怎么写由你判断**，按中文习惯来：金额、数量、序号、年份、代码这类写阿拉伯数字（我花 123 元、第 3 章、2024 年）；\
   口语量词与成语里的固定说法写汉字（三个月、一个人、一心一意）。同一个句子里两种混着来才自然——「我花 123 元买了三个 mp3」比\
   「我花一百二十三元买了3个mp3」更像人写的。用户敲的拼音是按汉字念的（`yibaiershisanyuan` 就是 123 元），照念法还原即可。
+- **letters 为空是「续写」**（用户没敲拼音、直接按了触发键让你接着写）：只看 before / after 往下写，不必考虑拼音与 local_candidates，
+  sentence_pinyin 给空字符串即可；其余要求（接住话题、不重复 after、不带句末标点、不写空话）照旧。
 want_sentence 为 false 时给 null。语言跟随上下文。
 
 不解释、不加引号、不加序号。";
@@ -264,11 +266,14 @@ pub fn parse_reply(content: &str, request: &PredictionRequest) -> Reply {
         // 模型没给 sentence_pinyin、或拼音是先想词再编的（敲 d'x 回「基础」），整句不收——
         // 本地词库没有的词不受影响：这里只看拼音，不查词库。
         let letters = request.letters.chars().count();
+        // 续写（没敲拼音）没有拼音可对：只看句子本身。
+        let continuing = request.letters.is_empty();
         let fits = !sentence.is_empty()
             && Some(sentence.as_str()) != first_local
             && !restates_after(&sentence, &request.after)
-            && !syllables.is_empty()
-            && mismatch_count(&request.pinyin, &syllables) <= tolerance(letters);
+            && (continuing
+                || (!syllables.is_empty()
+                    && mismatch_count(&request.pinyin, &syllables) <= tolerance(letters)));
         if fits {
             reply.sentence = Some(sentence);
         } else {
@@ -581,6 +586,29 @@ mod tests {
             parse_reply(corrected, &typo).sentence.as_deref(),
             Some("大学阶段的课程")
         );
+    }
+
+    /// 续写（用户没敲拼音，敲了续写键按 Tab）：没有拼音可对，只看句子本身成不成立。
+    #[test]
+    fn continuation_replies_skip_the_pinyin_check() {
+        let mut req = request("", true);
+        req.letters = String::new();
+        req.pinyin = String::new();
+        req.syllables = 0;
+        req.candidates.clear();
+        req.before = "笛卡儿积是一种二元运算，把两个集合".into();
+        req.after = "按顺序两两配对组成有序对。".into();
+        // 模型没给 sentence_pinyin（续写不用给），句子照样收
+        let reply = r#"{"words": [], "sentence": "中的元素"}"#;
+        assert_eq!(
+            parse_reply(reply, &req).sentence.as_deref(),
+            Some("中的元素")
+        );
+        // 复述 after 照样不收（这条不因为续写就放宽）
+        let echoed = r#"{"words": [], "sentence": "按顺序两两配对组成有序对。"}"#;
+        assert!(parse_reply(echoed, &req).sentence.is_none());
+        // 没给 sentence 就是空
+        assert!(parse_reply(r#"{"words": []}"#, &req).sentence.is_none());
     }
 
     #[test]

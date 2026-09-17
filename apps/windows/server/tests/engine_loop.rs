@@ -1493,6 +1493,49 @@ fn second_tab_commits_the_sentence() {
     assert!(frame.is_empty(), "整段拼音吃完，候选窗收起");
 }
 
+/// 续写：敲续写键（缺省 `i`）再按 Tab，前缀不进拼音、请求只带光标前后文；
+/// 结果在 raw 状态（没有拼音候选）下也要显示，再按一次 Tab 采用。
+#[test]
+fn continue_key_then_tab_asks_for_a_continuation_without_pinyin() {
+    let (mut router, cloud) = router_with_cloud(true, false);
+    router.handle(ClientMessage::Surrounding {
+        session: SESSION,
+        text: "笛卡儿积是一种二元运算，把两个集合".to_owned(),
+        after: "按顺序两两配对组成有序对。".to_owned(),
+    });
+    type_letters(&mut router, "i");
+
+    let (outcome, commit, frame) = press(&mut router, tab());
+    assert_eq!(outcome, KeyOutcome::Consumed, "Tab 被吃掉");
+    assert_eq!(commit, None, "结果还没到，这一拍不上屏");
+    assert!(frame.sentence_pending, "候选窗摆出「☁ …」");
+    {
+        let cloud = cloud.lock().unwrap();
+        assert_eq!(cloud.asked.last(), Some(&true), "Tab 这一拍才要句子");
+        assert_eq!(
+            cloud.befores.last().map(String::as_str),
+            Some("笛卡儿积是一种二元运算，把两个集合"),
+            "续写要带光标前文"
+        );
+        assert_eq!(
+            cloud.afters.last().map(String::as_str),
+            Some("按顺序两两配对组成有序对。"),
+            "光标后文也要带上"
+        );
+    }
+
+    deliver(&cloud, "中的元素");
+    let frame = poll(&mut router);
+    assert_eq!(
+        frame.sentence.as_deref(),
+        Some("中的元素"),
+        "raw 状态（敲了续写键）下续写结果也要显示"
+    );
+
+    let (_, commit, _) = press(&mut router, tab());
+    assert_eq!(commit.as_deref(), Some("中的元素"), "再按一次 Tab 采用");
+}
+
 /// 没配「按 Tab 才联想」：句子照样能用 Tab 接受（自动那一路请回来的）。
 #[test]
 fn tab_accepts_a_sentence_that_arrived_automatically() {

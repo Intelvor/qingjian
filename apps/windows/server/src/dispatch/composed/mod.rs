@@ -88,18 +88,27 @@ impl Router {
             }
             return;
         }
-        if let Some(Composed::Candidates { layout, .. }) = self.composed.as_mut() {
-            // 「按 Tab 才联想」时自动那一路没要句子，模型不守指令也不要采用：
-            // 只有这结果是用户请过的那一次带回来的，才拿去显示与自动上屏。
-            let wanted = self.engine.prediction_policy().sentence || self.sentence_requested;
-            self.sentence_requested = false;
-            let words: Vec<Candidate> = prediction
-                .words
-                .into_iter()
-                .map(CloudWord::into_candidate)
-                .collect();
-            layout.set_cloud(words);
-            self.sentence = wanted.then_some(prediction.sentence).flatten();
+        match self.composed.as_mut() {
+            Some(Composed::Candidates { layout, .. }) => {
+                // 「按 Tab 才联想」时自动那一路没要句子，模型不守指令也不要采用：
+                // 只有这结果是用户请过的那一次带回来的，才拿去显示与自动上屏。
+                let wanted = self.engine.prediction_policy().sentence || self.sentence_requested;
+                self.sentence_requested = false;
+                let words: Vec<Candidate> = prediction
+                    .words
+                    .into_iter()
+                    .map(CloudWord::into_candidate)
+                    .collect();
+                layout.set_cloud(words);
+                self.sentence = wanted.then_some(prediction.sentence).flatten();
+            }
+            // 续写（敲了续写键再按 Tab）：raw 状态没有候选可并，回来的整句就是这一整段。
+            Some(Composed::Raw { .. }) => {
+                let wanted = self.engine.prediction_policy().sentence || self.sentence_requested;
+                self.sentence_requested = false;
+                self.sentence = wanted.then_some(prediction.sentence).flatten();
+            }
+            None => {}
         }
     }
 
@@ -230,8 +239,9 @@ impl Router {
                 page_count: 1,
                 layout: self.config.layout,
                 theme: self.config.theme,
-                sentence: None,
-                sentence_pending,
+                // 敲了续写键再按 Tab 时也走这里：没有候选可显示，但整句那一段要有地方摆。
+                sentence: self.sentence.clone(),
+                sentence_pending: sentence_pending && self.sentence.is_none(),
                 notice: self.notice.clone(),
             },
             Some(Composed::Candidates {

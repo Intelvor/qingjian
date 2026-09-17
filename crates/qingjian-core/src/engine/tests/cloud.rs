@@ -2,6 +2,55 @@
 
 use super::*;
 
+/// 续写：敲续写键（缺省 `i`）后请整句——请求不带拼音，只带光标前后文。
+#[test]
+fn continue_key_asks_for_a_continuation_without_pinyin() {
+    let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut engine = self::engine().with_predictor(Box::new(EchoPredictor {
+        submitted: submitted.clone(),
+        replies: vec![],
+        sentence: true,
+    }));
+    engine.set_input("i");
+    assert!(engine.modes().is_continue("i", false), "缺省续写键是 i");
+    engine.request_sentence_once();
+
+    let sent = engine.request_prediction(
+        Some(SurroundingText {
+            before: "笛卡儿积是一种二元运算，把两个集合".into(),
+            after: "按顺序两两配对".into(),
+        }),
+        &[],
+    );
+    assert!(sent.is_some(), "续写该发出去");
+    let requests = submitted.borrow();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].pinyin, "", "续写不带拼音");
+    assert_eq!(requests[0].letters, "");
+    assert!(requests[0].want_sentence, "续写要的就是整句那一段");
+    assert!(
+        requests[0].before.ends_with("两个集合"),
+        "前后文要带上（policy 会按观察窗口裁），实际：{}",
+        requests[0].before
+    );
+}
+
+/// 没在打拼音、也没有光标前后文时，续写不发（没什么可接的）。
+#[test]
+fn continue_key_without_context_does_not_ask() {
+    let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut engine = self::engine().with_predictor(Box::new(EchoPredictor {
+        submitted: submitted.clone(),
+        replies: vec![],
+        sentence: true,
+    }));
+    engine.set_input("i");
+    engine.request_sentence_once();
+
+    assert_eq!(engine.request_prediction(None, &[]), None);
+    assert!(submitted.borrow().is_empty());
+}
+
 #[test]
 fn question_mode_asks_the_cloud_and_shows_answers_unvalidated() {
     let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -369,6 +418,7 @@ fn question_key_answers_code_points_locally_and_keeps_question_mark_alias() {
     engine.set_mode_keys(ModeKeys {
         expression: 'v',
         question: 'i',
+        continue_key: 'u',
         question_mark: false,
     });
     engine.set_input("u4e00");
@@ -379,6 +429,7 @@ fn question_key_answers_code_points_locally_and_keeps_question_mark_alias() {
     engine.set_mode_keys(ModeKeys {
         expression: 'u',
         question: 'u',
+        continue_key: 'i',
         question_mark: false,
     });
     assert_eq!(engine.mode_keys(), ModeKeys::default());

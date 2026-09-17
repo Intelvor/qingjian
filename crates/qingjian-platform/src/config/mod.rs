@@ -227,6 +227,8 @@ system_text_replacements = true
 expression = "v"
 # 问字模式：usangemu 问「三个木」（云端答），u4e00 出码点对应的字符（本地答）
 question = "u"
+# 续写模式：敲它再按 Tab，让云端接着光标前后的文字往下写一段（需要云服务）；这个前缀不上屏
+continue = "i"
 # 没在组句时敲 ? 是否也进问字模式（中英文模式都行，后面跟字母才是问题，跟别的键还原成问号）；false 的话问号就是问号
 question_mark = false
 "#,

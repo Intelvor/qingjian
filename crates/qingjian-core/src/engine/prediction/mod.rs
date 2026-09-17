@@ -69,9 +69,20 @@ impl Engine {
             None => (String::new(), String::new()),
         };
         let scope = self.composition.scope();
-        if self.english_mode
-            || self.modes().is_expression(scope, self.zhuyin)
-            || is_raw(scope, self.modes(), self.shuangpin, self.zhuyin)
+        // 续写模式：敲了续写键（缺省 `i`）再按 Tab。前缀不进拼音，模型只按光标前后文往下写；
+        // 应用给不出光标前后文就没得续，不发。
+        let continuing = self.modes().is_continue(scope, self.zhuyin);
+        if continuing && before.is_empty() && after.is_empty() {
+            return None;
+        }
+        // 续写只在用户按 Tab 现请时发：自动那一路没有拼音可依据，发出去也只是白费一次请求。
+        if continuing && !policy.sentence && !self.sentence_once {
+            return None;
+        }
+        if !continuing
+            && (self.english_mode
+                || self.modes().is_expression(scope, self.zhuyin)
+                || is_raw(scope, self.modes(), self.shuangpin, self.zhuyin))
         {
             return None;
         }
@@ -90,6 +101,9 @@ impl Engine {
                 String::new(),
                 String::new(),
             )
+        } else if continuing {
+            // 续写不带拼音，也就没有「字母对得上」那套校验
+            (PredictionKind::Compose, "", before, after)
         } else {
             (PredictionKind::Compose, scope, before, after)
         };
@@ -97,7 +111,7 @@ impl Engine {
         let decoded = self.decode(pinyin_source);
         let pinyin_source: &str = decoded.as_ref().map_or(pinyin_source, |d| d.pinyin());
         let letters = pinyin_source.chars().filter(|c| *c != '\'').count();
-        if letters < MIN_PREDICTION_LETTERS {
+        if !continuing && letters < MIN_PREDICTION_LETTERS {
             return None;
         }
         let (pinyin, syllables, guess, abbreviated) = match segment_longest_prefix(pinyin_source) {
