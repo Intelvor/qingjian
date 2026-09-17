@@ -91,9 +91,17 @@ impl Router {
                 }
                 None
             }
-            ClientMessage::ModeChanged { session, english } => {
-                tracing::debug!(?session, english, "中英模式");
-                self.handle_mode_changed(english);
+            ClientMessage::ModeChanged {
+                session,
+                english,
+                background,
+            } => {
+                tracing::debug!(?session, english, background, "中英模式");
+                // 后台应用的轮询也会报模式（每个加载了输入法的应用都在轮询），只采纳前台的，
+                // 否则几条轮询交替覆盖，状态条会中英横跳。
+                if !background {
+                    self.handle_mode_changed(english);
+                }
                 None
             }
             ClientMessage::SyncMode { session } => Some(ServerMessage::ModeSync {

@@ -757,6 +757,7 @@ fn status_bar_mode_click_is_handed_to_dll_via_sync_mode() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        background: false,
     });
 
     // 点「中」：状态条先翻成「英」，DLL 来取时拿到目标模式，取一次就清。
@@ -793,6 +794,7 @@ fn status_bar_mode_click_is_ignored_when_builtin_english_is_off() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        background: false,
     });
     assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
 
@@ -884,10 +886,12 @@ fn status_bar_follows_mode_when_enabled() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        background: false,
     });
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: true,
+        background: false,
     });
     router.handle(ClientMessage::CloseSession { session: SESSION });
     assert_eq!(
@@ -913,6 +917,7 @@ fn status_bar_shows_shuangpin_scheme_in_chinese() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        background: false,
     });
 
     assert_eq!(recorder.calls(), vec![Some("中 · 小鹤双拼".to_owned())]);
@@ -927,6 +932,7 @@ fn status_bar_stays_hidden_when_disabled() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        background: false,
     });
 
     assert_eq!(recorder.calls(), vec![None]);
@@ -1159,6 +1165,7 @@ fn punctuation_toggle_is_remembered_per_mode() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        background: false,
     });
     router.handle_status_event(StatusEvent::TogglePunctuation);
     assert_eq!(press(&mut router, comma).0, KeyOutcome::Passthrough);
@@ -1166,6 +1173,7 @@ fn punctuation_toggle_is_remembered_per_mode() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: true,
+        background: false,
     });
     assert_eq!(press(&mut router, english_comma).0, KeyOutcome::Passthrough);
     router.handle_status_event(StatusEvent::TogglePunctuation);
@@ -1174,11 +1182,13 @@ fn punctuation_toggle_is_remembered_per_mode() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        background: false,
     });
     assert_eq!(press(&mut router, comma).0, KeyOutcome::Passthrough);
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: true,
+        background: false,
     });
     assert_eq!(press(&mut router, english_comma).1, Some("，".to_owned()));
     // 英文候选组词中敲标点：先把字母原样上屏，标点也按英文那份转。

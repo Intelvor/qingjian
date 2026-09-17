@@ -176,10 +176,12 @@ impl<S: Read + Write> EngineClient<S> {
     }
 
     /// 把当前会话的中英模式推给 Server（悬浮状态条）。不回话。
-    pub fn mode_changed(&mut self, english: bool) -> Result<(), ClientError> {
+    /// `background` 为真表示本应用不在前台——轮询那一拍会带上它，Server 不采纳（见协议里的说明）。
+    pub fn mode_changed(&mut self, english: bool, background: bool) -> Result<(), ClientError> {
         self.send(&ClientMessage::ModeChanged {
             session: self.session,
             english,
+            background,
         })
     }
 

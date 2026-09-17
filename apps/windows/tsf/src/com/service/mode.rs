@@ -77,7 +77,7 @@ impl TextService_Impl {
             mode::set_indicator(thread_mgr, self.client_id.get(), english);
         }
         if let Some(client) = self.engine.borrow_mut().as_mut()
-            && let Err(error) = client.mode_changed(english)
+            && let Err(error) = client.mode_changed(english, false)
         {
             log(&format!("上报中英模式失败: {error}"));
         }
