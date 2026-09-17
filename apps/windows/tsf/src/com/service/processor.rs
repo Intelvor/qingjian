@@ -19,6 +19,12 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         let thread_mgr = ptim.ok()?.clone();
         let keystroke: ITfKeystrokeMgr = thread_mgr.cast()?;
         let sink: ITfKeyEventSink = self.to_interface();
+        // client id 必须在挂击键 sink **之前**记下：`AdviseKeyEventSink` 最后那个参数是「本线程在前台」，
+        // msctf 会当场回调一次 `OnSetFocus`，那里就要连 Server，而会话 id 用的正是这个 client id。
+        // 记晚了会先开出一个 id 为 0 的会话、紧接着被真会话顶掉，而没人给 0 号发 `CloseSession` ——
+        // Server 侧于是留下一个与真会话同 tid / pid、模式永远停在中文的僵尸，
+        // 认前台会话时可能认到它，真会话报来的模式反被当成「后台应用」丢掉。
+        self.client_id.set(tid);
         unsafe { keystroke.AdviseKeyEventSink(tid, &sink, true)? };
         let combo = preserved::load_combo();
         match preserved::register(&keystroke, tid, combo) {
@@ -29,7 +35,6 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             Err(error) => log(&format!("登记翻译快捷键失败: {error}")),
         }
 
-        self.client_id.set(tid);
         // 连不上 Server、没定时器都不致命。
         match PollTimer::new(self.engine.clone(), self.shared.clone()) {
             Ok(timer) => *self.poll_timer.borrow_mut() = Some(timer),

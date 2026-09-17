@@ -29,7 +29,10 @@ impl Router {
             None => self.foreground = Some(session),
             // 后台应用也会报模式（配置改了、激活了）：记下就行，别把状态条带到别的应用去 ——
             // 那正是「切应用后中 / 英乱跳」的老毛病。
-            Some(foreground) if foreground != session => return,
+            Some(foreground) if foreground != session => {
+                tracing::debug!(?session, ?foreground, "后台会话报来的中英模式，只记不显");
+                return;
+            }
             Some(_) => {}
         }
         self.reconcile_status();
@@ -60,8 +63,9 @@ impl Router {
     /// 认不出来就收起状态条 —— 接着显示上一个应用的中英模式正是这条路要修的毛病。
     pub fn handle_foreground(&mut self, hints: Vec<(u32, u32)>) {
         let matched = self.match_foreground(&hints);
-        if matched.is_none() {
-            tracing::debug!(?hints, "前台窗口不属于任何会话，状态条收起");
+        match matched {
+            Some(session) => tracing::debug!(?session, ?hints, "前台窗口归到这个会话"),
+            None => tracing::debug!(?hints, "前台窗口不属于任何会话，状态条收起"),
         }
         self.switch_foreground(matched);
     }

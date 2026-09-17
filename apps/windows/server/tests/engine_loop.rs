@@ -965,6 +965,24 @@ fn foreground_window_falls_back_to_the_process_id() {
     assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
 }
 
+/// 线程号会被系统回收：只有进程号也对得上才算同一个会话，否则会认到早已退出的那个。
+#[test]
+fn foreground_match_needs_both_the_thread_and_the_process() {
+    let (mut router, recorder) = status_router();
+
+    mode_changed(&mut router, SESSION, false);
+    router.handle_foreground(vec![(9999, 8888)]);
+    assert_eq!(recorder.calls().last(), Some(&None));
+
+    let (pid, tid) = host_of(SESSION);
+    // 线程号撞上、进程号不对：不算，状态条保持收起。
+    router.handle_foreground(vec![(tid, 8888)]);
+    assert_eq!(recorder.calls().last(), Some(&None));
+    // 两个都对上才认。
+    router.handle_foreground(vec![(tid, pid)]);
+    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+}
+
 /// 状态条上点出的目标模式只交给前台会话：所有装了青简的应用都在轮询，谁先来给谁就切进别的应用里去了。
 #[test]
 fn pending_mode_goes_only_to_the_foreground_session() {

@@ -54,13 +54,18 @@ impl Router {
     /// 按前台窗口的归属线索认出哪个会话在前台。
     ///
     /// `hints` 是 `(线程 id, 进程 id)` 列表，按可信度从高到低排（前台窗口本身 → 它的根祖先 → 它的后代窗口），
-    /// 由 [`crate::ui`] 的 `EVENT_SYSTEM_FOREGROUND` 钩子收集。先拿线程 id 逐个对——TSF 按线程激活，
-    /// 线程号唯一确定一个会话；都对不上再退到进程 id（宿主把编辑框放在另一条线程里时）。
+    /// 由 [`crate::ui`] 的 `EVENT_SYSTEM_FOREGROUND` 钩子收集。
+    ///
+    /// 先拿 (线程, 进程) **整对**去对——线程号会被系统回收，单看它可能撞上早已退出的会话；
+    /// 都对不上再退到只比进程号：前台窗口与承载 TSF 的线程可以不是同一条
+    /// （实测 Win11 记事本就是：前台窗口在一条线程上、TSF 激活在另一条），
+    /// 商店应用更是把前台窗口交给 `ApplicationFrameHost` 的框架窗、装了青简的宿主在它的后代窗口里。
     /// 老 DLL 不报 id（都是 0），一律对不上。
     pub(super) fn match_foreground(&self, hints: &[(u32, u32)]) -> Option<SessionId> {
-        for &(tid, _) in hints {
+        for &(tid, pid) in hints {
             if tid != 0
-                && let Some(session) = self.session_where(|info| info.tid == tid)
+                && pid != 0
+                && let Some(session) = self.session_where(|info| info.tid == tid && info.pid == pid)
             {
                 return Some(session);
             }
