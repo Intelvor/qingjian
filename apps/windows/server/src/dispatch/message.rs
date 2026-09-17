@@ -97,9 +97,18 @@ impl Router {
                 background,
             } => {
                 tracing::debug!(?session, english, background, "中英模式");
-                // 后台应用的轮询也会报模式（每个加载了输入法的应用都在轮询），只采纳前台的，
-                // 否则几条轮询交替覆盖，状态条会中英横跳。
-                if !background {
+                // 只采纳「这个会话的宿主就是前台应用」的上报。每个加载了输入法的应用都在轮询上报，
+                // 后台那些会覆盖状态条（中英横跳、在状态条上切了又被改回去）。前台由 Server 自己按
+                // 窗口判断；拿不到前台窗口（极少见）时退回信 DLL 的判断。
+                let accept = match crate::dispatch::session::foreground_app_name() {
+                    Some(front) => self
+                        .sessions
+                        .get(&session)
+                        .and_then(|info| info.app.as_deref())
+                        .is_some_and(|app| app.eq_ignore_ascii_case(&front)),
+                    None => !background,
+                };
+                if accept {
                     self.handle_mode_changed(english);
                 }
                 None
