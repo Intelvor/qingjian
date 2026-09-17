@@ -9,7 +9,7 @@ pub use qingjian_platform::protocol::{
     ClientMessage, Frame, KeyEvent, KeyModifiers, KeyOutcome, PROTOCOL_VERSION, ServerMessage,
     SessionId,
 };
-pub use qingjian_platform::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS};
+pub use qingjian_platform::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, PreeditMode};
 pub use qingjian_windows_server::dispatch::{StatusEvent, StatusSink, StatusView};
 pub use qingjian_windows_server::{AssemblySpec, Router, RouterConfig, assembly};
 
