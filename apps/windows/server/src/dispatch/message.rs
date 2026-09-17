@@ -101,11 +101,12 @@ impl Router {
                 // 后台那些会覆盖状态条（中英横跳、在状态条上切了又被改回去）。前台由 Server 自己按
                 // 窗口判断；拿不到前台窗口（极少见）时退回信 DLL 的判断。
                 let accept = match crate::dispatch::session::foreground_app_name() {
+                    // 会话没报 exe 名（老 DLL / 会话刚开还没报）时无从匹配，退回信 DLL 的判断
                     Some(front) => self
                         .sessions
                         .get(&session)
                         .and_then(|info| info.app.as_deref())
-                        .is_some_and(|app| app.eq_ignore_ascii_case(&front)),
+                        .map_or(!background, |app| app.eq_ignore_ascii_case(&front)),
                     None => !background,
                 };
                 if accept {
