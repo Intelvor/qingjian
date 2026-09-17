@@ -272,12 +272,24 @@ pub fn parse_reply(content: &str, request: &PredictionRequest) -> Reply {
         let continuing = request.letters.is_empty();
         // 整句比云端词更宽（句子长、模型常扩展），光标后无文字时给的是完整短句、更容易扩出对不齐的音节，再松一档。
         let sentence_allowed = sentence_tolerance(letters) + usize::from(request.after.is_empty());
+        // 整句与本地首选是同一个词时：只有「没有下文」才算重复（本地已经给了那个词，整句再来一条没意义）。
+        // 有下文时整句填的是 before 与 after 中间那一段，用途与词候选完全不同——而答案恰恰常常就是本地首选
+        // 那个词（敲 daxue 在「高等数学是 ⋯ 最重要的基础课程之一」里填「大学」），这条判据会把填空整片挡掉。
+        let duplicated_local = request.after.is_empty() && Some(sentence.as_str()) == first_local;
+        // 只比用户敲的那一段（前 `syllables` 个音节）：模型接着往下续写的字不属于这次拼音，
+        // 整段去比会把「公园散步放松一下」这种续写长的句子整片丢掉（敲 gongyuan 只对应前两个音节）。
+        // 用 `syllables` 而不是数 `pinyin` 里的 `'`：简拼段写作 `dx` 但切出来是 2 个音节。
+        let head: Vec<String> = syllables
+            .iter()
+            .take(request.syllables.max(1))
+            .cloned()
+            .collect();
         let fits = !sentence.is_empty()
-            && Some(sentence.as_str()) != first_local
+            && !duplicated_local
             && !restates_after(&sentence, &request.after)
             && (continuing
-                || (!syllables.is_empty()
-                    && mismatch_count(&request.pinyin, &syllables) <= sentence_allowed));
+                || (!head.is_empty()
+                    && mismatch_count(&request.pinyin, &head) <= sentence_allowed));
         if fits {
             reply.sentence = Some(sentence);
         } else {
@@ -392,7 +404,10 @@ mod tests {
     #[test]
     fn arabic_digits_pass_the_pinyin_check() {
         let reply = r#"{"words": [], "sentence": "我花123元", "sentence_pinyin": "wo hua yi bai er shi san yuan"}"#;
-        let parsed = parse_reply(reply, &request("wo'hua'yi'bai'er'shi'san'yuan", true));
+        // helper 的 syllables 默认写 2（给简拼测试用），这里按实际音节数写
+        let mut req = request("wo'hua'yi'bai'er'shi'san'yuan", true);
+        req.syllables = 8;
+        let parsed = parse_reply(reply, &req);
         assert_eq!(parsed.sentence.as_deref(), Some("我花123元"));
     }
 
@@ -402,10 +417,9 @@ mod tests {
     fn mixed_arabic_digits_and_letters_in_one_sentence() {
         let reply = r#"{"words": [], "sentence": "我花123元买了三个mp3",
             "sentence_pinyin": "wo hua yi bai er shi san yuan mai le san ge mp san"}"#;
-        let parsed = parse_reply(
-            reply,
-            &request("wo'hua'yi'bai'er'shi'san'yuan'mai'le'san'ge'mp'san", true),
-        );
+        let mut req = request("wo'hua'yi'bai'er'shi'san'yuan'mai'le'san'ge'mp'san", true);
+        req.syllables = 14;
+        let parsed = parse_reply(reply, &req);
         assert_eq!(parsed.sentence.as_deref(), Some("我花123元买了三个mp3"));
     }
 
@@ -632,6 +646,42 @@ mod tests {
         assert!(parse_reply(echoed, &req).sentence.is_none());
         // 没给 sentence 就是空
         assert!(parse_reply(r#"{"words": []}"#, &req).sentence.is_none());
+    }
+
+    /// 有下文（填空）时，整句与本地首选是同一个词也要收——它填的是 before 与 after 之间那一段，
+    /// 与词候选用途不同，而答案常常就是本地首选那个词。
+    #[test]
+    fn a_gap_filling_sentence_may_match_the_local_first_candidate() {
+        let mut req = request("da'xue", true);
+        req.before = "高等数学是".into();
+        req.after = "最重要的基础课程之一".into();
+        req.candidates = vec!["大学".into(), "大雪".into()];
+        let reply = r#"{"words": [], "sentence": "大学", "sentence_pinyin": "da xue"}"#;
+        assert_eq!(
+            parse_reply(reply, &req).sentence.as_deref(),
+            Some("大学"),
+            "填空时答案就是本地首选那个词，不该当重复丢掉"
+        );
+        // 没有下文时仍然不收：本地已经给了同一个词，整句再来一条是重复
+        let mut bare = request("da'xue", true);
+        bare.candidates = vec!["大学".into()];
+        assert!(parse_reply(reply, &bare).sentence.is_none());
+    }
+
+    /// 模型接着往下续写的部分不算「拼音对不上」：敲 gongyuan（2 音节），模型给「公园散步放松一下」
+    /// （8 音节），前两个音节对得上就该收；但前两个本身对不上（回 kai fa）还是要拒。
+    #[test]
+    fn a_sentence_may_extend_beyond_the_typed_syllables() {
+        let mut req = request("gong'yuan", true);
+        req.before = "今天天气不错，我打算去".into();
+        let reply = r#"{"words": [], "sentence": "公园散步放松一下",
+            "sentence_pinyin": "gong yuan san bu fang song yi xia"}"#;
+        assert_eq!(
+            parse_reply(reply, &req).sentence.as_deref(),
+            Some("公园散步放松一下")
+        );
+        let wrong = r#"{"words": [], "sentence": "开发", "sentence_pinyin": "kai fa san bu"}"#;
+        assert!(parse_reply(wrong, &req).sentence.is_none());
     }
 
     #[test]
