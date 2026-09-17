@@ -96,6 +96,72 @@ fn with_active(f: impl FnOnce(&TextService_Impl)) {
     }
 }
 
+/// 前台窗口属于本 exe 吗？轮询上报中英模式前用它筛一下：后台应用的轮询上报会覆盖状态条
+/// （横跳、在状态条上切了又被改回去），所以要挑出真前台那个。
+///
+/// 比 **exe 名**而不是进程 id：Chromium 系（Edge / Chrome）的前台窗口属于它的 renderer 子进程，
+/// 按 pid 比永远对不上，但 renderer 的 exe 名与浏览器相同，按名字比能认出来。
+pub(super) fn is_foreground_app() -> bool {
+    let hwnd = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+    if hwnd.0.is_null() {
+        return false;
+    }
+    let mut pid = 0u32;
+    unsafe {
+        windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    }
+    let Some(front) = process_exe(pid) else {
+        return false;
+    };
+    let Some(me) = std::env::current_exe().ok().and_then(|path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+    }) else {
+        return false;
+    };
+    front.eq_ignore_ascii_case(&me)
+}
+
+/// `pid` 的 exe 文件名；打不开的进程返回 `None`。
+fn process_exe(pid: u32) -> Option<String> {
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW,
+    };
+    use windows::core::PWSTR;
+
+    if pid == 0 {
+        return None;
+    }
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+    let mut buffer = [0u16; 260];
+    let mut len = buffer.len() as u32;
+    let queried = unsafe {
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            PWSTR(buffer.as_mut_ptr()),
+            &mut len,
+        )
+    };
+    let _ = unsafe { windows::Win32::Foundation::CloseHandle(process) };
+    queried.ok()?;
+    String::from_utf16_lossy(&buffer[..len as usize])
+        .rsplit(['\\', '/'])
+        .next()
+        .map(str::to_owned)
+}
+
+/// 本线程激活的文本服务当前的中英模式；没激活时为 `None`。轮询那一拍用它把模式推给 Server。
+pub(super) fn current_english() -> Option<bool> {
+    ACTIVE.with(|active| {
+        active
+            .borrow()
+            .as_ref()
+            .map(|service| service.mode_state.english())
+    })
+}
+
 /// 用户点了语言栏的中 / 英按钮（见 [`ModeButton`](crate::com::mode::ModeButton)）：翻转模式。
 pub(super) fn toggle_mode() {
     with_active(|service| service.set_english_mode(!service.mode_state.english()));
