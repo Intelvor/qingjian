@@ -6,7 +6,7 @@ use windows::Win32::UI::TextServices::{
 };
 use windows::core::{IUnknownImpl, Interface, Ref, Result};
 
-use qingjian_platform::protocol::{InputSettings, SessionId};
+use qingjian_platform::protocol::InputSettings;
 
 use super::{ACTIVE, TextService_Impl};
 use crate::com::key::preserved;
@@ -20,10 +20,8 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         let keystroke: ITfKeystrokeMgr = thread_mgr.cast()?;
         let sink: ITfKeyEventSink = self.to_interface();
         // client id 必须在挂击键 sink **之前**记下：`AdviseKeyEventSink` 最后那个参数是「本线程在前台」，
-        // msctf 会当场回调一次 `OnSetFocus`，那里就要连 Server，而会话 id 用的正是这个 client id。
-        // 记晚了会先开出一个 id 为 0 的会话、紧接着被真会话顶掉，而没人给 0 号发 `CloseSession` ——
-        // Server 侧于是留下一个与真会话同 tid / pid、模式永远停在中文的僵尸，
-        // 认前台会话时可能认到它，真会话报来的模式反被当成「后台应用」丢掉。
+        // msctf 会当场回调一次 `OnSetFocus`，那里就要连 Server 并刷指示器（写转换模式 compartment 用的
+        // 就是这个 client id）。记晚了那次写入会带着空 client id 失败，任务栏的中 / 英就刷不出来。
         self.client_id.set(tid);
         unsafe { keystroke.AdviseKeyEventSink(tid, &sink, true)? };
         let combo = preserved::load_combo();
@@ -42,7 +40,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         }
 
         if self.profile_cookie.get().is_none() {
-            match profile::advise(&thread_mgr, SessionId(tid as u64)) {
+            match profile::advise(&thread_mgr, super::session_id()) {
                 Ok(cookie) => self.profile_cookie.set(Some(cookie)),
                 Err(error) => log(&format!("监听输入法切换失败: {error}")),
             }

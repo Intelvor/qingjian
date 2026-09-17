@@ -24,16 +24,17 @@ impl Router {
     pub(super) fn handle_mode_changed(&mut self, session: SessionId, english: bool) {
         self.set_mode(session, english);
         match self.foreground {
-            // 还没有前台线索（Server 刚起、钩子认不出这个宿主）就把报模式的这个当前台，
-            // 否则状态条要等用户敲第一个键才亮。
-            None => self.foreground = Some(session),
             // 后台应用也会报模式（配置改了、激活了）：记下就行，别把状态条带到别的应用去 ——
             // 那正是「切应用后中 / 英乱跳」的老毛病。
             Some(foreground) if foreground != session => {
                 tracing::debug!(?session, ?foreground, "后台会话报来的中英模式，只记不显");
                 return;
             }
-            Some(_) => {}
+            // 还没有前台线索（Server 刚起、钩子认不出这个宿主）就把报模式的这个当前台，
+            // 否则状态条要等用户敲第一个键才亮。老 DLL 不报宿主 id（升级后没重启的应用），
+            // 前台永远认不出它，别让它占住这个位置。
+            None if self.session_host(session).is_some() => self.foreground = Some(session),
+            _ => {}
         }
         self.reconcile_status();
     }

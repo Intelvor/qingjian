@@ -2,10 +2,6 @@
 
 use std::time::Instant;
 
-use windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
-
-use qingjian_platform::protocol::SessionId;
-
 use super::launch;
 use super::{RECONNECT_INTERVAL, TextService_Impl};
 use crate::client::EngineClient;
@@ -13,14 +9,14 @@ use crate::client::pipe::connect_default;
 use crate::com::log::log;
 
 impl TextService_Impl {
-    /// 连 Server 并开会话（会话 id 用 TSF 的 client id，带上宿主 exe 名与进程 / 线程 id）。
+    /// 连 Server 并开会话（会话 id 见 [`super::session_id`]，带上宿主 exe 名与进程 / 线程 id）。
     ///
-    /// 进程 / 线程 id 是**当场取**的：`connect` 只在 TSF 线程上调（激活、按键、轮询都在这条 STA 线程上），
+    /// 进程 / 线程 id 是**当场取**的：`connect` 只在 TSF 线程上调（激活、获键、轮询都在这条 STA 线程上），
     /// 所以取到的就是承载这个会话的那条线程。Server 拿它把系统报来的前台窗口对到会话上。
     pub(super) fn connect(&self) {
-        let session = SessionId(self.client_id.get() as u64);
+        let (pid, tid) = super::host_ids();
+        let session = super::session_id();
         let app = crate::com::host_app_name();
-        let (pid, tid) = unsafe { (GetCurrentProcessId(), GetCurrentThreadId()) };
         let connected = connect_default()
             .map_err(|e| e.to_string())
             .and_then(|stream| {

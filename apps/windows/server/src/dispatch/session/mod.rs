@@ -51,6 +51,14 @@ impl Router {
         }
     }
 
+    /// 某会话的宿主 `(进程 id, 线程 id)`；老 DLL 不报（升级后没重启的应用）为 `None`。
+    pub(super) fn session_host(&self, session: SessionId) -> Option<(u32, u32)> {
+        self.sessions
+            .get(&session)
+            .map(|info| (info.pid, info.tid))
+            .filter(|&(pid, tid)| pid != 0 && tid != 0)
+    }
+
     /// 按前台窗口的归属线索认出哪个会话在前台。
     ///
     /// `hints` 是 `(线程 id, 进程 id)` 列表，按可信度从高到低排（前台窗口本身 → 它的根祖先 → 它的后代窗口），

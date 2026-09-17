@@ -15,6 +15,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
 use windows::Win32::UI::TextServices::{
     ITfDisplayAttributeProvider, ITfKeyEventSink, ITfLangBarItemButton, ITfSource,
     ITfTextInputProcessor, ITfThreadMgr,
@@ -22,7 +23,7 @@ use windows::Win32::UI::TextServices::{
 use windows::core::{ComObject, implement};
 
 use qingjian_platform::KeyCombo;
-use qingjian_platform::protocol::{Frame, InputSettings};
+use qingjian_platform::protocol::{Frame, InputSettings, SessionId};
 
 use super::composition::Shared;
 use super::key::KeyTap;
@@ -36,6 +37,23 @@ pub(crate) type SharedClient = Rc<RefCell<Option<EngineClient<PipeStream>>>>;
 
 /// 连不上 Server 后隔多久再试（每次尝试都在应用的 UI 线程上，不能每键都试）。
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
+
+/// 本线程的 `(进程 id, 线程 id)`。
+pub(super) fn host_ids() -> (u32, u32) {
+    unsafe { (GetCurrentProcessId(), GetCurrentThreadId()) }
+}
+
+/// 本线程的会话标识 = 进程号 `<< 32 | 线程号`。**调它的必须是承载这个会话的那条线程**
+/// （`Activate` 与 `connect` 都在那条 STA 线程上）。
+///
+/// 不能拿 `Activate` 传进来的 client id 当会话标识：实测那几个值（0 / 25 / 57）在完全不同的进程之间
+/// 反复出现，而 Server 的会话表是全局一张（一个 Server 服务所有应用），于是后开的会话把先开的顶掉 ——
+/// 表现出来是 `[apps]` 按应用的设置认错应用、两个应用的中英模式互相覆盖（「切应用后状态条中 / 英乱跳」）。
+/// 进程号 + 线程号一起才在「活着的进程」里唯一。
+pub(super) fn session_id() -> SessionId {
+    let (pid, tid) = host_ids();
+    SessionId((u64::from(pid) << 32) | u64::from(tid))
+}
 
 /// 一个 TSF 文本服务实例（每线程一个）。
 #[implement(ITfTextInputProcessor, ITfKeyEventSink, ITfDisplayAttributeProvider)]
