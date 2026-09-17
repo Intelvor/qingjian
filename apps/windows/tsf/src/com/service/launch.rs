@@ -185,9 +185,9 @@ mod tests {
     fn server_exe_sits_next_to_the_dll() {
         assert_eq!(
             server_exe_path(Path::new(
-                r"D:\Program Files\Qingjian\qingjian_tsf-0.1.0-alpha.15-dev.dll"
+                r"C:\Program Files\Qingjian\qingjian_tsf-0.1.0-alpha.15-dev.dll"
             )),
-            Path::new(r"D:\Program Files\Qingjian\qingjian-server.exe")
+            Path::new(r"C:\Program Files\Qingjian\qingjian-server.exe")
         );
     }
 }

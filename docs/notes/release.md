@@ -141,7 +141,7 @@ Apple Developer 账号有了以后，在仓库 Secrets 里配齐 `release.yml` �
 
 ```powershell
 $env:QINGJIAN_UIACCESS = '0'                     # 没有签名证书：带 uiAccess 的未签名 exe 起不来
-$env:QINGJIAN_ISCC = 'D:\Inno Setup 7\ISCC.exe'   # 开发机上的 Inno；CI 里由 workflow 装同一个版本
+$env:QINGJIAN_ISCC = "$env:ProgramFiles\Inno Setup 7\ISCC.exe"   # 开发机上的 Inno（装到别处的，把前面的路径换成实际安装目录）；CI 里由 workflow 装同一个版本
 powershell -NoProfile -ExecutionPolicy Bypass -File apps\windows\installer\build.ps1
 ```
 
@@ -149,7 +149,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File apps\windows\installer\build
 而安装包里的 DLL 是带版本的文件名（`qingjian_tsf-<版本串>.dll`）。没提交就打包、又和上次打的是同一个提交，哈希不变、文件名一样，
 Inno 只能把它登记成「重启后替换」，**装完不生效**——用户看到的是「装了跟没装一样」。
 
-出包前清一次 `D:\Rust\target\debug` 是省空间的习惯（装机只用 `release` 那份）：顺序是**跑完 check 与单测 → 清 debug → 出包**。
+出包前清一次 `$env:CARGO_TARGET_DIR\debug`（按本机 Cargo 目标目录）是省空间的习惯（装机只用 `release` 那份）：顺序是**跑完 check 与单测 → 清 debug → 出包**。
 
 装机这几步一步都不能省：
 
@@ -165,8 +165,9 @@ Start-Process -FilePath $setup -Verb RunAs -Wait `
     -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER'
 Start-Sleep -Seconds 3
 
-# 3) 把 Server 起回来——漏了这步，DLL 连不上管道就静默吞键（没有任何提示，像「输入法完全没反应」）
-Start-Process "D:\Program Files\Qingjian\qingjian-server.exe" -WorkingDirectory "D:\Program Files\Qingjian"
+# 3) 把 Server 起回来——漏了这步，DLL 连不上管道就静默吞键（没有任何提示，像「输入法完全没反应」）。
+#    路径按本机实际安装目录填（装到非默认盘的替换 `$env:ProgramFiles\Qingjian`）
+Start-Process "$env:ProgramFiles\Qingjian\qingjian-server.exe" -WorkingDirectory "$env:ProgramFiles\Qingjian"
 Start-Sleep -Seconds 5
 Test-Path '\\.\pipe\qingjian'     # True 才算起来了
 
@@ -180,7 +181,7 @@ Test-Path '\\.\pipe\qingjian'     # True 才算起来了
 几个配套的点：
 
 - 产品数据在 `data/generated/`（不在 git 里）。缺 `glossary-es.qj` 时 iscc 直接报错退出；从上游 `data` 标签的 `qingjian-data.tar.gz` 取，解包时排除 `._*`。
-- 装好后 Server 的 exe 在 `D:\Program Files\Qingjian\`，ACL 是 Administrators 全权、`BUILTIN\Users` 只读 —— 直接覆盖会 `UnauthorizedAccessException`，
+- 装好后 Server 的 exe 在 `$env:ProgramFiles\Qingjian\`（本机装在非默认盘的按实际路径看），ACL 是 Administrators 全权、`BUILTIN\Users` 只读 —— 直接覆盖会 `UnauthorizedAccessException`，
   所以**改 Server 侧代码也必须走安装包**（只有 DLL 靠版本化文件名能在重启后替换）。
 - 排障先看日志，现在都在 `%LOCALAPPDATA%\Qingjian\logs\`（`server.<UTC 日期>.log`、`tsf.<UTC 日期>.log`；文件名用 UTC 日期）。
 - 想知道某个进程加载的是哪一份 DLL：`(Get-Process -Id <pid>).Modules | Where-Object ModuleName -like 'qingjian*' | Select ModuleName, FileName` —
