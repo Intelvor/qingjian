@@ -320,6 +320,8 @@ impl Router {
             return Effect::Waiting;
         }
         Effect::Passthrough
+    }
+
     /// 数字键在当前页对应的格子下标；这一页没有这一格（`gpt6` 只有三个候选）返回 `None`，数字当内容进缓冲区。
     /// 云端词还没到的占位格算有：按了不算，免得结果一到就选错。
     fn slot_index(&self, digit: usize) -> Option<usize> {
