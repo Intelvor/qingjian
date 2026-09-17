@@ -49,6 +49,25 @@ Rust 工具链由 `rust-toolchain.toml` 钉版本（现在 1.96.0），两个 wo
 5. 官网：`releases.json` 里 Windows 包由文件名 `-Setup.exe` 识别（`ASSET_KINDS`），下载页按访问者平台取「有该平台安装包的最新版本」
    （`latestFor`），所以 macOS 与 Windows 各自的最新版互不干扰。
 
+### 发版时 gh 传附件失败怎么办（2026-09-17 实测）
+
+`gh release create/upload` 打 `uploads.github.com` 有可能整体不稳：CI 的 `Create GitHub release` 一步卡十几分钟不结束，
+本机 `gh release upload` 传 20 MB 报 `EOF` / `HTTP 500`、传 92 MB 迟迟不落盘（同一时刻 CI 里 93 B 的 `SHA256SUMS` 也花了 3.5 分钟）。
+普通 API（`gh api`）不受影响，而 `curl --http1.1` 直传同一个端点正常——所以这是上传通道的问题，不是版本号或数据的问题
+（发版门禁那一步当时是 success）。
+
+- **先分清「客户端报错」与「服务端没收下」**：查 `gh release view <标签> --json assets` 里的 `size` / `digest`。
+  那次 20 MB 的探针 gh 报 `EOF`、92 MB 最后一次回 `504`，**两件附件其实都已完整落盘**（`digest` 与本地 sha256 一致）。
+  看到 5xx 先查一次再决定重传，别直接推翻重来。
+- 直传（`<databaseId>` 取 `gh release view <标签> --json databaseId` 的数字 id，**不是** `RE_...` 那个 node id）：
+  `curl --http1.1 -H "Expect:" -X POST "https://uploads.github.com/repos/<repo>/releases/<databaseId>/assets?name=<文件名>" -H "Authorization: token $(gh auth token)" -H "Content-Type: application/octet-stream" --data-binary @<文件>`
+- 附件大到本机上行撑不住时会撞服务端的写入超时（92 MB 在本机约 0.4 MB/s 的上行下要 4 分钟，回 `504`），
+  这时要么反复重试、要么换一条上行更快的机器传。
+- 手动补发的收尾：按标签提交出包（`git checkout <标签>` 后跑 `build.ps1`，工作树干净版本串才不带哈希与 `+`）
+  → `gh release edit <标签> --draft=false --latest` → 跑 `publish-releases-json.sh`。
+  **那个脚本末尾几个 `gh` 调用没带 `--repo`**：CI 里靠环境推断没问题，本机跑要设 `GH_REPO=<owner>/<repo>`，否则它操作 `origin`（上游）、报 `release not found`。
+- 手动补发时要连带核对：`SHA256SUMS` 必须按本次上传的包重算，`build-info.json` 的 `runner` / `built_at` 改成实情（`commit` / 两个 data 摘要照旧）。
+
 ## 提交前检查与 CI
 
 本地 `git config core.hooksPath .githooks` 启用一次后，每次提交前 `.githooks/pre-commit` 先拒绝装饰性分隔注释（`// ====` / `// ────`，只做视觉分组不带「为什么」），再跑 `cargo fmt --check` 与 `cargo clippy -D warnings`（含 IMK 外壳，增量几十秒）；
