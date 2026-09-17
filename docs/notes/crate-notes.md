@@ -164,6 +164,9 @@ TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解
 所以鼠标的客户区坐标得先减掉 `Rendered.content_x/content_y`（顺手按内容区边界判一脚），
 漏了这一步命中整体偏右下：竖排看着是「高亮跑到鼠标下面那一行」，只有一行高的整句补全则完全点不中。
 悬停底色与可点范围是同一块，格子边缘那圈留白自然点不着。
+分层窗口的鼠标命中按像素 alpha 判：**只有 alpha 恰好为 0 的像素才把点击放过去**，而阴影尾部那一大圈 alpha 只有个位数（肉眼几乎看不见）照样吃点击，
+表现是「判定区域比看得见的外观大一圈」，状态条下方尤其明显（光从上方来，阴影往下甩得最长）。
+所以 `ui/layered/` 在贴上之前把低于 `HIT_ALPHA_FLOOR`（6）的像素整颗抹成全透明，让判定区域贴着外观走。
 状态条的「☁」「⚙」也自绘（`crates/qingjian-render/src/{cloud,gear}.rs`）：这两个码位会被 Segoe UI Emoji 接走画成彩色的，不认我们给的颜色。
 整句补全的时机在 `[predict] sentence_trigger`：`idle` 是停键自动请，`tab` 是按下 Tab 现请一次（`Engine::request_sentence_once` 让这一拍破例要句子）；
 请出去到结果回来的这段由 `Router.sentence_pending` 驱动候选窗摆「☁ …」。云联想关着时按 Tab 交还应用（缩进 / 跳焦点）。

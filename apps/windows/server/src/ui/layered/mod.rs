@@ -25,6 +25,12 @@ const KEY_MAX: f64 = 65.0;
 /// 环境光晕的最浓 alpha，四边等浓。
 const AMBIENT_MAX: f64 = 18.0;
 
+/// 命中判定的 alpha 下限。分层窗口只把 **alpha 恰好为 0** 的像素当透明、让鼠标消息穿过去，
+/// 而阴影尾部那一大圈 alpha 只有个位数（肉眼几乎看不出）却照样吃点击 ——
+/// 表现就是「判定区域比看得见的外观大一圈」，状态条下方尤其明显（光从上方来，阴影往下甩得最长）。
+/// 低于这个阈值的一律抹成全透明，让判定区域贴着外观走。
+const HIT_ALPHA_FLOOR: u8 = 6;
+
 /// 阴影留白的物理像素宽度（`dpi` 96 为 100%）。
 pub(super) fn shadow_margin(dpi: u32) -> i32 {
     ((SHADOW_MARGIN * dpi as i32) / 96).max(1)
@@ -98,8 +104,13 @@ pub(super) fn present(hwnd: HWND, pixmap: &Pixmap, win_pos: (i32, i32)) -> Resul
         return Err(Error::from(E_INVALIDARG));
     }
     let mut canvas = Canvas::new(w, h)?;
-    // tiny-skia 是 RGBA，DIB 是 BGRA；都是预乘，只换通道顺序。
     for (dst, src) in canvas.pixels().chunks_exact_mut(4).zip(pixmap.pixels()) {
+        // 几乎看不见的阴影尾部不该吃点击（见 HIT_ALPHA_FLOOR）：整像素抹成全透明。
+        if src.alpha() < HIT_ALPHA_FLOOR {
+            dst.copy_from_slice(&[0, 0, 0, 0]);
+            continue;
+        }
+        // tiny-skia 是 RGBA，DIB 是 BGRA；都是预乘，只换通道顺序。
         dst[0] = src.blue();
         dst[1] = src.green();
         dst[2] = src.red();
@@ -168,10 +179,12 @@ fn fill_shadow_and_background(
                 let fall = fall * fall;
                 let ambient = AMBIENT_MAX * fall;
                 let key = KEY_MAX * round.down_weight(x, y) * fall;
+                let alpha = (ambient + key).min(255.0) as u8;
                 pixels[idx] = 0;
                 pixels[idx + 1] = 0;
                 pixels[idx + 2] = 0;
-                pixels[idx + 3] = (ambient + key).min(255.0) as u8;
+                // 同 `present`：几乎看不见的阴影尾部不该吃点击。
+                pixels[idx + 3] = if alpha < HIT_ALPHA_FLOOR { 0 } else { alpha };
             }
         }
     }
