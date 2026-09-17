@@ -54,6 +54,16 @@ pub fn tolerance(letters: usize) -> usize {
     }
 }
 
+/// 整句补全专用容错，比 [`tolerance`] 更宽：句子长、模型常略扩展或换措辞，拼音很难逐音节全对；
+/// 云端词要求与字数和音节严格一致、错了会混进候选，所以不能共享同一档。短输入仍严格（过短时什么都对得上）。
+pub fn sentence_tolerance(letters: usize) -> usize {
+    if letters < 4 {
+        0
+    } else {
+        1 + (letters - 2) / 4
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,5 +103,15 @@ mod tests {
         assert_eq!(tolerance(5), 1);
         assert_eq!(tolerance(9), 1);
         assert_eq!(tolerance(10), 2);
+    }
+
+    #[test]
+    fn sentence_tolerance_is_looser_but_strict_for_short_input() {
+        assert_eq!(sentence_tolerance(2), 0);
+        assert_eq!(sentence_tolerance(3), 0);
+        // 同一个长度，整句比云端词多容：6 个字母整句容 2、云端词容 1
+        assert_eq!(sentence_tolerance(6), 2);
+        assert_eq!(sentence_tolerance(10), 3);
+        assert!(sentence_tolerance(6) > tolerance(6));
     }
 }

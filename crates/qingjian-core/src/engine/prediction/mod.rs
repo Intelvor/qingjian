@@ -18,7 +18,7 @@ mod script;
 mod surrounding_text;
 
 pub use cloud_word::CloudWord;
-pub use fuzzy::{mismatch_count, tolerance};
+pub use fuzzy::{mismatch_count, sentence_tolerance, tolerance};
 pub use kind::PredictionKind;
 pub use policy::PredictionPolicy;
 pub use predictor::{NoPredictor, Predictor};

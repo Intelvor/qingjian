@@ -1,6 +1,8 @@
 //! 提示词与回复解析。模型只输出约定的 JSON，其余一概不信；拼音校验在 Core 里再做一遍。
 
-use qingjian_core::{CloudWord, PredictionKind, PredictionRequest, mismatch_count, tolerance};
+use qingjian_core::{
+    CloudWord, PredictionKind, PredictionRequest, mismatch_count, sentence_tolerance,
+};
 use serde::{Deserialize, Serialize};
 
 /// 系统提示。语言跟随上下文，不限定中文。
@@ -262,18 +264,20 @@ pub fn parse_reply(content: &str, request: &PredictionRequest) -> Reply {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_ascii_lowercase())
             .collect();
-        // 开头那几个字要对得上敲的字母（与云端词同一套容错：简拼、少量错字 / 漏字 / 多字都算过）。
+        // 开头那几个字要对得上敲的字母（整句专用容错 [`sentence_tolerance`]，比云端词宽一档：简拼、少量错字 / 漏字 / 多字都算过）。
         // 模型没给 sentence_pinyin、或拼音是先想词再编的（敲 d'x 回「基础」），整句不收——
         // 本地词库没有的词不受影响：这里只看拼音，不查词库。
         let letters = request.letters.chars().count();
         // 续写（没敲拼音）没有拼音可对：只看句子本身。
         let continuing = request.letters.is_empty();
+        // 整句比云端词更宽（句子长、模型常扩展），光标后无文字时给的是完整短句、更容易扩出对不齐的音节，再松一档。
+        let sentence_allowed = sentence_tolerance(letters) + usize::from(request.after.is_empty());
         let fits = !sentence.is_empty()
             && Some(sentence.as_str()) != first_local
             && !restates_after(&sentence, &request.after)
             && (continuing
                 || (!syllables.is_empty()
-                    && mismatch_count(&request.pinyin, &syllables) <= tolerance(letters)));
+                    && mismatch_count(&request.pinyin, &syllables) <= sentence_allowed));
         if fits {
             reply.sentence = Some(sentence);
         } else {
@@ -585,6 +589,25 @@ mod tests {
         assert_eq!(
             parse_reply(corrected, &typo).sentence.as_deref(),
             Some("大学阶段的课程")
+        );
+    }
+
+    /// 中度放宽：整句容错比云端词宽，光标后无文字时再松一档。同一句敲 `xiang` 模型给了 `shang`
+    /// （差 2 个字母）：有下文时只容 1 个错被拒，没下文时容 2 个被收。
+    #[test]
+    fn sentence_tolerance_is_loose_and_looser_without_after_text() {
+        let reply = r#"{"words": [], "sentence": "尚", "sentence_pinyin": "shang"}"#;
+        let mut with_after = request("xiang", true);
+        with_after.after = "课".into();
+        assert!(
+            parse_reply(reply, &with_after).sentence.is_none(),
+            "有下文时整句差 2 个字母不该收"
+        );
+        let bare = request("xiang", true);
+        assert_eq!(
+            parse_reply(reply, &bare).sentence.as_deref(),
+            Some("尚"),
+            "没下文时整句差 2 个字母应收下"
         );
     }
 

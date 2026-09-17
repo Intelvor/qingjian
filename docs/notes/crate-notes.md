@@ -57,6 +57,8 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
   拼音校验又按首字母序列匹配放行缩写，拦不住；问字模式的答案不受这条限制。
   双拼 / 注音与拼音同一套：请求与校验都先 `Engine::decode` 把敲的键换成全拼再走（`prediction/mod.rs` 里 `request_prediction` 与 `validate_cloud_words`），
   简拼判定、容错复用，不另开路径（cloud.rs 三个用例覆盖）。
+  整句补全的拼音校验用单独的 `sentence_tolerance`（比云端词的 `tolerance` 宽一档，短输入 <4 仍严格），光标后无文字时再松 1 个错（`prompt.rs::parse_reply`）：
+  整句长、模型常扩展换措辞，逐音节全对太难，原档整句成功率偏低；云端词要求字=音节数且错了混进候选，不跟着放宽。
 - `CloudGlossFiller`：释义兜底（Core `GlossFiller` trait，与 Predictor 分开的线程与通道，攒 1.5 秒 / 8 个词发一次，问过不再问）：
   随包释义表没有的词库词 / 云端词上屏后入队，结果壳每秒 `Engine::poll_glosses` 经 `Translator::learn` 写进 `qingjian-translate::PersonalGlossary`
   （`user-glossary-<语言>.tsv`，`LayeredTranslator` 个人表优先）；随云联想开关一起开。
