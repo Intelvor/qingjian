@@ -1,7 +1,9 @@
 use qingjian_core::ShuangpinScheme;
 use serde::{Deserialize, Serialize};
 
-use super::{CandidateRenderer, LayoutMode, LogLevel, PreeditMode, ShiftLetter, ThemeMode};
+use super::{
+    AccentColor, CandidateRenderer, LayoutMode, LogLevel, PreeditMode, ShiftLetter, ThemeMode,
+};
 
 /// 每页最多几个候选：数字键只有 1–9。
 pub const MAX_PAGE_SIZE: usize = 9;
@@ -32,6 +34,9 @@ pub struct GeneralConfig {
 
     /// 候选窗口外观。
     pub theme: ThemeMode,
+
+    /// 主题色：候选窗高亮 / 悬停底色，以及状态条强调格与云朵的品牌色。
+    pub accent: AccentColor,
 
     /// 候选窗口竖排 / 横排。
     pub layout: LayoutMode,
@@ -99,6 +104,7 @@ impl Default for GeneralConfig {
             page_size: MAX_PAGE_SIZE,
             page_keys: PAGE_KEY_OPTIONS[0].to_owned(),
             theme: ThemeMode::default(),
+            accent: AccentColor::default(),
             layout: LayoutMode::default(),
             renderer: CandidateRenderer::default(),
             font: String::new(),

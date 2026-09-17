@@ -7,7 +7,7 @@ mod font_spec;
 mod palette;
 
 pub use font_spec::FontSpec;
-pub use palette::Palette;
+pub use palette::{Accent, Palette};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
@@ -44,14 +44,24 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// 浅色，对齐 macOS 系统外观；字号 16 点。
+    /// 浅色，对齐 macOS 系统外观；字号 16 点，主题色用缺省的青简绿。
     pub fn light() -> Self {
-        Self::with_palette(Palette::light(), 0.85, 16.0)
+        Self::light_with(Accent::default())
     }
 
-    /// 深色，对齐 macOS 系统外观；字号 16 点。
+    /// 深色，对齐 macOS 系统外观；字号 16 点，主题色用缺省的青简绿。
     pub fn dark() -> Self {
-        Self::with_palette(Palette::dark(), 0.75, 16.0)
+        Self::dark_with(Accent::default())
+    }
+
+    /// 浅色 + 指定主题色。
+    pub fn light_with(accent: Accent) -> Self {
+        Self::with_palette(Palette::light_with(accent), 0.85, 16.0)
+    }
+
+    /// 深色 + 指定主题色。
+    pub fn dark_with(accent: Accent) -> Self {
+        Self::with_palette(Palette::dark_with(accent), 0.75, 16.0)
     }
 
     /// 按给定字号复制一份主题，比例保持与 16 点基准一致。
@@ -86,6 +96,25 @@ impl Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accent_switches_the_brand_color_and_the_bands() {
+        let green = Theme::light_with(Accent::Qingjian);
+        let blue = Theme::light_with(Accent::Classic);
+        // 品牌色（状态条强调格与云朵）与高亮 / 悬停底色都跟着主题色走。
+        assert_ne!(green.colors.accent, blue.colors.accent);
+        assert_ne!(green.colors.highlight, blue.colors.highlight);
+        assert_ne!(green.colors.hover, blue.colors.hover);
+        // 语义色不跟着变。
+        assert_eq!(green.colors.fresh, blue.colors.fresh);
+        assert_eq!(green.colors.text, blue.colors.text);
+        // 缺省是青简绿。
+        assert_eq!(Theme::light().colors.accent, green.colors.accent);
+        assert_eq!(
+            Theme::dark().colors.highlight,
+            Theme::dark_with(Accent::Qingjian).colors.highlight
+        );
+    }
 
     #[test]
     fn font_size_scales_all_fonts_proportionally() {

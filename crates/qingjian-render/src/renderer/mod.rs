@@ -249,7 +249,7 @@ impl Renderer {
             x,
             top + (line_height - size) / 2.0,
             size,
-            m.theme.colors.cloud,
+            m.theme.colors.accent,
         );
         m.cloud_width()
     }
@@ -269,7 +269,7 @@ impl Renderer {
             word_x += self.draw_cloud(canvas, m, word_x, top, text_height);
         }
         let color = if row.cloud {
-            m.theme.colors.cloud
+            m.theme.colors.accent
         } else {
             m.theme.colors.text
         };

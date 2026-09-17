@@ -1,3 +1,4 @@
+mod accent;
 mod apps;
 mod candidate_renderer;
 mod dictionaries;
@@ -23,6 +24,7 @@ use toml_edit::DocumentMut;
 
 use crate::error::ConfigError;
 
+pub use accent::AccentColor;
 pub use apps::{
     AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF, DEFAULT_ENGLISH_CANDIDATES_OFF_MACOS,
     DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS,
@@ -176,6 +178,8 @@ page_size = 9
 page_keys = "[]"
 # 候选窗口外观：system 跟随系统 / light 浅色 / dark 深色
 theme = "system"
+# 主题色：候选窗的高亮 / 悬停底色，以及状态条上「中 / 英」「，。」与云朵的品牌色；qingjian 青简绿 / classic 经典蓝
+accent = "qingjian"
 # 候选窗口排布：vertical 竖排 / horizontal 横排（横排只给高亮候选显示译文）
 layout = "vertical"
 # 候选窗口由谁绘制：qingjian 青简渲染器（各平台一致，主题走它）/ system 系统原生绘制（渲染器有问题时的退路）

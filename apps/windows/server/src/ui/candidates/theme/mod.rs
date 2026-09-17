@@ -10,6 +10,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::core::{PCWSTR, w};
 
 use self::palette::Palette;
+use qingjian_render::Accent;
 
 /// 常规字重；windows crate 未导出。
 const FW_NORMAL: i32 = 400;
@@ -41,8 +42,8 @@ pub(crate) struct Theme {
 
     pub index_color: COLORREF,
 
-    /// 云联想的云朵与文字。
-    pub cloud_color: COLORREF,
+    /// 云联想的云朵与状态条的强调格（品牌色，见主题色 `[general] accent`）。
+    pub accent_color: COLORREF,
 
     pub background: COLORREF,
 
@@ -67,14 +68,14 @@ pub(crate) struct Theme {
 
 impl Theme {
     /// `dpi` 96 为 100%。
-    pub(crate) fn new(dpi: u32, dark: bool) -> Self {
+    pub(crate) fn new(dpi: u32, dark: bool, accent: Accent) -> Self {
         let scale = |px: i32| (px * dpi as i32) / 96;
         // 负高度 = 字符高度（不含内部行距）。
         let font = |px: i32| create_font(-scale(px), w!("Microsoft YaHei UI"));
         let palette = if dark {
-            Palette::dark()
+            Palette::dark(accent)
         } else {
-            Palette::light()
+            Palette::light(accent)
         };
         Self {
             text_font: font(16),
@@ -86,7 +87,7 @@ impl Theme {
             pos_color: palette.pos_color,
             fresh_color: palette.fresh_color,
             index_color: palette.index_color,
-            cloud_color: palette.cloud_color,
+            accent_color: palette.accent_color,
             background: palette.background,
             highlight: palette.highlight,
             hover_color: palette.hover,

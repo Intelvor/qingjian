@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::mem::size_of;
 use std::rc::Rc;
 
-use qingjian_render::{Rect, StatusCell};
+use qingjian_render::{Accent, Rect, StatusCell};
 use windows::Win32::Foundation::{
     CloseHandle, E_INVALIDARG, FALSE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, TRUE, WPARAM,
 };
@@ -106,6 +106,12 @@ struct Bar {
     /// 上次解析出的深浅，变了重建配色。
     dark: Cell<bool>,
 
+    /// 主题色（`[general] accent`）。
+    accent: Cell<Accent>,
+
+    /// 造当前那份主题时用的主题色，变了重建配色。
+    theme_accent: Cell<Accent>,
+
     /// 青简渲染器；`None` 走 GDI。
     painter: SharedPainter,
 
@@ -140,9 +146,11 @@ impl Bar {
         let bar = Rc::new(Self {
             hwnd,
             data: RefCell::new(None),
-            theme: RefCell::new(Rc::new(Theme::new(dpi, dark))),
+            theme: RefCell::new(Rc::new(Theme::new(dpi, dark, Accent::default()))),
             dpi: Cell::new(dpi),
             dark: Cell::new(dark),
+            accent: Cell::new(Accent::default()),
+            theme_accent: Cell::new(Accent::default()),
             painter,
             margin: Cell::new(layered::shadow_margin(dpi)),
             pos: Cell::new(None),
@@ -181,7 +189,7 @@ impl Bar {
         let _ = unsafe { ShowWindow(self.hwnd, SW_HIDE) };
     }
 
-    /// DPI 或深浅变了就重建主题。
+    /// DPI、深浅或主题色变了就重建主题。
     fn sync_theme(&self) {
         let dpi = match unsafe { GetDpiForWindow(self.hwnd) } {
             0 => self.dpi.get(),
@@ -194,10 +202,12 @@ impl Bar {
             .map(|view| view.theme)
             .unwrap_or_default();
         let dark = resolve_dark(mode);
-        if dpi != self.dpi.get() || dark != self.dark.get() {
-            *self.theme.borrow_mut() = Rc::new(Theme::new(dpi, dark));
+        let accent = self.accent.get();
+        if dpi != self.dpi.get() || dark != self.dark.get() || accent != self.theme_accent.get() {
+            *self.theme.borrow_mut() = Rc::new(Theme::new(dpi, dark, accent));
             self.dpi.set(dpi);
             self.dark.set(dark);
+            self.theme_accent.set(accent);
         }
     }
 
@@ -237,14 +247,14 @@ impl Bar {
             CellSpec {
                 text: Self::mode_text(view),
                 font: theme.text_font,
-                color: theme.cloud_color,
+                color: theme.accent_color,
                 action: StatusAction::ToggleMode,
             },
             CellSpec {
                 text: if view.full_width { "，。" } else { ",." }.to_owned(),
                 font: theme.text_font,
                 color: if view.full_width {
-                    theme.cloud_color
+                    theme.accent_color
                 } else {
                     theme.gloss_color
                 },
@@ -254,7 +264,7 @@ impl Bar {
                 text: "\u{2601}".to_owned(),
                 font: theme.symbol_font,
                 color: if view.cloud {
-                    theme.cloud_color
+                    theme.accent_color
                 } else {
                     theme.gloss_color
                 },
@@ -522,6 +532,11 @@ impl StatusBar {
 
     pub(super) fn hide(&self) {
         self.bar.hide();
+    }
+
+    /// 换主题色（`[general] accent`）：下一次刷新时重建配色。
+    pub(super) fn set_accent(&self, accent: Accent) {
+        self.bar.accent.set(accent);
     }
 }
 

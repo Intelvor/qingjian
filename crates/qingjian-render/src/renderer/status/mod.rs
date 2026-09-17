@@ -135,7 +135,7 @@ impl Renderer {
         match cell {
             StatusCell::Text { text, emphasized } => {
                 let color = if *emphasized {
-                    m.theme.colors.cloud
+                    m.theme.colors.accent
                 } else {
                     m.theme.colors.gloss
                 };
@@ -148,7 +148,7 @@ impl Renderer {
             StatusCell::Cloud { emphasized } => {
                 let size = m.px(CLOUD_SIZE);
                 let color = if *emphasized {
-                    m.theme.colors.cloud
+                    m.theme.colors.accent
                 } else {
                     m.theme.colors.gloss
                 };

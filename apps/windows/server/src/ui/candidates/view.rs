@@ -157,7 +157,7 @@ fn draw_top_line(hdc: HDC, data: &RenderData, y: i32) -> i32 {
         draw_text(
             hdc,
             theme.annotation_font,
-            theme.cloud_color,
+            theme.accent_color,
             sentence_x,
             top,
             CLOUD_GLYPH,
@@ -403,12 +403,12 @@ fn draw_word(hdc: HDC, theme: &Theme, row: &Row, x: i32, baseline: i32, small_of
         draw_text(
             hdc,
             theme.annotation_font,
-            theme.cloud_color,
+            theme.accent_color,
             x,
             baseline + small_offset,
             CLOUD_GLYPH,
         );
-        theme.cloud_color
+        theme.accent_color
     } else {
         theme.text_color
     };

@@ -14,7 +14,7 @@ pub(crate) mod view;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use qingjian_render::{Hover, Rendered};
+use qingjian_render::{Accent, Hover, Rendered};
 use windows::Win32::Foundation::{E_INVALIDARG, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
@@ -80,6 +80,12 @@ pub(super) struct Inner {
 
     /// 上次解析出的深浅，变了重建配色。
     dark: Cell<bool>,
+
+    /// 主题色（`[general] accent`）。
+    accent: Cell<Accent>,
+
+    /// 造当前那份主题时用的主题色，变了重建配色。
+    theme_accent: Cell<Accent>,
 
     /// 青简渲染器；`None` 走 GDI。
     painter: SharedPainter,
@@ -230,17 +236,19 @@ impl Inner {
         self.data.borrow().vertical()
     }
 
-    /// DPI 或深浅变了就重建主题；每次 `show` 前调。
+    /// DPI、深浅或主题色变了就重建主题；每次 `show` 前调。
     fn sync_theme(&self) {
         let dpi = match unsafe { GetDpiForWindow(self.hwnd) } {
             0 => self.dpi.get(),
             dpi => dpi,
         };
         let dark = resolve_dark(self.data.borrow().theme_mode);
-        if dpi != self.dpi.get() || dark != self.dark.get() {
-            self.data.borrow_mut().theme = Rc::new(Theme::new(dpi, dark));
+        let accent = self.accent.get();
+        if dpi != self.dpi.get() || dark != self.dark.get() || accent != self.theme_accent.get() {
+            self.data.borrow_mut().theme = Rc::new(Theme::new(dpi, dark, accent));
             self.dpi.set(dpi);
             self.dark.set(dark);
+            self.theme_accent.set(accent);
         }
     }
 
@@ -274,7 +282,11 @@ impl CandidateWindow {
         })?;
         let dpi = unsafe { GetDpiForSystem() }.max(96);
         let dark = resolve_dark(ThemeMode::default());
-        let data = RefCell::new(RenderData::empty(Rc::new(Theme::new(dpi, dark))));
+        let data = RefCell::new(RenderData::empty(Rc::new(Theme::new(
+            dpi,
+            dark,
+            Accent::default(),
+        ))));
         // NOACTIVATE：显示时不抢应用焦点。
         let hwnd = unsafe {
             CreateWindowExW(
@@ -297,6 +309,8 @@ impl CandidateWindow {
             data,
             dpi: Cell::new(dpi),
             dark: Cell::new(dark),
+            accent: Cell::new(Accent::default()),
+            theme_accent: Cell::new(Accent::default()),
             painter,
             last: Cell::new(None),
         });
@@ -307,6 +321,11 @@ impl CandidateWindow {
     /// 刷新内容（不定位、不显示）。
     pub(crate) fn set_content(&self, frame: &Frame) {
         self.inner.set_content(frame);
+    }
+
+    /// 换主题色（`[general] accent`）：下一次显示时重建配色。
+    pub(crate) fn set_accent(&self, accent: Accent) {
+        self.inner.accent.set(accent);
     }
 
     /// 按光标矩形定位并显示，顺带把这帧的可点范围交给命中表。

@@ -172,6 +172,10 @@ TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解
 表现是「判定区域比看得见的外观大一圈」，状态条下方尤其明显（光从上方来，阴影往下甩得最长）。
 所以 `ui/layered/` 在贴上之前把低于 `HIT_ALPHA_FLOOR`（6）的像素整颗抹成全透明，让判定区域贴着外观走。
 状态条的「☁」「⚙」也自绘（`crates/qingjian-render/src/{cloud,gear}.rs`）：这两个码位会被 Segoe UI Emoji 接走画成彩色的，不认我们给的颜色。
+**主题色**（`[general] accent`，青简绿 / 经典蓝）由渲染器的 `theme::Accent` 给值，只换三处：**品牌色**（`Palette::accent`，状态条上「中 / 英」「，。」这类强调格与云朵）、**高亮底色**与**悬停底色**；语义色（生词的橙、译文与序号的灰）不跟着变。
+深浅各一套（浅底上品牌色要更深才压得住白，深底上要更亮才读得出来），所以是 `Palette::light_with(accent)` / `dark_with(accent)`。
+**两条画法都要给**：青简渲染器在 `ui/painter/`（`Painter` 存一份 `Accent`，`configure` 里主题色变了只换配色、**不重建字体库** —— 那是几十毫秒的重扫）；GDI 那条在 `ui/candidates/theme/`，没有 alpha，按各色的不透明度**预混**到背景上写成不透明值。
+主题色到达两个窗口的路径：`RenderSettings.accent`（配置类型 `AccentColor`）→ UI 线程 `UiCommand::Configure` → `window.set_accent()` / `status.set_accent()` 各存一份 → 各自 `sync_theme` 里与「造当前主题时用的那份」比对后重建。
 整句补全的时机在 `[predict] sentence_trigger`：`idle` 是停键自动请，`tab` 是按下 Tab 现请一次（`Engine::request_sentence_once` 让这一拍破例要句子）；
 请出去到结果回来的这段由 `Router.sentence_pending` 驱动候选窗摆「☁ …」。云联想关着时按 Tab 交还应用（缩进 / 跳焦点）。
 

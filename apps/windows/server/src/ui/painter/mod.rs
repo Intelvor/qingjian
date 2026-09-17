@@ -4,16 +4,24 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use qingjian_platform::{CandidateRenderer, LayoutMode};
+use qingjian_platform::{AccentColor, CandidateRenderer, LayoutMode};
 use qingjian_render::{
-    FontLibrary, Frame, Layout, Rendered, RenderedStatus, Renderer, Shadow, StatusCell, Theme,
-    UiFont, system_fonts,
+    Accent, FontLibrary, Frame, Layout, Rendered, RenderedStatus, Renderer, Shadow, StatusCell,
+    Theme, UiFont, system_fonts,
 };
 
 use crate::dispatch::RenderSettings;
 
 /// UI 线程上共享的渲染器；`None` = 系统绘制。
 pub(super) type SharedPainter = Rc<RefCell<Option<Painter>>>;
+
+/// 配置里的主题色（`[general] accent`）→ 渲染器的主题色。
+pub(super) fn accent_of(accent: AccentColor) -> Accent {
+    match accent {
+        AccentColor::Qingjian => Accent::Qingjian,
+        AccentColor::Classic => Accent::Classic,
+    }
+}
 
 pub(super) struct Painter {
     /// 渲染器（字体库随它）。
@@ -24,11 +32,14 @@ pub(super) struct Painter {
 
     /// 建它时用的字号（点）。
     font_size: u8,
+
+    /// 主题色。
+    accent: Accent,
 }
 
 impl Painter {
     /// `font` 是用户选的字族名，空为系统字体；没装就回到系统字体。字体库加载失败返回 `None`，调用方退回 GDI。
-    fn new(font: &str, font_size: u8) -> Option<Self> {
+    fn new(font: &str, font_size: u8, accent: Accent) -> Option<Self> {
         let started = std::time::Instant::now();
         let library = if font.is_empty() {
             FontLibrary::system("zh-CN")
@@ -55,6 +66,7 @@ impl Painter {
             renderer: Renderer::new(library),
             font: font.to_owned(),
             font_size,
+            accent,
         })
     }
 
@@ -63,11 +75,15 @@ impl Painter {
         let mut painter = shared.borrow_mut();
         match settings.renderer {
             CandidateRenderer::Qingjian => {
+                let accent = accent_of(settings.accent);
                 let same = painter.as_ref().is_some_and(|p| {
                     p.font.as_str() == settings.font.as_str() && p.font_size == settings.font_size
                 });
                 if !same {
-                    *painter = Self::new(&settings.font, settings.font_size);
+                    *painter = Self::new(&settings.font, settings.font_size, accent);
+                } else if let Some(painter) = painter.as_mut() {
+                    // 主题色只换配色，不必重建字体库（那是几十毫秒的重扫）。
+                    painter.accent = accent;
                 }
             }
             CandidateRenderer::System => {
@@ -97,7 +113,7 @@ impl Painter {
             .render(
                 frame,
                 layout,
-                &theme(dark, self.font_size),
+                &theme(dark, self.font_size, self.accent),
                 scale(dpi),
                 Some(&SHADOW),
             )
@@ -123,7 +139,7 @@ impl Painter {
         self.renderer
             .render_status(
                 cells,
-                &theme(dark, self.font_size),
+                &theme(dark, self.font_size, self.accent),
                 scale(dpi),
                 Some(&SHADOW),
                 hovered,
@@ -136,8 +152,12 @@ impl Painter {
 /// 两个窗口都用渲染器画阴影（分层窗口没有系统阴影），参数与 macOS 面板一致。
 const SHADOW: Shadow = Shadow::mac_panel();
 
-fn theme(dark: bool, font_size: u8) -> Theme {
-    let theme = if dark { Theme::dark() } else { Theme::light() };
+fn theme(dark: bool, font_size: u8, accent: Accent) -> Theme {
+    let theme = if dark {
+        Theme::dark_with(accent)
+    } else {
+        Theme::light_with(accent)
+    };
     theme.with_font_size(font_size as f32)
 }
 

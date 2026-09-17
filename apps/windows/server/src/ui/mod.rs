@@ -35,7 +35,7 @@ use qingjian_platform::protocol::{Frame, ScreenRect};
 use self::candidates::CandidateWindow;
 use self::command::UiCommand;
 use self::foreground::ForegroundHook;
-use self::painter::{Painter, SharedPainter};
+use self::painter::{Painter, SharedPainter, accent_of};
 use self::status::StatusBar;
 use crate::dispatch::{
     CandidateEvent, CandidateSink, RenderSettings, StatusEvent, StatusSink, StatusView,
@@ -217,7 +217,15 @@ fn apply(
                 status.hide();
             }
         }
-        UiCommand::Configure(settings) => Painter::configure(painter, &settings),
+        UiCommand::Configure(settings) => {
+            // 主题色两个窗口各存一份自己的配色，得分别告诉它们。
+            let accent = accent_of(settings.accent);
+            window.set_accent(accent);
+            if let Some(status) = status {
+                status.set_accent(accent);
+            }
+            Painter::configure(painter, &settings);
+        }
     }
 }
 

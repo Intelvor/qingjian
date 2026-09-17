@@ -55,7 +55,7 @@ impl Renderer {
             let start_x = x;
             let color = if tail.cloud {
                 x += self.draw_cloud(canvas, m, x, top, line_height);
-                m.theme.colors.cloud
+                m.theme.colors.accent
             } else {
                 m.theme.colors.gloss
             };

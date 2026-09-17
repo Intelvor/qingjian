@@ -1,7 +1,7 @@
 //! 候选窗口的输出端。
 
-use qingjian_platform::CandidateRenderer;
 use qingjian_platform::protocol::{Frame, ScreenRect};
+use qingjian_platform::{AccentColor, CandidateRenderer};
 
 /// 候选窗口 / 状态条的画法。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +14,9 @@ pub struct RenderSettings {
 
     /// 字体大小（点，`[general] font_size`）。
     pub font_size: u8,
+
+    /// 主题色（`[general] accent`）。
+    pub accent: AccentColor,
 }
 
 /// Router 只产出帧，画交给它；Windows 上由 UI 线程实现。

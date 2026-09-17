@@ -1,6 +1,6 @@
 //! 「候选窗口」页：外观、排布、渲染引擎、字体、拼音显示位置、悬浮状态条。
 
-use qingjian_platform::{CandidateRenderer, LayoutMode, PreeditMode, ThemeMode};
+use qingjian_platform::{AccentColor, CandidateRenderer, LayoutMode, PreeditMode, ThemeMode};
 use windows_reactor::*;
 
 use crate::panel::controls::{field, page};
@@ -41,6 +41,16 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
                 g.theme,
                 ThemeMode::label,
                 context.callback(Message::Theme),
+            ),
+        ),
+        field(
+            "主题色",
+            "候选窗的高亮底色，以及悬浮状态条上「中 / 英」「，。」与云朵的颜色。",
+            mode_combo(
+                &AccentColor::ALL,
+                g.accent,
+                AccentColor::label,
+                context.callback(Message::Accent),
             ),
         ),
         field(

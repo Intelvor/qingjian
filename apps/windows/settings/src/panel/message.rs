@@ -27,6 +27,8 @@ pub(crate) enum Message {
 
     // 候选窗口页
     Theme(Option<usize>),
+    /// 主题色（青简绿 / 经典蓝）。
+    Accent(Option<usize>),
     Layout(Option<usize>),
     Preedit(Option<usize>),
     Renderer(Option<usize>),

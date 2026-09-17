@@ -1,7 +1,8 @@
 use qingjian_core::ShuangpinScheme;
 use qingjian_platform::protocol::KeyModifiers;
 use qingjian_platform::{
-    AppsConfig, CandidateRenderer, Config, KeyCombo, LayoutMode, PreeditMode, SwitchKey, ThemeMode,
+    AccentColor, AppsConfig, CandidateRenderer, Config, KeyCombo, LayoutMode, PreeditMode,
+    SwitchKey, ThemeMode,
 };
 
 use super::RenderSettings;
@@ -28,6 +29,9 @@ pub struct RouterConfig {
 
     /// 候选窗口外观（`[general] theme`）。
     pub theme: ThemeMode,
+
+    /// 主题色（`[general] accent`）：候选窗高亮底色与状态条强调格 / 云朵的品牌色。
+    pub accent: AccentColor,
 
     /// 候选窗口 / 状态条由青简渲染器还是 GDI 画（`[general] renderer`）。
     pub renderer: CandidateRenderer,
@@ -97,6 +101,7 @@ impl RouterConfig {
             renderer: self.renderer,
             font: self.font.clone(),
             font_size: self.font_size,
+            accent: self.accent,
         }
     }
 }
@@ -110,6 +115,7 @@ impl From<&Config> for RouterConfig {
             shift_letter_compose: config.general.shift_letter.compose(),
             layout: config.general.layout,
             theme: config.general.theme,
+            accent: config.general.accent,
             renderer: config.general.renderer,
             font: config.general.font.trim().to_owned(),
             font_size: config.general.font_size(),
