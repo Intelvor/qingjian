@@ -11,13 +11,17 @@ use super::controls::{export_logs, log_dir, open_in_editor, open_with_explorer};
 use super::pages::{about, cloud, dictionaries, general, shortcut, typing};
 use super::{Message, Settings};
 
-/// 导航图标：要么是 Segoe MDL2 Assets 字形（`SymbolIcon`），要么是一个文字字符（`FontIcon`）。
+/// 导航图标：`SymbolIcon`（WinUI `Symbol` 枚举）或 `FontIcon`（Segoe MDL2 Assets 的字面 glyph 编码）。
 ///
-/// 经验：极少数 Unicode 字符在本机字体里没有字形，会回退成「□」（豆腐框），比「?」还糟。
-/// 一律用 Segoe MDL2 Assets 的 `Symbol::*` 字形做导航；个别 Symbol 在其它环境被回退成「?」
-/// 也是显式字符，比豆腐框好。
+/// 关键区分（踩过的坑）：
+/// - `Symbol::Help`（E897）本身是**圆圈包问号「?」**，不是回退，就是那个图标。
+/// - 「ⓘ 圆圈包 i」在 Segoe MDL2 Assets 里是 **E946（Info）**，WinUI `Symbol` 枚举没直接封装，
+///   用 `FontIcon` 传字面 glyph `"\u{E946}"`。`FontIcon` 默认字体就是 Segoe MDL2 Assets，精确渲染。
+/// - 千万别用 Unicode `ℹ`（U+2139）：它不是 Segoe MDL2 Assets 的字形，落到系统字体又未必有字形，
+///   会回退成「□」豆腐框。
 enum Icon {
     Symbol(Symbol),
+    Glyph(&'static str),
 }
 
 impl Icon {
@@ -25,9 +29,14 @@ impl Icon {
         Self::Symbol(symbol)
     }
 
+    fn glyph(glyph: &'static str) -> Self {
+        Self::Glyph(glyph)
+    }
+
     fn into_view(self) -> View {
         match self {
             Self::Symbol(symbol) => SymbolIcon::new().symbol(symbol).into(),
+            Self::Glyph(glyph) => FontIcon::new().glyph(glyph).into(),
         }
     }
 }
@@ -37,20 +46,22 @@ mod tests {
     use super::Icon;
     use windows_reactor::Symbol;
 
-    /// 「关于」一栏：Unicode `ℹ` 在某些 Windows 字体里没有字形，会被回退成「□」豆腐框，
-    /// 所以统一走 Segoe MDL2 Assets 的 `Symbol::Help`（回退也只是「?」，不是豆腐框）。
+    /// 「关于」一栏：目标字形是「ⓘ 圆圈包 i」= Segoe MDL2 Assets **E946（Info）**，
+    /// 用 FontIcon 的字面 glyph，不用 WinUI `Symbol::Help`（那是问号）。
     #[test]
-    fn about_uses_help_symbol() {
-        match Icon::symbol(Symbol::Help) {
-            Icon::Symbol(symbol) => assert_eq!(symbol, Symbol::Help),
+    fn about_uses_info_glyph() {
+        match Icon::glyph("\u{E946}") {
+            Icon::Glyph(glyph) => assert_eq!(glyph, "\u{E946}"),
+            Icon::Symbol(_) => panic!("关于应该用 FontIcon 的 E946（Info 圆圈包 i）"),
         }
     }
 
-    /// 「使用说明」应避开 `Symbol::Help`，否则导航里会出现两个一样的图标。
+    /// 「使用说明」应避开 `Symbol::Help`，否则导航里会出现两个一样的问号。
     #[test]
     fn guide_does_not_use_help_symbol() {
         match Icon::symbol(Symbol::Message) {
             Icon::Symbol(symbol) => assert_ne!(symbol, Symbol::Help),
+            Icon::Glyph(_) => {}
         }
     }
 }
@@ -300,8 +311,8 @@ impl Component for Settings {
 
     fn view(&self, _input: &(), context: &mut ViewContext<Self>) -> View {
         context.window_title("青简设置");
-        // 导航图标全部走 Segoe MDL2 Assets（SymbolIcon）。Unity/U+ 字符在本机字体里可能没有字形
-        // （会被回退成「□」豆腐框），Symbol 字形最差也只是回退成「?」，至少是显式字符。
+        // 「关于」的目标图标是「ⓘ 圆圈包 i」（Segoe MDL2 Assets **E946 Info**）。
+        // `Symbol::Help` 是 E897「?」不是ⓘ，所以这里用 FontIcon 传 E946（默认字体 Segoe MDL2 Assets）。
         let item = |tag: &str, label: &str, icon: Icon| {
             KeyedView::new(
                 tag,
@@ -324,7 +335,7 @@ impl Component for Settings {
             item("dictionaries", "词库", Icon::symbol(Symbol::Library)),
             item("usage", "统计", Icon::symbol(Symbol::List)),
             item("advanced", "高级", Icon::symbol(Symbol::Repair)),
-            item("about", "关于", Icon::symbol(Symbol::Help)),
+            item("about", "关于", Icon::glyph("\u{E946}")),
             item("guide", "使用说明", Icon::symbol(Symbol::Message)),
         ];
         NavigationView::new()
