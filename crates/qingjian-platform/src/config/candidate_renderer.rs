@@ -31,7 +31,8 @@ impl CandidateRenderer {
     pub fn label(self) -> &'static str {
         match self {
             Self::Qingjian => "青简渲染器",
-            Self::System => "系统绘制",
+            // 退路：渲染器有问题时用来继续用的，不该是常态选择，界面上一并说明。
+            Self::System => "系统绘制（不推荐）",
         }
     }
 }
