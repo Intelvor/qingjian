@@ -96,30 +96,6 @@ fn with_active(f: impl FnOnce(&TextService_Impl)) {
     }
 }
 
-/// 本线程激活的文本服务当前的中英模式；没激活时为 `None`。轮询那一拍用它把模式推给 Server。
-pub(super) fn current_english() -> Option<bool> {
-    ACTIVE.with(|active| {
-        active
-            .borrow()
-            .as_ref()
-            .map(|service| service.mode_state.english())
-    })
-}
-
-/// 前台窗口属于本进程？中英模式上报时用它区分「真前台」与「后台也在轮询 / 焦点事件抖动的应用」：
-/// 后台那几个的上报会覆盖状态条（表现是状态条中英横跳），Server 只采纳前台的。
-pub(super) fn is_foreground() -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
-
-    let hwnd = unsafe { GetForegroundWindow() };
-    if hwnd.0.is_null() {
-        return false;
-    }
-    let mut pid = 0u32;
-    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-    pid == std::process::id()
-}
-
 /// 用户点了语言栏的中 / 英按钮（见 [`ModeButton`](crate::com::mode::ModeButton)）：翻转模式。
 pub(super) fn toggle_mode() {
     with_active(|service| service.set_english_mode(!service.mode_state.english()));

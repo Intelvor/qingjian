@@ -44,6 +44,15 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     fn OnKeyDown(&self, pic: Ref<ITfContext>, wparam: WPARAM, lparam: LPARAM) -> Result<BOOL> {
         let vk = wparam.0 as u32;
         self.note_key_down(vk, lparam);
+        // 每一键都把当前中英模式推给 Server。按键只可能来自前台应用，是最可靠的前台信号，
+        // 不需要再判断——判断过两轮（DLL 按 pid 比前台窗口、Server 按 exe 名匹配）都不准。
+        // 也不能靠轮询：每个加载了输入法的应用都在轮询，后台上报会互相覆盖，状态条中英横跳、
+        // 在状态条上切了又被改回去。
+        if let Some(client) = self.engine.borrow_mut().as_mut()
+            && let Err(error) = client.mode_changed(self.mode_state.english(), false)
+        {
+            log(&format!("上报中英模式失败: {error}"));
+        }
         if self.keyboard_disabled(&pic) {
             return Ok(FALSE);
         }

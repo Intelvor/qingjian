@@ -172,15 +172,6 @@ fn sync_mode(context: &PollContext) {
         }
     };
     drop(guard);
-    // 顺手把本应用当前的中英模式推给 Server（悬浮状态条用）。Chromium 系（Edge / Chrome / Electron）
-    // 切回来时不触发 TSF 的 OnSetFocus，只靠那条路的话状态条会停在别的应用的模式上。这一拍只在
-    // 「本应用是前台」时才跑（见 should_sync_mode），所以推上去的就是前台应用的模式。
-    if let Some(english) = super::service::current_english()
-        && let Some(client) = context.engine.borrow_mut().as_mut()
-        && let Err(error) = client.mode_changed(english, !super::service::is_foreground())
-    {
-        log(&format!("上报中英模式失败: {error}"));
-    }
     // 按键行为设置每一拍都带（DLL 不读配置文件），切换键与内置英文模式开关改完靠它生效。
     super::service::on_input_settings(reply.input);
     if let Some(english) = reply.english {

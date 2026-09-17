@@ -7,48 +7,6 @@ use qingjian_platform::protocol::SessionId;
 pub(super) use self::info::SessionInfo;
 use super::Router;
 
-/// 前台窗口的 exe 文件名（`Code.exe`）；查不到时为 `None`。
-///
-/// 中英模式只采纳「该会话的宿主就是前台应用」的上报：每个加载了输入法的应用都在轮询上报，
-/// 后台上报会覆盖状态条（表现是中英来回横跳、在状态条上切了又被改回去）。前台让 Server 自己判断，
-/// 不信 DLL 的自我判断——Chromium 系（Edge / Chrome）的 TSF 跑在浏览器进程，前台窗口却可能属于
-/// 它的 renderer 子进程，按 pid 比会对不上。
-pub(super) fn foreground_app_name() -> Option<String> {
-    use windows::Win32::System::Threading::{
-        OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-        QueryFullProcessImageNameW,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
-    use windows::core::PWSTR;
-
-    let hwnd = unsafe { GetForegroundWindow() };
-    if hwnd.0.is_null() {
-        return None;
-    }
-    let mut pid = 0u32;
-    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-    if pid == 0 {
-        return None;
-    }
-    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
-    let mut buffer = [0u16; 260];
-    let mut len = buffer.len() as u32;
-    let queried = unsafe {
-        QueryFullProcessImageNameW(
-            process,
-            PROCESS_NAME_WIN32,
-            PWSTR(buffer.as_mut_ptr()),
-            &mut len,
-        )
-    };
-    let _ = unsafe { windows::Win32::Foundation::CloseHandle(process) };
-    queried.ok()?;
-    String::from_utf16_lossy(&buffer[..len as usize])
-        .rsplit(['\\', '/'])
-        .next()
-        .map(str::to_owned)
-}
-
 impl Router {
     pub fn session_count(&self) -> usize {
         self.sessions.len()

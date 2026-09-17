@@ -92,31 +92,27 @@ impl Router {
                 None
             }
             ClientMessage::ModeChanged {
-                session,
-                english,
-                background,
+                session, english, ..
             } => {
-                tracing::debug!(?session, english, background, "中英模式");
-                // 只采纳「这个会话的宿主就是前台应用」的上报。每个加载了输入法的应用都在轮询上报，
-                // 后台那些会覆盖状态条（中英横跳、在状态条上切了又被改回去）。前台由 Server 自己按
-                // 窗口判断；拿不到前台窗口（极少见）时退回信 DLL 的判断。
-                let accept = match crate::dispatch::session::foreground_app_name() {
-                    // 会话没报 exe 名（老 DLL / 会话刚开还没报）时无从匹配，退回信 DLL 的判断
-                    Some(front) => self
-                        .sessions
-                        .get(&session)
-                        .and_then(|info| info.app.as_deref())
-                        .map_or(!background, |app| app.eq_ignore_ascii_case(&front)),
-                    None => !background,
-                };
-                if accept {
-                    self.handle_mode_changed(english);
-                }
+                tracing::debug!(?session, english, "中英模式");
+                // 只有前台应用会发这一条（DLL 在按键时上报，见 OnKeyDown），所以这里不必再判断前台：
+                // 判断过两轮都不准（DLL 按 pid 比前台窗口、Server 按 exe 名匹配），后台应用的轮询
+                // 上报才是横跳与「切了又被改回去」的来源，那一路已经去掉了。
+                self.handle_mode_changed(english);
                 None
             }
             ClientMessage::SyncMode { session } => Some(ServerMessage::ModeSync {
                 session,
-                english: self.take_pending_mode(),
+                // 只有刚按过键的那个会话（就是前台那个）能取走待切模式：后台应用的轮询也在跑，
+                // 谁先来谁拿走的话，用户在状态条上点的切换会落到后台应用头上——表现就是
+                // 「在状态条上切了，界面又自己变回去」。还没按键过（刚启动就在状态条上点）时
+                // 无从判断，照旧给。
+                english: match self.focused {
+                    Some(focused) => (focused == session)
+                        .then(|| self.take_pending_mode())
+                        .flatten(),
+                    None => self.take_pending_mode(),
+                },
                 input: self.input_settings(),
             }),
             ClientMessage::ImeSwitched { session } => {
