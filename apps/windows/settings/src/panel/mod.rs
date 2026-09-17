@@ -16,7 +16,8 @@ use windows_reactor::*;
 use self::cloud_status::CloudStatus;
 pub(crate) use self::message::Message;
 use self::pages::{
-    about, advanced, candidates, cloud, dictionaries, fuzzy, general, shortcut, typing, usage,
+    about, advanced, candidates, cloud, dictionaries, fuzzy, general, guide, shortcut, typing,
+    usage,
 };
 
 /// 左侧标签固定宽度，让各行控件对齐。
@@ -90,6 +91,7 @@ impl Settings {
             "fuzzy" => fuzzy::view(self, context),
             "dictionaries" => dictionaries::view(self, context),
             "usage" => usage::view(self, context),
+            "guide" => guide::view(self, context),
             "advanced" => advanced::view(self, context),
             "about" => about::view(self, context),
             _ => general::view(self, context),

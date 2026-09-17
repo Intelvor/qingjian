@@ -278,6 +278,7 @@ impl Component for Settings {
             item("usage", "统计", Symbol::List),
             item("advanced", "高级", Symbol::Repair),
             item("about", "关于", Symbol::Help),
+            item("guide", "使用说明", Symbol::Help),
         ];
         NavigationView::new()
             .pane_display_mode(NavigationViewPaneDisplayMode::Left)
