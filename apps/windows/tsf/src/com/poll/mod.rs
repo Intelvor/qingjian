@@ -163,7 +163,7 @@ fn sync_mode(context: &PollContext) {
     let Some(client) = guard.as_mut() else {
         return;
     };
-    let reply = match client.sync_mode() {
+    let reply = match client.sync_mode(!super::service::is_foreground_app()) {
         Ok(reply) => reply,
         Err(error) => {
             log(&format!("同步中英模式失败，断开，下一键重连: {error}"));

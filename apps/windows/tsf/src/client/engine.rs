@@ -166,9 +166,11 @@ impl<S: Read + Write> EngineClient<S> {
     }
 
     /// 问 Server 有没有待处理的目标模式，顺路取回最新的按键行为设置（每一拍都带）。
-    pub fn sync_mode(&mut self) -> Result<ModeSyncReply, ClientError> {
+    /// `background` 为真时 Server 不会给出「待切模式」——后台应用不该取走它。
+    pub fn sync_mode(&mut self, background: bool) -> Result<ModeSyncReply, ClientError> {
         match self.call(&ClientMessage::SyncMode {
             session: self.session,
+            background,
         })? {
             ServerMessage::ModeSync { english, input, .. } => Ok(ModeSyncReply { english, input }),
             _ => Err(ClientError::Unexpected("expected mode sync")),

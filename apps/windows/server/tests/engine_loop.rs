@@ -764,7 +764,10 @@ fn status_bar_mode_click_is_handed_to_dll_via_sync_mode() {
     router.handle_status_event(StatusEvent::ToggleMode);
     assert_eq!(recorder.calls().last(), Some(&Some("英".to_owned())));
     assert_eq!(
-        router.handle(ClientMessage::SyncMode { session: SESSION }),
+        router.handle(ClientMessage::SyncMode {
+            session: SESSION,
+            background: false
+        }),
         Some(ServerMessage::ModeSync {
             session: SESSION,
             english: Some(true),
@@ -772,7 +775,10 @@ fn status_bar_mode_click_is_handed_to_dll_via_sync_mode() {
         })
     );
     assert_eq!(
-        router.handle(ClientMessage::SyncMode { session: SESSION }),
+        router.handle(ClientMessage::SyncMode {
+            session: SESSION,
+            background: false
+        }),
         Some(ServerMessage::ModeSync {
             session: SESSION,
             english: None,
@@ -802,7 +808,10 @@ fn status_bar_mode_click_is_ignored_when_builtin_english_is_off() {
     router.handle_status_event(StatusEvent::ToggleMode);
     assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
     assert_eq!(
-        router.handle(ClientMessage::SyncMode { session: SESSION }),
+        router.handle(ClientMessage::SyncMode {
+            session: SESSION,
+            background: false
+        }),
         Some(ServerMessage::ModeSync {
             session: SESSION,
             english: None,
