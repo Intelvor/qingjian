@@ -1610,3 +1610,110 @@ fn a_passthrough_key_keeps_the_picked_text_for_the_next_poll() {
         other => panic!("expected update, got {other:?}"),
     }
 }
+
+// ---- 注音模式（大千键位）与繁体输出 ----
+
+/// 大千键位的注音 Router：`1`=ㄅ、`j`=ㄨ、`4`=ˋ、`5`=ㄓ。
+/// 与 `main.rs` 一样，注音开关既给 Router 也给 Engine（分派看的是 Engine 的状态）。
+fn router_zhuyin() -> Router {
+    let mut router = router_with(RouterConfig {
+        zhuyin: true,
+        ..RouterConfig::default()
+    });
+    router.engine_mut().set_zhuyin_mode(true);
+    router
+}
+
+/// 注音模式下字母与声调数字都进缓冲区：`1`(ㄅ) `j`(ㄨ) `4`(ˋ) 组出 ㄅㄨˋ，候选出「不」。
+#[test]
+fn zhuyin_mode_composes_letters_and_tone_digits() {
+    let mut router = router_zhuyin();
+    let (outcome, commit, frame) = type_letters(&mut router, "1j4");
+
+    assert_eq!(outcome, KeyOutcome::Consumed);
+    assert_eq!(commit, None, "组句期间不上屏");
+    let texts = candidate_texts(&frame);
+    assert!(texts.contains(&"不"), "ㄅㄨˋ 应出「不」，实际：{texts:?}");
+}
+
+/// 注音模式下数字是声调键，不拿来选词：ㄅㄨ 出候选后敲 `4`（ˋ）继续组字成 ㄅㄨˋ。
+#[test]
+fn zhuyin_digit_composes_a_tone_instead_of_picking() {
+    let mut router = router_zhuyin();
+    let (_, _, before) = type_letters(&mut router, "1j");
+    assert!(
+        candidate_texts(&before).contains(&"不"),
+        "ㄅㄨ 应已出「不」，实际：{:?}",
+        candidate_texts(&before)
+    );
+
+    let (outcome, commit, after) = press(&mut router, letter('4'));
+
+    assert_eq!(outcome, KeyOutcome::Consumed);
+    assert_eq!(commit, None, "声调键不该选词上屏");
+    assert_ne!(
+        preedit(&after),
+        preedit(&before),
+        "`4` 应作为 ˋ 进缓冲区，缓冲区要有变化"
+    );
+}
+
+/// 注音模式下回车把高亮候选上屏；Shift + 回车才是把注音键原样上屏。
+#[test]
+fn zhuyin_return_commits_the_highlight_and_shift_return_the_raw_keys() {
+    let mut router = router_zhuyin();
+    let (_, _, frame) = type_letters(&mut router, "1j4");
+    let texts = candidate_texts(&frame).to_vec();
+    let (_, commit, _) = press(&mut router, function_key(0x0D));
+    let committed = commit.expect("回车应上屏");
+    assert!(
+        texts.iter().any(|t| *t == committed),
+        "回车应上屏候选 {texts:?}，实际：{committed}"
+    );
+
+    let mut router = router_zhuyin();
+    type_letters(&mut router, "1j4");
+    let (_, commit, _) = press(&mut router, KeyEvent::new(0x0D, None, SHIFT));
+    assert_eq!(
+        commit.as_deref(),
+        Some("ㄅㄨˋ"),
+        "Shift + 回车应把注音键原样上屏"
+    );
+}
+
+/// 注音模式下还没定调时空格进缓冲区（大千布局里单敲 ㄓ 要按空格才成为 zhi），不直接选词。
+#[test]
+fn zhuyin_space_composes_while_a_tone_is_still_due() {
+    let mut router = router_zhuyin();
+    let (_, _, before) = press(&mut router, letter('5'));
+    let before_texts = candidate_texts(&before).to_vec();
+
+    let (outcome, commit, after) = press(&mut router, letter(' '));
+
+    assert_eq!(outcome, KeyOutcome::Consumed);
+    assert_eq!(commit, None, "还要声调时空格不该上屏");
+    // 一声的符号是空白，拼音行看不出变化，所以比候选：空格被吸收后 ㄓ 成了 zhi，候选跟着变。
+    assert_ne!(
+        candidate_texts(&after),
+        before_texts,
+        "空格应作为一声吸收，候选跟着变；实际：{:?}",
+        candidate_texts(&after)
+    );
+}
+
+/// 繁体模式下候选与上屏都是繁体（`kaifa` → 開發）。
+#[test]
+fn traditional_mode_shows_and_commits_traditional_text() {
+    let mut router = router();
+    router.engine_mut().set_traditional_mode(true);
+
+    let (_, _, frame) = type_letters(&mut router, "kaifa");
+    let texts = candidate_texts(&frame);
+    assert!(
+        texts.contains(&"開發"),
+        "繁体下应出「開發」，实际：{texts:?}"
+    );
+
+    let (_, commit, _) = press(&mut router, letter(' '));
+    assert_eq!(commit.as_deref(), Some("開發"), "空格应上屏繁体");
+}
