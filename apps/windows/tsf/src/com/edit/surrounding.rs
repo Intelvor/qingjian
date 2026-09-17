@@ -13,11 +13,12 @@ use windows::Win32::UI::TextServices::{
 };
 use windows::core::Interface;
 
-/// 往前读多少字（与 macOS 壳的 `RESCORE_LOOKBACK`、`[predict] lookback` 的缺省一致）。
-const LOOKBACK: i32 = 64;
+/// 往前读多少字。取配置能配到的上限（`[predict] lookback`）——真正发给云端多少由 Server
+/// 按那个配置裁剪，这里读够就行，省得配置调大了却读不到。
+const LOOKBACK: i32 = qingjian_platform::MAX_LOOKBACK as i32;
 
-/// 往后读多少字（与 macOS 壳的 `lookahead` 缺省一致）：光标后已有文字时，云整句只填中间缺的那几个字。
-const LOOKAHEAD: i32 = 32;
+/// 往后读多少字，同理。
+const LOOKAHEAD: i32 = qingjian_platform::MAX_LOOKAHEAD as i32;
 
 /// 起组句时对输入框的判断：私密不私密，以及不私密时光标前后的文字。
 pub(crate) struct InputContext {

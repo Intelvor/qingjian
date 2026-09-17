@@ -42,6 +42,10 @@ pub(crate) enum Message {
     CloudModel(String),
     CloudBaseUrl(String),
     CloudSlots(Option<f64>),
+    /// 光标前发给云端的字数上限。
+    CloudLookback(Option<f64>),
+    /// 光标后发给云端的字数上限。
+    CloudLookahead(Option<f64>),
     CloudSentence(bool),
     CloudSentenceTrigger(Option<usize>),
     TestConnection,

@@ -16,7 +16,7 @@ mod prompt;
 mod worker;
 
 pub use cloud_predictor::CloudPredictor;
-pub use config::{PredictConfig, SentenceTrigger};
+pub use config::{MAX_LOOKAHEAD, MAX_LOOKBACK, PredictConfig, SentenceTrigger};
 pub use connection::{ConnectionReport, ConnectionTest};
 pub use error::PredictError;
 pub use gloss::CloudGlossFiller;

@@ -1,6 +1,13 @@
 use qingjian_core::PredictionPolicy;
 use serde::{Deserialize, Serialize};
 
+/// `lookback` 的上限：光标前最多能配多少字。
+/// Windows 的 TSF 侧就按它读光标前的文本——读得再多也没用，真正发出去多少由 `lookback` 决定。
+pub const MAX_LOOKBACK: usize = 512;
+
+/// `lookahead` 的上限：光标后最多能配多少字，同理。
+pub const MAX_LOOKAHEAD: usize = 256;
+
 /// 云联想配置。默认**关闭**，开启后光标附近的文本会发往 `base_url`。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -31,7 +38,6 @@ pub struct PredictConfig {
 
     /// 光标后最多发多少个字符。
     pub lookahead: usize,
-
     /// 云端词最多补进候选窗口第一页末尾几格；0 表示不要云端词，只要整句补全。
     pub slots: usize,
 

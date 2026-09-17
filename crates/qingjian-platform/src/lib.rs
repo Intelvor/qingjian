@@ -19,3 +19,6 @@ pub use config::{
     PreeditMode, ShiftLetter, ShortcutConfig, SwitchKey, ThemeMode,
 };
 pub use error::ConfigError;
+
+// 云联想上下文长度的上限：TSF 侧要按它读光标前后的文本，从这儿转出去省得抄一遍。
+pub use qingjian_predict::{MAX_LOOKAHEAD, MAX_LOOKBACK};

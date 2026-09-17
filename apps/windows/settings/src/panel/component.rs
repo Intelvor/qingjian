@@ -122,6 +122,14 @@ impl Component for Settings {
                 self.save("predict", "slots", slots);
             }
             Message::CloudSentence(on) => self.save("predict", "sentence", on),
+            Message::CloudLookback(Some(value)) => {
+                let chars = (value.round() as i64).clamp(0, qingjian_predict::MAX_LOOKBACK as i64);
+                self.save("predict", "lookback", chars);
+            }
+            Message::CloudLookahead(Some(value)) => {
+                let chars = (value.round() as i64).clamp(0, qingjian_predict::MAX_LOOKAHEAD as i64);
+                self.save("predict", "lookahead", chars);
+            }
             Message::CloudSentenceTrigger(Some(i)) if i < cloud::SENTENCE_TRIGGERS.len() => {
                 self.save("predict", "sentence_trigger", cloud::SENTENCE_TRIGGERS[i].1);
             }

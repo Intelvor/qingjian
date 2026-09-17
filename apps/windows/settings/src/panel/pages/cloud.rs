@@ -1,6 +1,6 @@
 //! 「云服务」页：本地整句模型开关（`[model]`）、`[predict]` 各项与「测试连接」（后台线程跑）。
 
-use qingjian_predict::{ConnectionTest, PredictConfig};
+use qingjian_predict::{ConnectionTest, MAX_LOOKAHEAD, MAX_LOOKBACK, PredictConfig};
 use windows_reactor::*;
 
 use crate::panel::cloud_status::CloudStatus;
@@ -85,6 +85,24 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
                 p.sentence_trigger.key(),
                 context.callback(Message::CloudSentenceTrigger),
             ),
+        ),
+        field(
+            "前文长度",
+            "发给云端的光标前文字上限（字），模型靠它接上你正在写的话题；0 表示不发前文。调大一点更容易接上话题，代价是每次请求多发一点文字、也多用一点 token。",
+            NumberBox::new()
+                .minimum(0.0)
+                .maximum(MAX_LOOKBACK as f64)
+                .value(p.lookback as f64)
+                .on_value_changed(context.callback(Message::CloudLookback)),
+        ),
+        field(
+            "后文长度",
+            "光标后文字的上限（字）：后面已有文字时，整句补全只填中间缺的那几个字，靠的就是它；0 表示不发后文。",
+            NumberBox::new()
+                .minimum(0.0)
+                .maximum(MAX_LOOKAHEAD as f64)
+                .value(p.lookahead as f64)
+                .on_value_changed(context.callback(Message::CloudLookahead)),
         ),
         field(
             "接口地址",
