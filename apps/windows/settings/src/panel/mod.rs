@@ -20,7 +20,7 @@ use self::pages::{
 };
 
 /// 左侧标签固定宽度，让各行控件对齐。
-const LABEL_WIDTH: f64 = 220.0;
+const LABEL_WIDTH: f64 = 140.0;
 
 /// 设置窗口状态。
 pub(crate) struct Settings {
@@ -50,6 +50,13 @@ impl Settings {
     /// `%APPDATA%\Qingjian\config.toml`；取不到 `APPDATA` 退回工作目录。
     fn config_path() -> PathBuf {
         qingjian_platform::dirs::config_path().unwrap_or_else(|| PathBuf::from("config.toml"))
+    }
+
+    /// 配置文件不在就写出模板：这个账户下 Server 还没跑过时，保存与「在记事本中打开」都要有文件。
+    fn ensure_config_file(path: &Path) {
+        if let Err(error) = Config::write_template_if_missing(path) {
+            crate::log::warn(format!("写配置模板失败: {error}"));
+        }
     }
 
     /// 数据目录 `%APPDATA%\Qingjian`。

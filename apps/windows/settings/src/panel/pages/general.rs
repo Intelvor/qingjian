@@ -15,12 +15,13 @@ pub(crate) const LANGUAGES: [(&str, &str); 4] = [
 ];
 
 /// 双拼方案：界面名 + 配置写法（空串为全拼）。
-pub(crate) const SHUANGPIN: [(&str, &str); 5] = [
-    ("全拼（不启用双拼）", ""),
+pub(crate) const SHUANGPIN: [(&str, &str); 6] = [
+    ("全拼", ""),
     ("小鹤双拼", "xiaohe"),
-    ("自然码", "ziranma"),
+    ("自然码双拼", "ziranma"),
     ("微软双拼", "microsoft"),
     ("搜狗双拼", "sogou"),
+    ("小浪双拼", "xiaolang"),
 ];
 
 fn string_combo(
@@ -57,8 +58,8 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
                 .on_value_changed(context.callback(Message::PageSize)),
         ),
         field(
-            "双拼",
-            "开双拼后 v、u、i 是音节键，表达式与问字模式只能用 ? 开头进；微软、搜狗方案的 ; 键是 ing。",
+            "输入方式",
+            "开双拼后 v、u、i 是音节键，表达式与问字模式改用 Shift+V、Shift+U 进；微软、搜狗方案的 ; 键是 ing。",
             string_combo(
                 &SHUANGPIN,
                 &g.shuangpin,
