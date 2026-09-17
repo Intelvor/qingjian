@@ -16,7 +16,7 @@ use windows_reactor::*;
 use self::cloud_status::CloudStatus;
 pub(crate) use self::message::Message;
 use self::pages::{
-    about, advanced, candidates, cloud, dictionaries, fuzzy, general, shortcut, usage,
+    about, advanced, candidates, cloud, dictionaries, fuzzy, general, shortcut, typing, usage,
 };
 
 /// 左侧标签固定宽度，让各行控件对齐。
@@ -84,6 +84,7 @@ impl Settings {
     fn page_content(&self, context: &mut ViewContext<Self>) -> View {
         match self.page.as_str() {
             "candidates" => candidates::view(self, context),
+            "typing" => typing::view(self, context),
             "shortcut" => shortcut::view(self, context),
             "cloud" => cloud::view(self, context),
             "fuzzy" => fuzzy::view(self, context),

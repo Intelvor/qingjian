@@ -84,4 +84,6 @@ pub(crate) enum Message {
     // 关于页
     OpenWebsite,
     OpenRepository,
+    /// 打开本改版（Windows 增强版）自己的仓库。
+    OpenFork,
 }

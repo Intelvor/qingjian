@@ -9,6 +9,13 @@ pub(crate) const WEBSITE_URL: &str = "https://qingjian.app";
 
 pub(crate) const REPOSITORY_URL: &str = "https://github.com/qingjian-team";
 
+/// 本改版（Windows 增强版）自己的仓库：本版的问题与建议提到这里。
+pub(crate) const FORK_URL: &str = "https://github.com/lll114514lll1919810lll/qingjian";
+
+/// 本版说明：讲清「上游」与「本版」分别指哪个仓库，免得用户把本版的问题提到上游去。
+const EDITION_NOTE: &str = "这是青简（上游项目）的 Windows 增强版：在上游基础上补齐了候选窗鼠标点选、整句联想的上下文与时机、状态条图标、中英切换键等 Windows 侧的功能，词库与引擎跟上游同步。\
+下面「上游官网」「上游 GitHub」指向项目原仓库；「本版仓库」是这一改版自己的仓库——本版的问题与建议提到那里。";
+
 /// 与仓库根 `LICENSE` 一致。
 const LICENSE_NOTE: &str = "自由软件，GPL-3.0-or-later 许可证：可以自由使用、修改与再分发，修改后分发须同样开源。官方渠道免费。";
 
@@ -55,16 +62,20 @@ pub(crate) fn view(_settings: &Settings, context: &mut ViewContext<Settings>) ->
             "构建 {}",
             option_env!("QINGJIAN_BUILD").unwrap_or("本地构建")
         )),
+        note(EDITION_NOTE),
         StackPanel::new()
             .orientation(Orientation::Horizontal)
             .spacing(12.0)
             .children((
                 Button::new()
                     .on_click(context.message(Message::OpenWebsite))
-                    .content("官网"),
+                    .content("上游官网"),
                 Button::new()
                     .on_click(context.message(Message::OpenRepository))
-                    .content("GitHub"),
+                    .content("上游 GitHub"),
+                Button::new()
+                    .on_click(context.message(Message::OpenFork))
+                    .content("本版仓库"),
                 Button::new()
                     .on_click(context.message(Message::OpenDataDir))
                     .content("打开数据目录"),

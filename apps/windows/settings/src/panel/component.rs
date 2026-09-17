@@ -8,7 +8,7 @@ use windows_reactor::*;
 
 use super::cloud_status::CloudStatus;
 use super::controls::{export_logs, log_dir, open_in_editor, open_with_explorer};
-use super::pages::{about, cloud, dictionaries, general, shortcut};
+use super::pages::{about, cloud, dictionaries, general, shortcut, typing};
 use super::{Message, Settings};
 
 impl Component for Settings {
@@ -65,8 +65,8 @@ impl Component for Settings {
                 };
                 self.save_array("apps", "english_candidates_off", &list);
             }
-            Message::SwitchMode(Some(i)) if i < general::SWITCH_KEYS.len() => {
-                self.save("shortcut", "switch_mode", general::SWITCH_KEYS[i].1);
+            Message::SwitchMode(Some(i)) if i < typing::SWITCH_KEYS.len() => {
+                self.save("shortcut", "switch_mode", typing::SWITCH_KEYS[i].1);
             }
             Message::EnglishMode(on) => self.save("general", "english_mode", on),
 
@@ -231,6 +231,7 @@ impl Component for Settings {
             // 关于页
             Message::OpenWebsite => open_with_explorer(about::WEBSITE_URL),
             Message::OpenRepository => open_with_explorer(about::REPOSITORY_URL),
+            Message::OpenFork => open_with_explorer(about::FORK_URL),
 
             // 下拉被清空 / 越界：不改
             _ => {}
@@ -256,6 +257,7 @@ impl Component for Settings {
         };
         let items = [
             item("general", "通用", Symbol::Setting),
+            item("typing", "输入行为", Symbol::Keyboard),
             item("candidates", "候选窗口", Symbol::View),
             item("shortcut", "快捷键", Symbol::Keyboard),
             item("cloud", "云服务", Symbol::World),
