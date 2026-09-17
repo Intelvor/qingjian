@@ -2,6 +2,108 @@
 
 use super::*;
 
+/// 双拼（小鹤）下标出的拼音比键长：请求带的是解出来的全拼，校验也按全拼。
+#[test]
+fn shuangpin_prediction_uses_decoded_full_pinyin() {
+    let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut engine = xiaohe().with_predictor(Box::new(EchoPredictor {
+        submitted: submitted.clone(),
+        replies: vec![Prediction {
+            sequence: 1,
+            words: vec![cloud("你好", &["ni", "hao"])],
+            sentence: None,
+        }],
+        sentence: false,
+    }));
+    // xiaohe: h→n 韵母是 i? 用实测过的 ni'hc = ni'hao
+    engine.set_input("ni'hc");
+    let query = engine.query().unwrap();
+    assert_eq!(query.marked_text(), "ni'hao", "双拼标记显示解码后的全拼");
+    assert_eq!(
+        engine.request_prediction(None, &query.candidates.items),
+        Some(1)
+    );
+    let request = submitted.borrow()[0].clone();
+    assert_eq!(request.pinyin, "ni'hao", "双拼请求是全拼");
+    assert_eq!(request.letters, "nihao", "双拼请求 letters 是全拼");
+    assert_eq!(request.syllables, 2);
+
+    let prediction = engine.poll_prediction().unwrap();
+    assert_eq!(prediction.words, [cloud("你好", &["ni", "hao"])]);
+    let word = Candidate {
+        text: "你好".into(),
+        kind: CandidateKind::Cloud,
+        syllables: prediction.words[0].syllables.clone(),
+        reading: None,
+        translation: None,
+    };
+    assert_eq!(engine.commit(&word), "你好");
+    assert!(engine.composition().is_empty());
+}
+
+/// 双拼下模型给出的词若拼音与解码后的全拼对不上，一样被容错校验过滤。
+#[test]
+fn shuangpin_cloud_words_are_validated_against_decoded_pinyin() {
+    let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut engine = xiaohe().with_predictor(Box::new(EchoPredictor {
+        submitted,
+        sentence: false,
+        replies: vec![Prediction {
+            sequence: 1,
+            words: vec![
+                cloud("你好", &["ni", "hao"]),
+                cloud("你想", &["ni", "xiang"]),
+                cloud("乱码", &["zx", "ma"]),
+            ],
+            sentence: None,
+        }],
+    }));
+    engine.set_input("ni'hc");
+    engine.request_prediction(None, &[]);
+    let prediction = engine.poll_prediction().unwrap();
+    assert_eq!(prediction.words, [cloud("你好", &["ni", "hao"])]);
+}
+
+/// 注音大千键位标出的拼音比键短/长：请求带解码后的全拼，校验按全拼走。
+#[test]
+fn zhuyin_prediction_uses_decoded_full_pinyin() {
+    let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut engine = engine().with_predictor(Box::new(EchoPredictor {
+        submitted: submitted.clone(),
+        replies: vec![Prediction {
+            sequence: 1,
+            words: vec![cloud("不", &["bu"])],
+            sentence: None,
+        }],
+        sentence: false,
+    }));
+    engine.set_zhuyin_mode(true);
+    // 1:ㄅ j:ㄨ 4:ˋ → 不 (bu)
+    engine.set_input("1j4");
+    let query = engine.query().unwrap();
+    assert_eq!(query.marked_text(), "ㄅㄨˋ");
+    assert_eq!(
+        engine.request_prediction(None, &query.candidates.items),
+        Some(1)
+    );
+    let request = submitted.borrow()[0].clone();
+    assert_eq!(request.pinyin, "bu", "注音请求是全拼");
+    assert_eq!(request.letters, "bu");
+    assert_eq!(request.syllables, 1);
+
+    let prediction = engine.poll_prediction().unwrap();
+    assert_eq!(prediction.words, [cloud("不", &["bu"])]);
+    let word = Candidate {
+        text: "不".into(),
+        kind: CandidateKind::Cloud,
+        syllables: prediction.words[0].syllables.clone(),
+        reading: None,
+        translation: None,
+    };
+    assert_eq!(engine.commit(&word), "不");
+    assert!(engine.composition().is_empty());
+}
+
 /// 续写：敲续写键（缺省 `i`）后请整句——请求不带拼音，只带光标前后文。
 #[test]
 fn continue_key_asks_for_a_continuation_without_pinyin() {
