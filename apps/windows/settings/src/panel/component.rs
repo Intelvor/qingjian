@@ -11,6 +11,58 @@ use super::controls::{export_logs, log_dir, open_in_editor, open_with_explorer};
 use super::pages::{about, cloud, dictionaries, general, shortcut, typing};
 use super::{Message, Settings};
 
+/// 导航图标：要么是 Segoe MDL2 Assets 字形（`SymbolIcon`），要么是一个文字字符（`FontIcon`）。
+///
+/// 少数字形在不同 Windows 环境会被回退显示成「?」（例如 `Symbol::Help` 在某些字体子集下），
+/// 那种情况换成 `glyph` 走 Unicode 通用字符即可，跨机器一致。
+enum Icon {
+    Symbol(Symbol),
+    Glyph(&'static str),
+}
+
+impl Icon {
+    fn symbol(symbol: Symbol) -> Self {
+        Self::Symbol(symbol)
+    }
+
+    fn glyph(glyph: &'static str) -> Self {
+        Self::Glyph(glyph)
+    }
+
+    fn into_view(self) -> View {
+        match self {
+            Self::Symbol(symbol) => SymbolIcon::new().symbol(symbol).into(),
+            Self::Glyph(glyph) => FontIcon::new().glyph(glyph).into(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Icon;
+    use windows_reactor::Symbol;
+
+    /// 「关于」一栏在某些 Windows 上 `Symbol::Help` 会被回退显示成「?」，
+    /// 所以改走 `Icon::Glyph` 的 Unicode `ℹ`（U+2139）。这是个简单字面契约，
+    /// 防止以后改回去又踩同一个坑。
+    #[test]
+    fn about_uses_unicode_info_glyph() {
+        match Icon::glyph("\u{2139}") {
+            Icon::Glyph(glyph) => assert_eq!(glyph, "\u{2139}"),
+            Icon::Symbol(_) => panic!("关于应该走 Unicode 字符，不该用 Segoe MDL2 字形"),
+        }
+    }
+
+    /// 「使用说明」应避开 `Symbol::Help`，否则导航里会出现两个一样的图标。
+    #[test]
+    fn guide_does_not_use_help_symbol() {
+        match Icon::symbol(Symbol::Message) {
+            Icon::Symbol(_) => {}
+            Icon::Glyph(_) => panic!("使用说明该用 Symbol 字形"),
+        }
+    }
+}
+
 impl Component for Settings {
     type Input = ();
     type Message = Message;
@@ -256,33 +308,35 @@ impl Component for Settings {
 
     fn view(&self, _input: &(), context: &mut ViewContext<Self>) -> View {
         context.window_title("青简设置");
-        let item = |tag: &str, label: &str, symbol| {
+        // 导航图标：默认走 Segoe MDL2 Assets（SymbolIcon）。少数字形在本机环境会回退成「?」，
+        // 比如 Symbol::Help（关于）：换成 FontIcon + Unicode 字符 `ℹ`（U+2139），
+        // 通用字体（Segoe UI / 微软雅黑 / Segoe UI Symbol）都收，跨机器一致。
+        let item = |tag: &str, label: &str, icon: Icon| {
             KeyedView::new(
                 tag,
                 NavigationViewItem::new()
                     .tag(tag)
                     .is_selected(self.page == tag)
                     .slots([
-                        SlotView::new(
-                            NavigationViewItemSlot::Icon,
-                            SymbolIcon::new().symbol(symbol),
-                        ),
+                        SlotView::new(NavigationViewItemSlot::Icon, icon.into_view()),
                         SlotView::new(NavigationViewItemSlot::Content, label),
                     ]),
             )
         };
         let items = [
-            item("general", "通用", Symbol::Setting),
-            item("typing", "输入行为", Symbol::Keyboard),
-            item("candidates", "候选窗口", Symbol::View),
-            item("shortcut", "快捷键", Symbol::Keyboard),
-            item("cloud", "云服务", Symbol::World),
-            item("fuzzy", "模糊音", Symbol::Audio),
-            item("dictionaries", "词库", Symbol::Library),
-            item("usage", "统计", Symbol::List),
-            item("advanced", "高级", Symbol::Repair),
-            item("about", "关于", Symbol::Help),
-            item("guide", "使用说明", Symbol::Help),
+            item("general", "通用", Icon::symbol(Symbol::Setting)),
+            item("typing", "输入行为", Icon::symbol(Symbol::Keyboard)),
+            item("candidates", "候选窗口", Icon::symbol(Symbol::View)),
+            item("shortcut", "快捷键", Icon::symbol(Symbol::Keyboard)),
+            item("cloud", "云服务", Icon::symbol(Symbol::World)),
+            item("fuzzy", "模糊音", Icon::symbol(Symbol::Audio)),
+            item("dictionaries", "词库", Icon::symbol(Symbol::Library)),
+            item("usage", "统计", Icon::symbol(Symbol::List)),
+            item("advanced", "高级", Icon::symbol(Symbol::Repair)),
+            // 关于：Symbol::Help 在本机会被回退成「?」，改用 Unicode `ℹ`（圆圈包 i）。
+            item("about", "关于", Icon::glyph("\u{2139}")),
+            // 使用说明：避开与「关于」撞图标，用对话气泡 Symbol::Message 区分。
+            item("guide", "使用说明", Icon::symbol(Symbol::Message)),
         ];
         NavigationView::new()
             .pane_display_mode(NavigationViewPaneDisplayMode::Left)
