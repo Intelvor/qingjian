@@ -10,7 +10,7 @@ pub(crate) const WEBSITE_URL: &str = "https://qingjian.app";
 pub(crate) const REPOSITORY_URL: &str = "https://github.com/qingjian-team";
 
 /// 本改版（Windows 增强版）自己的仓库：本版的问题与建议提到这里。
-pub(crate) const FORK_URL: &str = "https://github.com/lll114514lll1919810lll/qingjian";
+pub(crate) const FORK_URL: &str = "https://github.com/Intelvor/qingjian";
 
 /// 本版说明：讲清「上游」与「本版」分别指哪个仓库，免得用户把本版的问题提到上游去。
 const EDITION_NOTE: &str = "这是青简（上游项目）的 Windows 增强版：在上游基础上补齐了候选窗鼠标点选、整句联想的上下文与时机、状态条图标、中英切换键等 Windows 侧的功能，词库与引擎跟上游同步。\
