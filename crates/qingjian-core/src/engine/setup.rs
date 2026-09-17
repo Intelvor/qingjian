@@ -92,11 +92,13 @@ impl Engine {
         }
     }
 
-    /// 缓冲区为空时敲的大写字母该不该进表达式 / 问字模式：只在双拼下、且是模式键的大写时。
+    /// 缓冲区为空时敲的大写字母该不该进前缀模式（表达式 / 问字 / 续写）：只在双拼下、且是模式键的大写时。
     /// 壳只在中文模式、Caps 灭时问。
     pub fn takes_mode_letter(&self, c: char) -> bool {
         let modes = self.modes();
-        self.shuangpin.is_some() && !self.zhuyin && (c == modes.expression || c == modes.question)
+        self.shuangpin.is_some()
+            && !self.zhuyin
+            && (c == modes.expression || c == modes.question || c == modes.continue_key)
     }
 
     /// 缓冲区为空时敲 `?` 该不该进问字模式（配置 `[shortcut] question_mark`）：壳据此决定问号是入口还是标点。

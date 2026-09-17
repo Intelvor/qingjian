@@ -153,6 +153,34 @@ fn continue_key_without_context_does_not_ask() {
     assert!(submitted.borrow().is_empty());
 }
 
+/// 双拼下续写键换成大写（`Shift + I`）：`ModeKeys::shifted` 与 DLL 早就算上了它，
+/// Core 的入口判定 `takes_mode_letter` 当初漏了这个键 —— 全拼的 `i` 在双拼里是音节键，
+/// 结果双拼下续写整个进不去。1.0.6 补上。
+#[test]
+fn shuangpin_continue_key_is_the_shifted_letter() {
+    let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut engine = xiaohe().with_predictor(Box::new(EchoPredictor {
+        submitted: submitted.clone(),
+        replies: vec![],
+        sentence: true,
+    }));
+    engine.set_input("I");
+    engine.request_sentence_once();
+
+    let sent = engine.request_prediction(
+        Some(SurroundingText {
+            before: "两个集合".into(),
+            after: "按顺序两两配对".into(),
+        }),
+        &[],
+    );
+    assert!(sent.is_some(), "双拼下 Shift + I 之后按 Tab 该发得出去");
+    let requests = submitted.borrow();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].pinyin, "", "续写不带拼音");
+    assert_eq!(requests[0].letters, "");
+}
+
 #[test]
 fn question_mode_asks_the_cloud_and_shows_answers_unvalidated() {
     let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));

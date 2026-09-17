@@ -1659,6 +1659,8 @@ struct FakeCloud {
     befores: Vec<String>,
     /// 每次请求带的光标后文，按提交顺序。
     afters: Vec<String>,
+    /// 每次请求带的拼音，按提交顺序；续写那条路是空串。
+    pinies: Vec<String>,
     /// 最近一次请求的序号：`deliver` 用它造结果。
     last_request: Option<u64>,
     /// 备好、等轮询取走的结果。
@@ -1684,6 +1686,7 @@ impl Predictor for FakePredictor {
         cloud.asked.push(request.want_sentence);
         cloud.befores.push(request.before);
         cloud.afters.push(request.after);
+        cloud.pinies.push(request.pinyin);
         cloud.last_request = Some(request.sequence);
     }
 
@@ -1814,6 +1817,64 @@ fn continue_key_then_tab_asks_for_a_continuation_without_pinyin() {
 
     let (_, commit, _) = press(&mut router, tab());
     assert_eq!(commit.as_deref(), Some("中的元素"), "再按一次 Tab 采用");
+}
+
+/// 双拼下续写键换成 `Shift + I`：小写 `i` 是音节键，入口得按住 Shift 敲大写。
+/// `ModeKeys::shifted` 与 DLL 早就算上了这个键，Core 的入口判定漏了它，双拼下续写整个进不去。
+#[test]
+fn shuangpin_continue_key_is_the_shifted_letter() {
+    let cloud = Arc::new(Mutex::new(FakeCloud::default()));
+    let config = RouterConfig {
+        sentence_on_tab: true,
+        shuangpin: Some(ShuangpinScheme::Xiaohe),
+        ..RouterConfig::default()
+    };
+    let mut router = router_in(config, None);
+    router.engine_mut().set_predictor(Box::new(FakePredictor {
+        auto_sentence: false,
+        cloud: cloud.clone(),
+    }));
+    router.handle(ClientMessage::Surrounding {
+        session: SESSION,
+        text: "把两个集合".to_owned(),
+        after: "按顺序两两配对。".to_owned(),
+    });
+
+    // 小写 `i` 在双拼里是音节键：这一拍走的是拼音那条路（请求带解出来的拼音），不是续写
+    type_letters(&mut router, "i");
+    let (_, _, frame) = press(&mut router, tab());
+    assert!(frame.sentence_pending, "Tab 现请整句");
+    assert!(
+        cloud
+            .lock()
+            .unwrap()
+            .pinies
+            .last()
+            .is_some_and(|pinyin| !pinyin.is_empty()),
+        "小写 i 不是续写，请求该带拼音"
+    );
+    press(&mut router, function_key(0x1B));
+
+    // 按住 Shift 的大写 `I` 才是入口
+    let (outcome, _, _) = press(&mut router, letter_with('I', SHIFT));
+    assert_eq!(outcome, KeyOutcome::Consumed, "Shift + I 被吃掉");
+    let (outcome, commit, frame) = press(&mut router, tab());
+    assert_eq!(outcome, KeyOutcome::Consumed, "Tab 被吃掉");
+    assert_eq!(commit, None, "结果还没到，这一拍不上屏");
+    assert!(frame.sentence_pending, "候选窗摆出「☁ …」");
+    {
+        let cloud = cloud.lock().unwrap();
+        assert_eq!(
+            cloud.befores.last().map(String::as_str),
+            Some("把两个集合"),
+            "续写要带光标前文"
+        );
+        assert_eq!(
+            cloud.pinies.last().map(String::as_str),
+            Some(""),
+            "续写不带拼音"
+        );
+    }
 }
 
 /// 没配「按 Tab 才联想」：句子照样能用 Tab 接受（自动那一路请回来的）。

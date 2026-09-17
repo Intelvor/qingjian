@@ -69,9 +69,15 @@ fn shuangpin_moves_mode_keys_to_shifted_letters() {
     assert_eq!(engine.query().unwrap().marked_text(), "zh");
     engine.set_input("u1");
     assert!(!engine.question_mode());
-    // Shift+V / Shift+U 进模式，之后与全拼下的 v / u 一样
+    // Shift+V / Shift+U / Shift+I 进模式，之后与全拼下的 v / u / i 一样
     assert!(engine.takes_mode_letter('V') && engine.takes_mode_letter('U'));
-    assert!(!engine.takes_mode_letter('v') && !engine.takes_mode_letter('I'));
+    assert!(engine.takes_mode_letter('I'), "续写键也换成大写");
+    assert!(
+        !engine.takes_mode_letter('v')
+            && !engine.takes_mode_letter('u')
+            && !engine.takes_mode_letter('i'),
+        "小写的三个字母在双拼里都是音节键"
+    );
     engine.set_input("V1+2");
     assert!(engine.expression_mode() && !engine.raw_mode());
     assert_eq!(engine.query().unwrap().candidates.items[0].text, "3");
@@ -81,6 +87,14 @@ fn shuangpin_moves_mode_keys_to_shifted_letters() {
     engine.set_input("Unihc");
     assert!(engine.question_mode());
     assert_eq!(engine.query().unwrap().marked_text(), "Uni'hao");
+    // 续写键同样：Shift+I 才是入口，落了 `I` 就算续写形态
+    engine.set_input("I");
+    assert!(engine.modes().is_continue("I", false));
+    engine.set_input("i");
+    assert!(
+        !engine.modes().is_continue("i", false),
+        "小写 i 在双拼里是音节键，不是续写入口"
+    );
     // 全拼下大写字母不是入口
     let mut full = super::engine();
     assert!(!full.takes_mode_letter('V'));

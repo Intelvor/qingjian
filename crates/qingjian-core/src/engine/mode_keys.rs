@@ -44,7 +44,7 @@ impl ModeKeys {
     /// 能当模式键的字母：不是任何拼音音节的开头。
     pub const CANDIDATES: [char; 3] = ['v', 'u', 'i'];
 
-    /// 双拼下 v / u / i 都是音节键，模式键换成对应的大写字母（Shift+V / Shift+U，搜狗 / 微软的做法）。
+    /// 双拼下 v / u / i 都是音节键，模式键换成对应的大写字母（Shift+V / Shift+U / Shift+I，搜狗 / 微软的做法）。
     pub fn shifted(self) -> Self {
         Self {
             expression: self.expression.to_ascii_uppercase(),
