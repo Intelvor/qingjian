@@ -130,5 +130,58 @@ Apple Developer 账号有了以后，在仓库 Secrets 里配齐 `release.yml` �
 
 ## 本机打包
 
+### macOS
+
 `apps/macos/scripts/bundle.sh --pkg` 打本机架构；`QINGJIAN_TARGET=x86_64-apple-darwin` 交叉编译 Intel 包（要先 `rustup target add`，
 本机不需要时不必装，CI 上两个都打）。成品在 `target/pkg/Qingjian-<版本>-<arch>.pkg`，每个架构一个工作目录，连着打互不覆盖。
+
+### Windows：打包 + 静默升级本机
+
+改完想立刻装到本机试用时走这条；正式发版走 `release.yml`，不手动打包。
+
+```powershell
+$env:QINGJIAN_UIACCESS = '0'                     # 没有签名证书：带 uiAccess 的未签名 exe 起不来
+$env:QINGJIAN_ISCC = 'D:\Inno Setup 7\ISCC.exe'   # 开发机上的 Inno；CI 里由 workflow 装同一个版本
+powershell -NoProfile -ExecutionPolicy Bypass -File apps\windows\installer\build.ps1
+```
+
+**先提交再打包。** 版本串是「`apps/windows/server/Cargo.toml` 的版本 + git 短哈希（工作树脏时加 `+`）」，
+而安装包里的 DLL 是带版本的文件名（`qingjian_tsf-<版本串>.dll`）。没提交就打包、又和上次打的是同一个提交，哈希不变、文件名一样，
+Inno 只能把它登记成「重启后替换」，**装完不生效**——用户看到的是「装了跟没装一样」。
+
+出包前清一次 `D:\Rust\target\debug` 是省空间的习惯（装机只用 `release` 那份）：顺序是**跑完 check 与单测 → 清 debug → 出包**。
+
+装机这几步一步都不能省：
+
+```powershell
+$setup = (Get-ChildItem target\installer\*.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+
+# 1) 先停 Server：它正跑着时安装程序换不掉 exe
+Get-Process qingjian-server -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Seconds 2
+
+# 2) 静默安装（要 UAC 提升；/CURRENTUSER 让快捷方式落在当前用户下）
+Start-Process -FilePath $setup -Verb RunAs -Wait `
+    -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER'
+Start-Sleep -Seconds 3
+
+# 3) 把 Server 起回来——漏了这步，DLL 连不上管道就静默吞键（没有任何提示，像「输入法完全没反应」）
+Start-Process "D:\Program Files\Qingjian\qingjian-server.exe" -WorkingDirectory "D:\Program Files\Qingjian"
+Start-Sleep -Seconds 5
+Test-Path '\\.\pipe\qingjian'     # True 才算起来了
+
+# 4) 核对注册表：64 位与 32 位应用各一条，都要指向新装的 DLL
+(Get-ItemProperty 'HKLM:\SOFTWARE\Classes\CLSID\{4FDCA82D-E923-49BF-9E75-BB906B93B8BB}\InprocServer32').'(default)'
+(Get-ItemProperty 'HKLM:\SOFTWARE\Classes\WOW6432Node\CLSID\{4FDCA82D-E923-49BF-9E75-BB906B93B8BB}\InprocServer32').'(default)'
+```
+
+**装完必须重启被测应用。** DLL 已经加载进每个应用进程，切走输入法再切回来没用（模块还在进程里）。
+
+几个配套的点：
+
+- 产品数据在 `data/generated/`（不在 git 里）。缺 `glossary-es.qj` 时 iscc 直接报错退出；从上游 `data` 标签的 `qingjian-data.tar.gz` 取，解包时排除 `._*`。
+- 装好后 Server 的 exe 在 `D:\Program Files\Qingjian\`，ACL 是 Administrators 全权、`BUILTIN\Users` 只读 —— 直接覆盖会 `UnauthorizedAccessException`，
+  所以**改 Server 侧代码也必须走安装包**（只有 DLL 靠版本化文件名能在重启后替换）。
+- 排障先看日志，现在都在 `%LOCALAPPDATA%\Qingjian\logs\`（`server.<UTC 日期>.log`、`tsf.<UTC 日期>.log`；文件名用 UTC 日期）。
+- 想知道某个进程加载的是哪一份 DLL：`(Get-Process -Id <pid>).Modules | Where-Object ModuleName -like 'qingjian*' | Select ModuleName, FileName` —
+  里面出现 `wow64*.dll` 就说明那是个 32 位应用，走的是 `-x86.dll` 那份。

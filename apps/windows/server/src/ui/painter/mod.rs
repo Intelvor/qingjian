@@ -21,11 +21,14 @@ pub(super) struct Painter {
 
     /// 建它时用的字族名（空为系统字体），设置没变就不重建。
     font: String,
+
+    /// 建它时用的字号（点）。
+    font_size: u8,
 }
 
 impl Painter {
     /// `font` 是用户选的字族名，空为系统字体；没装就回到系统字体。字体库加载失败返回 `None`，调用方退回 GDI。
-    fn new(font: &str) -> Option<Self> {
+    fn new(font: &str, font_size: u8) -> Option<Self> {
         let started = std::time::Instant::now();
         let library = if font.is_empty() {
             FontLibrary::system("zh-CN")
@@ -51,6 +54,7 @@ impl Painter {
         Some(Self {
             renderer: Renderer::new(library),
             font: font.to_owned(),
+            font_size,
         })
     }
 
@@ -59,8 +63,11 @@ impl Painter {
         let mut painter = shared.borrow_mut();
         match settings.renderer {
             CandidateRenderer::Qingjian => {
-                if painter.as_ref().map(|p| p.font.as_str()) != Some(settings.font.as_str()) {
-                    *painter = Self::new(&settings.font);
+                let same = painter.as_ref().is_some_and(|p| {
+                    p.font.as_str() == settings.font.as_str() && p.font_size == settings.font_size
+                });
+                if !same {
+                    *painter = Self::new(&settings.font, settings.font_size);
                 }
             }
             CandidateRenderer::System => {
@@ -87,7 +94,13 @@ impl Painter {
         let started = std::time::Instant::now();
         let rendered = self
             .renderer
-            .render(frame, layout, &theme(dark), scale(dpi), Some(&SHADOW))
+            .render(
+                frame,
+                layout,
+                &theme(dark, self.font_size),
+                scale(dpi),
+                Some(&SHADOW),
+            )
             .inspect_err(|error| tracing::warn!(%error, "候选窗渲染失败"))
             .ok()?;
         tracing::debug!(
@@ -108,7 +121,13 @@ impl Painter {
         hovered: Option<usize>,
     ) -> Option<RenderedStatus> {
         self.renderer
-            .render_status(cells, &theme(dark), scale(dpi), Some(&SHADOW), hovered)
+            .render_status(
+                cells,
+                &theme(dark, self.font_size),
+                scale(dpi),
+                Some(&SHADOW),
+                hovered,
+            )
             .inspect_err(|error| tracing::warn!(%error, "状态条渲染失败"))
             .ok()
     }
@@ -117,8 +136,9 @@ impl Painter {
 /// 两个窗口都用渲染器画阴影（分层窗口没有系统阴影），参数与 macOS 面板一致。
 const SHADOW: Shadow = Shadow::mac_panel();
 
-fn theme(dark: bool) -> Theme {
-    if dark { Theme::dark() } else { Theme::light() }
+fn theme(dark: bool, font_size: u8) -> Theme {
+    let theme = if dark { Theme::dark() } else { Theme::light() };
+    theme.with_font_size(font_size as f32)
 }
 
 /// 点 → 像素的倍数。

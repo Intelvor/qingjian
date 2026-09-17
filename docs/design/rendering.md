@@ -90,7 +90,7 @@
 
 1. **光学字号 `opsz`**：SF 是变量字体，CoreText 在 20 pt 以下用 opsz = 17（Text 视觉尺寸），cosmic-text 只设 `wght`，落在缺省的 28（Display），
    小字号英文窄 16–24%。补法：给 cosmic-text 打补丁 `FontSystem::set_optical_size`（shaper 位置与 swash 栅格都带 opsz），放在 [qingjian-team/cosmic-text](https://github.com/qingjian-team/cosmic-text) 的 `qingjian-opsz` 分支（基于 0.19.0，一个提交），workspace `[patch.crates-io]` 钉 rev；上游收了就回 crates.io。
-   补丁是全局一个值，字体实例缓存没按它分键；候选窗几种字号都在 20 pt 以下落同一档，够用，做主题字号可调时要改成按字号分键。
+   补丁是全局一个值，字体实例缓存没按它分键。字号设置项（`font_size`，8–32 点）落地后仍固定给 17 且运行中不改值，不触发缓存分键问题；已知取舍是超过 20 点仍用 Text 档，带 `opsz` 轴的字体（SF、Segoe UI Variable）在大字号下比系统原生略窄。要逐字号对齐时再改成按字号分键。
 2. **`trak` 字距表**：SF 按字号给每个字形加减间距（11 pt +12、12 pt 0、16 pt −40 个字体单位，值 / upem × 字号 = 点），PingFang 没有正常轨。
    渲染器自己解析 `trak`（`fonts/trak.rs`），按字形所用字体各查各的。补完后「hello」「ni'hao」「1/6」「phr. you change」三个字号的宽度与 `NSAttributedString.size()` 到小数点后两位相等。
 3. **笔画加深**：CoreText 对文字抗锯齿有一层 gamma，线性混合出来的字偏细，深色背景尤其明显。主题里加 `text_gamma`（浅色 0.85、深色 0.75），放大并排看笔画粗细一致。
@@ -116,7 +116,7 @@
 - **壳**：`apps/windows/server/src/ui/painter/`，候选窗口与悬浮状态条共用一份渲染器（字体库与字形缓存一份）；`layered::present` 把渲染器出的预乘 RGBA 位图换成 BGRA 后 `UpdateLayeredWindow` 贴上，阴影由渲染器画（`Shadow::mac_panel()`，参数与 macOS 面板一致；分层窗口没有系统阴影）。倍数取 DPI / 96。
   `[general] renderer = "system"` 时两个窗口走原来的 GDI 画法，与 macOS 一样是过渡期退路；渲染器建不起来（字体库加载失败）也自动退回。
 - **状态条**：渲染器新增 `render_status`（`StatusCell::{Text, Gear}`，返回位图与各格右边界供点击命中）。齿轮改成矢量画：Segoe UI Emoji 排在回退链前面会把 U+2699 画成彩色。
-- **配置**：`[general] renderer` / `[general] font` 经 `CandidateSink::configure` 送到 UI 线程，装上时与热加载变了时各送一次；字族名按 DirectWrite 的系统字体集合找文件（`qingjian_render::system_fonts`），设置程序的「字体」框也从它列字族。
+- **配置**：`[general] renderer` / `[general] font` / `[general] font_size` 经 `CandidateSink::configure` 送到 UI 线程，装上时与热加载变了时各送一次；字族名按 DirectWrite 的系统字体集合找文件（`qingjian_render::system_fonts`），设置程序的「字体」框也从它列字族。
 - **候选行类型**：Windows 壳直接用渲染器的 `Row` / `Tone`，不再有自己的一份；macOS 壳还留着 `convert.rs`，spike 定型后一起去掉。
 - **删候选的提示**：渲染器画在拼音行右侧（与 macOS 一致）；GDI 画法仍在拼音行下方。
 

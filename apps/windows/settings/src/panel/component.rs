@@ -110,6 +110,10 @@ impl Component for Settings {
                 self.font_query = None;
                 self.save("general", "font", family);
             }
+            Message::FontSize(Some(value)) => {
+                let size = (value.round() as i64).clamp(8, 32);
+                self.save("general", "font_size", size);
+            }
             Message::StatusBar(on) => self.save("status_bar", "enabled", on),
 
             // 云服务页

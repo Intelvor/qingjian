@@ -75,6 +75,15 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
                 .on_suggestion_chosen(context.callback(Message::Font)),
         ),
         field(
+            "字体大小",
+            "只对青简渲染器生效；范围 8–32 点。",
+            NumberBox::new()
+                .minimum(8.0)
+                .maximum(32.0)
+                .value(g.font_size as f64)
+                .on_value_changed(context.callback(Message::FontSize)),
+        ),
+        field(
             "拼音显示",
             "「只在候选窗口」时正在敲的拼音不显示在应用里，终端或行内拼音不正常的应用可以选它。",
             mode_combo(

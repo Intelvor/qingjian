@@ -42,6 +42,9 @@ pub struct GeneralConfig {
     /// 候选窗口字体的字族名；空为系统字体。只对青简渲染器生效，没装这个字体时回到系统字体。
     pub font: String,
 
+    /// 候选窗口字体大小（点），只对青简渲染器生效。
+    pub font_size: u8,
+
     /// 组句中的拼音显示在行内、候选窗口还是两处都显示。
     pub preedit: PreeditMode,
 
@@ -99,6 +102,7 @@ impl Default for GeneralConfig {
             layout: LayoutMode::default(),
             renderer: CandidateRenderer::default(),
             font: String::new(),
+            font_size: 16,
             preedit: PreeditMode::default(),
             english_candidates: true,
             traditional: false,
@@ -161,6 +165,11 @@ impl GeneralConfig {
             _ => DEFAULT_PAGE_KEYS,
         }
     }
+
+    /// 夹到合法范围的候选窗口字体大小（点）。
+    pub fn font_size(&self) -> u8 {
+        self.font_size.clamp(8, 32)
+    }
 }
 
 #[cfg(test)]
@@ -182,6 +191,18 @@ mod tests {
         assert_eq!(general.page_keys(), ('[', ']'));
         general.page_keys = ",,".to_owned();
         assert_eq!(general.page_keys(), ('[', ']'));
+    }
+
+    #[test]
+    fn font_size_is_sanitized() {
+        let mut general = GeneralConfig::default();
+        assert_eq!(general.font_size(), 16);
+        general.font_size = 0;
+        assert_eq!(general.font_size(), 8);
+        general.font_size = 42;
+        assert_eq!(general.font_size(), 32);
+        general.font_size = 14;
+        assert_eq!(general.font_size(), 14);
     }
 
     #[test]

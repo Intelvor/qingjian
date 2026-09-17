@@ -44,22 +44,34 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// 浅色，对齐 macOS 系统外观。
+    /// 浅色，对齐 macOS 系统外观；字号 16 点。
     pub fn light() -> Self {
-        Self::with_palette(Palette::light(), 0.85)
+        Self::with_palette(Palette::light(), 0.85, 16.0)
     }
 
-    /// 深色，对齐 macOS 系统外观。
+    /// 深色，对齐 macOS 系统外观；字号 16 点。
     pub fn dark() -> Self {
-        Self::with_palette(Palette::dark(), 0.75)
+        Self::with_palette(Palette::dark(), 0.75, 16.0)
     }
 
-    fn with_palette(colors: Palette, text_gamma: f32) -> Self {
+    /// 按给定字号复制一份主题，比例保持与 16 点基准一致。
+    pub fn with_font_size(self, font_size: f32) -> Self {
+        let scale = font_size / self.text_font.size;
+        Self {
+            text_font: self.text_font.scaled(scale),
+            annotation_font: self.annotation_font.scaled(scale),
+            index_font: self.index_font.scaled(scale),
+            ..self
+        }
+    }
+
+    fn with_palette(colors: Palette, text_gamma: f32, base_font_size: f32) -> Self {
+        let scale = base_font_size / 16.0;
         Self {
             // 行高取 AppKit 系统字体在这几个字号下 NSAttributedString.size() 的高度
-            text_font: FontSpec::new(16.0, 19.0),
-            annotation_font: FontSpec::new(12.0, 15.0),
-            index_font: FontSpec::new(11.0, 14.0),
+            text_font: FontSpec::new(16.0, 19.0).scaled(scale),
+            annotation_font: FontSpec::new(12.0, 15.0).scaled(scale),
+            index_font: FontSpec::new(11.0, 14.0).scaled(scale),
             colors,
             padding: 8.0,
             row_padding: 5.0,
@@ -68,5 +80,24 @@ impl Theme {
             max_rows: 9,
             text_gamma,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn font_size_scales_all_fonts_proportionally() {
+        let base = Theme::light();
+        assert_eq!(base.text_font.size, 16.0);
+        assert_eq!(base.annotation_font.size, 12.0);
+        assert_eq!(base.index_font.size, 11.0);
+
+        let scaled = base.with_font_size(20.0);
+        assert_eq!(scaled.text_font.size, 20.0);
+        assert_eq!(scaled.annotation_font.size, 15.0);
+        assert_eq!(scaled.index_font.size, 13.75);
+        assert_eq!(scaled.text_font.line_height, 19.0 * 20.0 / 16.0);
     }
 }
