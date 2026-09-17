@@ -922,6 +922,25 @@ fn hyphen_and_equals_are_inserted_by_us_instead_of_passed_through() {
 }
 
 #[test]
+fn raw_segment_takes_digits_and_keeps_the_space() {
+    // `-` 进英文直输段之后数字是内容不是选词键，空格整段原样上屏并保留空格（`gpt-6` 曾经丢了 6）。
+    let mut router = router();
+    let mut frame = Frame::default();
+    for c in "gpt-6".chars() {
+        let (outcome, commit, next) = press(&mut router, letter(c));
+        assert_eq!((outcome, commit), (KeyOutcome::Consumed, None));
+        frame = next;
+    }
+    assert_eq!(preedit(&frame), "gpt-6");
+    let (outcome, commit, after) = press(&mut router, letter(' '));
+    assert_eq!(
+        (outcome, commit.as_deref()),
+        (KeyOutcome::Consumed, Some("gpt-6 "))
+    );
+    assert!(after.is_empty());
+}
+
+#[test]
 fn status_bar_follows_mode_when_enabled() {
     let (mut router, recorder) = status_router();
 
