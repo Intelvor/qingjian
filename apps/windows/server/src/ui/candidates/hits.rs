@@ -181,7 +181,7 @@ impl Hits {
 ///
 /// `bands.rows` / `bands.sentence` 是内容区坐标，而窗口左上角比内容区往左上多出阴影那一圈，
 /// 所以先按 `bands.content` 判一脚（留白与窗口之外都不算命中），再减掉它换进内容坐标系。
-/// 竖排候选按 `y` 判（整行都能点，点右侧的词不必对准文字），横排按 `x` 判。
+/// 竖排候选按 `y` 判（整行都能点，点右侧的词不必对准文字），横排的命中带与高亮底色同一块，`x` 与 `y` 都得在。
 fn target_in(bands: &Bands, vertical: bool, x: i32, y: i32) -> Option<Hover> {
     if !inside(bands.content, x, y) {
         return None;
@@ -197,9 +197,15 @@ fn target_in(bands: &Bands, vertical: bool, x: i32, y: i32) -> Option<Hover> {
         .rows
         .iter()
         .enumerate()
-        .find(|(_, rect)| match vertical {
-            true => y >= rect.y as i32 && y < (rect.y + rect.height) as i32,
-            false => x >= rect.x as i32 && x < (rect.x + rect.width) as i32,
+        .find(|(_, rect)| {
+            let in_y = y >= rect.y as i32 && y < (rect.y + rect.height) as i32;
+            let in_x = x >= rect.x as i32 && x < (rect.x + rect.width) as i32;
+            match vertical {
+                // 竖排整行都能点：点右侧的词不必对准文字，只判 y。
+                true => in_y,
+                // 横排只判 x 的话，候选那一列的整条内容区高度都算命中（候选下方点不着的地方也能选词）。
+                false => in_x && in_y,
+            }
         })
         .map(|(row, _)| Hover::Row(row))
 }
@@ -283,5 +289,43 @@ mod tests {
         assert_eq!(target_in(&bands, true, MARGIN + 5, 200), None, "内容区下方");
         // 内容区里的行间空隙：两行之间也算没压上
         assert_eq!(target_in(&bands, true, MARGIN + 5, MARGIN + 42), None);
+    }
+
+    /// 横排的命中带与高亮底色是同一块：候选下方那一片不该还能选中它
+    /// （只判 x 的话整条内容区高度都算命中，译文行与底下的空白都点得着）。
+    #[test]
+    fn horizontal_hits_stop_at_the_band_bottom() {
+        let bands = Bands {
+            rows: vec![Rect {
+                x: 0.0,
+                y: 20.0,
+                width: 200.0,
+                height: 20.0,
+            }],
+            sentence: None,
+            content: Rect {
+                x: MARGIN as f32,
+                y: MARGIN as f32,
+                width: 200.0,
+                height: 80.0,
+            },
+        };
+        // 压在候选块上
+        assert_eq!(
+            target_in(&bands, false, MARGIN + 5, MARGIN + 30),
+            Some(Hover::Row(0))
+        );
+        // 命中带下沿之外（内容坐标 y ≥ 40）不再是它，尽管 x 还在这一列的范围内
+        assert_eq!(
+            target_in(&bands, false, MARGIN + 5, MARGIN + 50),
+            None,
+            "横排候选下方不该命中"
+        );
+        assert_eq!(target_in(&bands, false, MARGIN + 5, MARGIN + 75), None);
+        // 竖排照旧按 y 判：压在候选行上照样命中
+        assert_eq!(
+            target_in(&bands, true, MARGIN + 5, MARGIN + 30),
+            Some(Hover::Row(0))
+        );
     }
 }
