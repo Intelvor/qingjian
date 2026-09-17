@@ -470,19 +470,35 @@ impl Engine {
                 }
                 if tail.competes
                     && let Some(full) = first_segmentation(keys)
-                    && let Some(plain) = self.plain_sentence(items, &full, typos)
+                    && let Some(plain) =
+                        self.plain_sentence(items, std::slice::from_ref(&full), typos)
                 {
                     let position = items.len().min(1);
                     items.insert(position, plain);
                 }
             }
             _ => {
-                if let Some(plain) = self.plain_sentence(items, best, typos) {
+                if let Some(plain) = self.plain_sentence(items, segmentations, typos) {
                     let position = leading_english(items);
                     items.insert(position, plain);
                 }
             }
         }
+    }
+
+    /// 最优切分之外的切分试几条。太靠后的切分离最长切分太远（多是拆碎音节的读法），试了只是白花时间。
+    const ALTERNATIVE_SEGMENTATIONS: usize = 4;
+
+    /// 在最优切分之外找一条「不用敲错边、也没有占位音节」的整句读法，给 [`Self::plain_sentence`] 兜底。
+    fn plain_alternative(&self, segmentations: &[Segmentation], typos: bool) -> Option<Conversion> {
+        segmentations
+            .iter()
+            .skip(1)
+            .take(Self::ALTERNATIVE_SEGMENTATIONS)
+            .find_map(|segmentation| {
+                let conversion = self.convert_sentence(&segmentation.patterns(), typos)?;
+                (!conversion.altered() && !conversion.has_placeholder()).then_some(conversion)
+            })
     }
 
     /// 整段拼音的整句候选：最优切分至少两个音节、且最优路径不止一个词时才有（空格上屏的就是它）。
@@ -491,9 +507,10 @@ impl Engine {
     pub(super) fn plain_sentence(
         &self,
         items: &mut Vec<Candidate>,
-        best: &Segmentation,
+        segmentations: &[Segmentation],
         typos: bool,
     ) -> Option<Candidate> {
+        let best = segmentations.first()?;
         if best.syllables.len() < 2 {
             return None;
         }
@@ -507,6 +524,11 @@ impl Engine {
                 .any(|c| c.kind == CandidateKind::Chinese && c.syllables.concat() == letters);
             if spelled_exactly {
                 conversion = self.convert_sentence(&best.patterns(), false)?;
+            } else if let Some(alternative) = self.plain_alternative(segmentations, typos) {
+                // 最优切分只能靠敲错边读出句子时，换别的切分试试：切分按最长音节优先，而最长的不一定对。
+                // `zhenandaobushi` 的最长切分是 `zhen an …`，它读成「真难道不是」全靠 an → nan 的敲错边；
+                // 而 `zhe nan …` 是原样的「这难道不是」。
+                conversion = alternative;
             }
         }
         if conversion.has_placeholder() {

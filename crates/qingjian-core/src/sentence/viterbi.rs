@@ -7,8 +7,8 @@ use qingjian_dictionary::{Dictionary, Match, SyllablePattern};
 
 use super::{
     ABBREVIATED_SPAN_CANDIDATES, BEAM_WIDTH, Context, Conversion, LanguageModel,
-    MAX_WORD_SYLLABLES, MIN_PARTIAL_LETTERS, Personal, SPAN_CANDIDATES, SentenceWord, SpanCache,
-    SpanWord, fallback_log_prob, transition_log_prob,
+    MAX_WORD_SYLLABLES, Personal, SPAN_CANDIDATES, SentenceWord, SpanCache, SpanWord,
+    fallback_log_prob, transition_log_prob,
 };
 use crate::ranking::weight_bonus;
 
@@ -123,8 +123,8 @@ pub fn convert_with(
 
 /// 得分最高的前 `k` 条路径（最多束宽条，按得分降序，文本相同的只留一条）：给重打分用。
 ///
-/// `forced_tail` 为真时，末尾即使是不足 [`MIN_PARTIAL_LETTERS`] 的残缺音节也保留——用户用 `'`（`wo'...'ni'd`）
-/// 强制把这个单字母当成一个独立的简拼音节（的），不是上一字的未打完前缀。
+/// `forced_tail` 是早先给「用 `'` 显式隔开的末尾单字母」开的口子（`wo'...'ni'd`）；现在末尾残缺音节一律保留，
+/// 它已经冗余，留着参数只为不动调用方签名。
 #[allow(clippy::too_many_arguments)]
 pub fn convert_paths(
     dictionaries: &[&Dictionary],
@@ -145,10 +145,14 @@ pub fn convert_paths(
         return Vec::new();
     };
     let abbreviated_head = head.iter().any(|p| p.first().is_none_or(|t| !t.complete));
+    // 末尾的残缺音节一律留着（阈值降到「非空」）。早先的阈值是 MIN_PARTIAL_LETTERS（2），被它丢掉的
+    // 只有单字母——而单字母恰恰是最常用的简拼（`d` → 的、`l` → 了、`s` → 是、`z` → 在），用户敲出它
+    // 就是要那个字，丢掉会让「我告诉过你的」这类句子永远出不来（`wogaosuguonid` 想选都没得选）。
+    // 留着不会有噪音：匹配不到词的残缺音节走 UNKNOWN_LOG_PROB 兜底，分数极低，挤不到前面去。
     let positions = if keep_partial
         || last.complete
         || abbreviated_head
-        || last.text.len() >= MIN_PARTIAL_LETTERS
+        || !last.text.is_empty()
         || forced_tail
     {
         positions
@@ -476,10 +480,11 @@ mod tests {
         let mut patterns = complete(&["wo", "xiang"]);
         patterns.push(vec![SyllablePattern::prefix("ka")]);
         assert_eq!(unigram(&dictionary, &patterns).unwrap().text, "我想开");
-        // 全拼句子末尾的单字母多半是没打完的音节，不参与
+        // 末尾单字母也参与：它往往就是用户要的简拼（k → 开）。留着不吵别的候选——
+        // 匹配不到词的残缺音节走兜底分，排不上来。
         let mut patterns = complete(&["wo", "xiang"]);
         patterns.push(vec![SyllablePattern::prefix("k")]);
-        assert_eq!(unigram(&dictionary, &patterns).unwrap().text, "我想");
+        assert_eq!(unigram(&dictionary, &patterns).unwrap().text, "我想开");
     }
 
     fn abbreviated<'a>(letters: &[&'a str]) -> Vec<Vec<SyllablePattern<'a>>> {
@@ -664,8 +669,8 @@ mod tests {
         assert_eq!(cache.len(), again);
     }
 
-    /// 末尾不足阈值时，残缺音节默认被当成上一字没打完的前缀丢掉（`wo gao su guo ni d…` → 我告诉过你）；
-    /// 但只要用户用 `'` 把它单独打断（`wo'...'ni'd` → 的），它就是显式的简拼音节，必须保留。
+    /// 末尾的单字母当简拼保留（`wo gao su guo ni d` → 我告诉过你的）：早先它被当成「上一字没打完的
+    /// 前缀」丢掉，于是 的 / 了 这类最常用的简拼根本选不到。
     #[test]
     fn apostrophe_forced_tail_partial_is_kept() {
         let dictionary = Dictionary::parse(
@@ -697,7 +702,8 @@ mod tests {
             .next()
             .unwrap()
         };
-        assert_eq!(run(false).text, "我告诉过你");
+        // 末尾残缺一律保留（阈值降到「非空」），有没有那个 `'` 都一样
+        assert_eq!(run(false).text, "我告诉过你的");
         assert_eq!(run(true).text, "我告诉过你的");
     }
 
