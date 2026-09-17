@@ -43,7 +43,7 @@ fn matches_key(key: SwitchKey, vk: u32) -> bool {
         SwitchKey::Control => {
             vk == VK_CONTROL.0 as u32 || vk == VK_LCONTROL.0 as u32 || vk == VK_RCONTROL.0 as u32
         }
-        SwitchKey::CtrlSpace | SwitchKey::None => false,
+        SwitchKey::None => false,
     }
 }
 
@@ -81,15 +81,13 @@ mod tests {
     }
 
     #[test]
-    fn none_and_combo_never_fire_as_a_tap() {
+    fn none_never_fires_as_a_tap() {
         let tap = KeyTap::default();
-        // 「不切换」与「Ctrl+Space」（组合键，走保留键）都不是单击某个修饰键
-        for key in [SwitchKey::None, SwitchKey::CtrlSpace] {
-            tap.key_down(VK_SHIFT_LEFT, DOWN, key);
-            assert!(!tap.key_up(VK_SHIFT_LEFT, key));
-            tap.key_down(VK_CONTROL_LEFT, DOWN, key);
-            assert!(!tap.key_up(VK_CONTROL_LEFT, key));
-        }
+        // 「不切换」不算单击某个修饰键
+        tap.key_down(VK_SHIFT_LEFT, DOWN, SwitchKey::None);
+        assert!(!tap.key_up(VK_SHIFT_LEFT, SwitchKey::None));
+        tap.key_down(VK_CONTROL_LEFT, DOWN, SwitchKey::None);
+        assert!(!tap.key_up(VK_CONTROL_LEFT, SwitchKey::None));
     }
 
     #[test]

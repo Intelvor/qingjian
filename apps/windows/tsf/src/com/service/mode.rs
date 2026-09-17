@@ -4,21 +4,15 @@
 
 use std::time::Instant;
 
-use windows::Win32::UI::TextServices::{ITfKeystrokeMgr, ITfLangBarItemMgr};
+use windows::Win32::UI::TextServices::ITfLangBarItemMgr;
 use windows::core::Interface;
 
 use qingjian_platform::SwitchKey;
 use qingjian_platform::protocol::InputSettings;
 
 use super::TextService_Impl;
-use crate::com::key::preserved;
 use crate::com::log::log;
 use crate::com::mode::{self, ModeButton, conversion};
-
-/// 激活后多久内忽略系统写回的转换模式：msctf 在 TIP 激活后约 200–300 ms 会把 profile 存的
-/// 转换模式（缺省「非原生」= 关掉输入法）写回 compartment，不忽略的话每个应用一激活就被翻成英文模式。
-pub(super) const CONVERSION_RESTORE_GUARD: std::time::Duration =
-    std::time::Duration::from_millis(1200);
 
 impl TextService_Impl {
     /// 应用中英模式的两项设置：激活时与配置变更时都走这里。
@@ -29,7 +23,6 @@ impl TextService_Impl {
             self.mode_state.set_english(false);
             self.refresh_mode_indicator();
         }
-        self.sync_switch_preserved_key(switch_key);
     }
 
     /// 应用 Server 下发的按键行为设置：`OpenSession` 的回包给一次，之后每一拍 `SyncMode` 也都带着。
@@ -45,56 +38,6 @@ impl TextService_Impl {
             input.english_mode
         ));
         self.apply_mode_settings(input.english_mode, input.switch_mode);
-    }
-
-    /// Ctrl+Space 是组合键、走 TSF 保留键（与「翻译选中文字」同一套）；换成别的键就撤掉登记，
-    /// 免得白占住 Ctrl+Space。
-    ///
-    /// 但 Windows 缺省把「输入法/非输入法切换」也绑在 Ctrl+Space 上：那时系统先截走这个组合，
-    /// 我们的保留键根本收不到，而系统那条路会把转换模式翻成「非原生」、我们再按 conversion compartment
-    /// 同步成英文模式——两边各切一次正好抵消。这种情况下不登记自己的键，交给系统那条路。
-    fn sync_switch_preserved_key(&self, switch_key: SwitchKey) {
-        let configured = matches!(switch_key, SwitchKey::CtrlSpace);
-        let system_owns_it = configured && preserved::system_owns_ctrl_space();
-        let want = configured && !system_owns_it;
-        if want == self.switch_preserved.get() {
-            if system_owns_it {
-                log(
-                    "系统的「输入法/非输入法切换」占着 Ctrl+Space：切中英交给它（不再重复登记保留键）",
-                );
-            }
-            return;
-        }
-        let Some(thread_mgr) = self.thread_mgr.borrow().clone() else {
-            return;
-        };
-        let Ok(keystroke) = thread_mgr.cast::<ITfKeystrokeMgr>() else {
-            return;
-        };
-        if want {
-            match preserved::register_switch_mode(&keystroke, self.client_id.get()) {
-                Ok(()) => {
-                    self.switch_preserved.set(true);
-                    log("中英切换键 Ctrl+Space 已登记为保留键");
-                }
-                Err(error) => log(&format!("登记 Ctrl+Space 切换键失败: {error}")),
-            }
-        } else {
-            preserved::unregister_switch_mode(&keystroke);
-            self.switch_preserved.set(false);
-            if system_owns_it {
-                log(
-                    "系统的「输入法/非输入法切换」占着 Ctrl+Space：切中英交给它（已撤掉自己的保留键）",
-                );
-            }
-        }
-    }
-
-    /// 停用时撤掉 Ctrl+Space 的保留键登记。
-    pub(super) fn drop_switch_preserved_key(&self, keystroke: &ITfKeystrokeMgr) {
-        if self.switch_preserved.replace(false) {
-            preserved::unregister_switch_mode(keystroke);
-        }
     }
 
     /// 切模式：先把组着的内容原样落定，再刷指示器。

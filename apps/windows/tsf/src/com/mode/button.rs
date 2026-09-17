@@ -63,7 +63,6 @@ impl ITfLangBarItem_Impl for ModeButton_Impl {
             match self.state.switch_key() {
                 SwitchKey::Shift => "中 / 英（单击 Shift 切换）",
                 SwitchKey::Control => "中 / 英（单击 Ctrl 切换）",
-                SwitchKey::CtrlSpace => "中 / 英（Ctrl + Space 切换）",
                 SwitchKey::None => "中 / 英（未设切换键，点这里切换）",
             }
         };

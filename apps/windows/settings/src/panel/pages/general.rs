@@ -24,10 +24,9 @@ pub(crate) const SHUANGPIN: [(&str, &str); 5] = [
 ];
 
 /// 中英切换键：界面名 + 配置写法，与 [`SwitchKey::ALL`] 同序（有测试钉住）。
-pub(crate) const SWITCH_KEYS: [(&str, &str); 4] = [
+pub(crate) const SWITCH_KEYS: [(&str, &str); 3] = [
     (SwitchKey::Shift.label(), SwitchKey::Shift.key()),
     (SwitchKey::Control.label(), SwitchKey::Control.key()),
-    (SwitchKey::CtrlSpace.label(), SwitchKey::CtrlSpace.key()),
     (SwitchKey::None.label(), SwitchKey::None.key()),
 ];
 
@@ -132,7 +131,7 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
         ),
         field(
             "中英切换键",
-            "单击选中的键（或按 Ctrl + Space）在中英之间切换，改完立刻生效。打字时容易误触 Shift 的话改成「单击 Ctrl」；「不切换」时只剩任务栏 / 悬浮状态条上的「中」「英」按钮。注意 Ctrl + Space 常被编辑器用作代码补全等快捷键，选了它会把这些应用里的该组合键抢过来。",
+            "单击选中的键在中英之间切换，改完立刻生效。打字时容易误触 Shift 的话改成「单击 Ctrl」；「不切换」时只剩任务栏 / 悬浮状态条上的「中」「英」按钮。",
             string_combo(
                 &SWITCH_KEYS,
                 settings.config.shortcut.switch_mode.key(),
