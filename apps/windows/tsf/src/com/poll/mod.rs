@@ -151,20 +151,6 @@ fn poll_once(context: &PollContext) {
     }
 }
 
-/// 前台窗口属于本进程？轮询那一拍上报模式时用它区分「真前台」与「后台也在轮询」的应用——
-/// 后台那几个的上报会覆盖状态条（表现就是状态条中英来回横跳）。
-fn is_foreground() -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
-
-    let hwnd = unsafe { GetForegroundWindow() };
-    if hwnd.0.is_null() {
-        return false;
-    }
-    let mut pid = 0u32;
-    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-    pid == std::process::id()
-}
-
 /// 取一次状态条上点出的目标模式，顺路取回 Server 下发的按键行为设置。切模式会回报 Server、要借引擎，
 /// 所以先放掉借用再切。
 fn sync_mode(context: &PollContext) {
@@ -191,7 +177,7 @@ fn sync_mode(context: &PollContext) {
     // 「本应用是前台」时才跑（见 should_sync_mode），所以推上去的就是前台应用的模式。
     if let Some(english) = super::service::current_english()
         && let Some(client) = context.engine.borrow_mut().as_mut()
-        && let Err(error) = client.mode_changed(english, !is_foreground())
+        && let Err(error) = client.mode_changed(english, !super::service::is_foreground())
     {
         log(&format!("上报中英模式失败: {error}"));
     }
