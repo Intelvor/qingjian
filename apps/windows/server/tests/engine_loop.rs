@@ -941,6 +941,40 @@ fn raw_segment_takes_digits_and_keeps_the_space() {
 }
 
 #[test]
+fn digit_without_a_slot_joins_the_buffer() {
+    // 这一页没有第 9 格：数字是内容（`gpt9`），不再被静默吞掉；成了直输段之后空格整段上屏。
+    let mut router = router();
+    let (_, _, frame) = type_letters(&mut router, "gpt");
+    let shown = frame.candidates.items.len();
+    assert!(
+        (1..9).contains(&shown),
+        "样例词库下 gpt 的候选应不满 9 个：{shown}"
+    );
+    let (outcome, commit, frame) = press(&mut router, digit(9));
+    assert_eq!((outcome, commit), (KeyOutcome::Consumed, None));
+    assert_eq!(preedit(&frame), "gpt9");
+    let (_, commit, after) = press(&mut router, letter(' '));
+    assert_eq!(commit.as_deref(), Some("gpt9 "));
+    assert!(after.is_empty());
+    // 有这一格照常选词。
+    let (_, _, frame) = type_letters(&mut router, "ni");
+    let first = frame.candidates.items[0].text.clone();
+    let (_, commit, _) = press(&mut router, digit(1));
+    assert_eq!(commit, Some(first));
+}
+
+#[test]
+fn english_digit_without_a_slot_joins_the_word() {
+    let mut router = router();
+    let (_, _, frame) = type_english(&mut router, "hello");
+    let shown = frame.candidates.items.len();
+    assert!((1..9).contains(&shown), "hello 的候选应不满 9 个：{shown}");
+    let (outcome, commit, frame) = press(&mut router, digit_with(9, ENGLISH));
+    assert_eq!((outcome, commit), (KeyOutcome::Consumed, None));
+    assert_eq!(preedit(&frame), "hello9");
+}
+
+#[test]
 fn status_bar_follows_mode_when_enabled() {
     let (mut router, recorder) = status_router();
 
