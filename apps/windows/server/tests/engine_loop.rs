@@ -87,16 +87,31 @@ fn router_in(config: RouterConfig, app: Option<String>) -> Router {
     router
 }
 
+/// 会话的宿主 `(进程 id, 线程 id)`：按会话号编一个，够互相区分就行。
+/// Server 认「前台窗口属于哪个会话」靠的就是这两个数（见 `ui::foreground`）。
+fn host_of(session: SessionId) -> (u32, u32) {
+    (1000 + session.0 as u32 * 100, session.0 as u32)
+}
+
 /// 开一个会话并吃掉 Server 回的按键行为设置。
 fn open_session(router: &mut Router, session: SessionId, app: Option<String>) {
+    let (pid, tid) = host_of(session);
     match router.handle(ClientMessage::OpenSession {
         session,
         app,
+        pid,
+        tid,
         protocol: PROTOCOL_VERSION,
     }) {
         Some(ServerMessage::SessionOpened { .. }) => {}
         other => panic!("expected SessionOpened, got {other:?}"),
     }
+}
+
+/// 让 Router 以为「前台窗口是 `session` 的宿主」：报它的线程与进程，与真钩子报的线索同形。
+fn focus_window(router: &mut Router, session: SessionId) {
+    let (pid, tid) = host_of(session);
+    router.handle_foreground(vec![(tid, pid)]);
 }
 
 fn letter(c: char) -> KeyEvent {
@@ -372,11 +387,7 @@ fn commit_from_other_session_does_not_take_buffer() {
     let mut router = router();
     type_letters(&mut router, "ni");
     let other = SessionId(2);
-    router.handle(ClientMessage::OpenSession {
-        session: other,
-        app: None,
-        protocol: PROTOCOL_VERSION,
-    });
+    open_session(&mut router, other, None);
     // 别的会话拿不到这个会话的拼音，但残留组句一并清掉。
     assert_eq!(
         router.handle(ClientMessage::Commit { session: other }),
@@ -523,11 +534,7 @@ fn app_list_is_looked_up_per_session() {
     // 两个应用同时在线：切会话时按各自的 exe 名判断。
     let mut router = router_in_app("Code.exe");
     let notepad = SessionId(2);
-    router.handle(ClientMessage::OpenSession {
-        session: notepad,
-        app: Some("notepad.exe".to_owned()),
-        protocol: PROTOCOL_VERSION,
-    });
+    open_session(&mut router, notepad, Some("notepad.exe".to_owned()));
     let (_, _, frame) = key_result(router.handle(ClientMessage::Key {
         session: notepad,
         event: letter_with('h', ENGLISH),
@@ -695,11 +702,7 @@ fn learning_data_persists_to_user_dir() {
     })
     .unwrap();
     let mut router = Router::new(engine, RouterConfig::default());
-    router.handle(ClientMessage::OpenSession {
-        session: SESSION,
-        app: None,
-        protocol: PROTOCOL_VERSION,
-    });
+    open_session(&mut router, SESSION, None);
     let (_, _, frame) = type_letters(&mut router, "nihao");
     let position = frame
         .candidates
@@ -743,6 +746,22 @@ impl StatusSink for RecordingStatus {
     fn hide_status(&self) {
         self.0.lock().unwrap().push(None);
     }
+}
+
+/// 开着状态条、接好记录器的 Router（已开好 [`SESSION`] 那个会话）。
+fn status_router() -> (Router, RecordingStatus) {
+    let mut router = router_with(RouterConfig {
+        status_enabled: true,
+        ..RouterConfig::default()
+    });
+    let recorder = RecordingStatus::default();
+    router.set_status_sink(Box::new(recorder.clone()));
+    (router, recorder)
+}
+
+/// 某会话报来它的中英模式（DLL 在激活与切模式时发）。
+fn mode_changed(router: &mut Router, session: SessionId, english: bool) {
+    router.handle(ClientMessage::ModeChanged { session, english });
 }
 
 #[test]
@@ -872,31 +891,139 @@ fn hyphen_and_equals_are_inserted_by_us_instead_of_passed_through() {
 
 #[test]
 fn status_bar_follows_mode_when_enabled() {
-    let config = RouterConfig {
-        status_enabled: true,
-        ..RouterConfig::default()
-    };
-    let mut router = router_with(config);
-    let recorder = RecordingStatus::default();
-    router.set_status_sink(Box::new(recorder.clone()));
+    let (mut router, recorder) = status_router();
 
-    // 中文 → 英文：各刷一次；会话关掉（应用退出）不收；切成别的输入法才收起。
-    router.handle(ClientMessage::ModeChanged {
-        session: SESSION,
-        english: false,
-    });
-    router.handle(ClientMessage::ModeChanged {
-        session: SESSION,
-        english: true,
-    });
+    // 中文 → 英文：各刷一次。
+    mode_changed(&mut router, SESSION, false);
+    mode_changed(&mut router, SESSION, true);
+    // 前台会话关了（应用退出）：状态条失去依据，收起 —— 接着显示一个已经不存在的会话的模式就是骗人。
     router.handle(ClientMessage::CloseSession { session: SESSION });
     assert_eq!(
         recorder.calls(),
-        vec![Some("中".to_owned()), Some("英".to_owned())]
+        vec![Some("中".to_owned()), Some("英".to_owned()), None]
     );
+}
+
+#[test]
+fn status_bar_hides_when_the_foreground_session_switches_to_another_ime() {
+    let (mut router, recorder) = status_router();
+
+    mode_changed(&mut router, SESSION, false);
+    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
 
     router.handle(ClientMessage::ImeSwitched { session: SESSION });
     assert_eq!(recorder.calls().last(), Some(&None));
+}
+
+/// 中英模式按会话各记一份，状态条只显示前台那一份：切应用时跟着变，后台应用报来的带不跑它。
+#[test]
+fn status_bar_follows_the_foreground_app() {
+    let (mut router, recorder) = status_router();
+    let notepad = SessionId(2);
+    open_session(&mut router, notepad, Some("notepad.exe".to_owned()));
+
+    // 编辑器中文、记事本英文。还没有前台线索时报模式的这个先当上前台，所以显示编辑器的「中」。
+    mode_changed(&mut router, SESSION, false);
+    mode_changed(&mut router, notepad, true);
+    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+
+    // 切到记事本：翻成「英」——记事本没再报过模式，Server 记着它激活时那一份。
+    focus_window(&mut router, notepad);
+    assert_eq!(recorder.calls().last(), Some(&Some("英".to_owned())));
+
+    // 切回来还是「中」；这时后台的记事本报模式（配置改了之类）也不许把状态条带跑。
+    focus_window(&mut router, SESSION);
+    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    mode_changed(&mut router, notepad, false);
+    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+}
+
+/// 前台窗口不属于任何会话（那个应用没装青简 / 用的是别的输入法）：收起，别接着显示上一个应用的模式。
+#[test]
+fn status_bar_hides_when_the_foreground_window_has_no_session() {
+    let (mut router, recorder) = status_router();
+
+    mode_changed(&mut router, SESSION, false);
+    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+
+    router.handle_foreground(vec![(9999, 8888)]);
+    assert_eq!(recorder.calls().last(), Some(&None));
+}
+
+/// 商店应用的前台窗口是 `ApplicationFrameHost` 的框架窗，线程号对不上任何会话；
+/// 真正装了青简的窗口在它的后代里，退一步按进程 id 也能认出来。
+#[test]
+fn foreground_window_falls_back_to_the_process_id() {
+    let (mut router, recorder) = status_router();
+
+    mode_changed(&mut router, SESSION, false);
+    router.handle_foreground(vec![(9999, 8888)]);
+    assert_eq!(recorder.calls().last(), Some(&None));
+
+    let (pid, _) = host_of(SESSION);
+    router.handle_foreground(vec![(9999, 8888), (7, pid)]);
+    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+}
+
+/// 状态条上点出的目标模式只交给前台会话：所有装了青简的应用都在轮询，谁先来给谁就切进别的应用里去了。
+#[test]
+fn pending_mode_goes_only_to_the_foreground_session() {
+    let mut router = router_with(RouterConfig {
+        status_enabled: true,
+        ..RouterConfig::default()
+    });
+    let notepad = SessionId(2);
+    open_session(&mut router, notepad, None);
+    mode_changed(&mut router, SESSION, false);
+    mode_changed(&mut router, notepad, false);
+    focus_window(&mut router, SESSION);
+
+    router.handle_status_event(StatusEvent::ToggleMode);
+    // 后台那个会话来问：不给。
+    assert_eq!(
+        router.handle(ClientMessage::SyncMode { session: notepad }),
+        Some(ServerMessage::ModeSync {
+            session: notepad,
+            english: None,
+            input: InputSettings::default(),
+        })
+    );
+    // 前台会话来问：给它。
+    assert_eq!(
+        router.handle(ClientMessage::SyncMode { session: SESSION }),
+        Some(ServerMessage::ModeSync {
+            session: SESSION,
+            english: Some(true),
+            input: InputSettings::default(),
+        })
+    );
+}
+
+/// 换了前台，上一个应用还没取走的切换请求作废，别把它带给新前台。
+#[test]
+fn pending_mode_is_dropped_when_the_foreground_changes() {
+    let mut router = router_with(RouterConfig {
+        status_enabled: true,
+        ..RouterConfig::default()
+    });
+    let notepad = SessionId(2);
+    open_session(&mut router, notepad, None);
+    mode_changed(&mut router, SESSION, false);
+    mode_changed(&mut router, notepad, false);
+    focus_window(&mut router, SESSION);
+
+    router.handle_status_event(StatusEvent::ToggleMode);
+    focus_window(&mut router, notepad);
+    for session in [SESSION, notepad] {
+        assert_eq!(
+            router.handle(ClientMessage::SyncMode { session }),
+            Some(ServerMessage::ModeSync {
+                session,
+                english: None,
+                input: InputSettings::default(),
+            })
+        );
+    }
 }
 
 #[test]
@@ -1206,11 +1333,7 @@ fn router_with_scorer(preferred: &'static str) -> Router {
         .expect("assemble engine from sample data");
     engine.set_async_sentence_scorer(Some(Box::new(Prefers(preferred))));
     let mut router = Router::new(engine, RouterConfig::default());
-    router.handle(ClientMessage::OpenSession {
-        session: SESSION,
-        app: None,
-        protocol: PROTOCOL_VERSION,
-    });
+    open_session(&mut router, SESSION, None);
     router
 }
 

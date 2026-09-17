@@ -22,17 +22,22 @@ pub struct EngineClient<S> {
 
 impl<S: Read + Write> EngineClient<S> {
     /// 开一个会话；Server 随即回一次按键行为设置（切换键、内置英文模式），带出来交给调用方。
-    /// `app` 是宿主应用的 exe 文件名，Server 据此查按应用的设置。
+    /// `app` 是宿主应用的 exe 文件名，Server 据此查按应用的设置；
+    /// `pid` / `tid` 是宿主进程与线程 id，Server 拿它们把「前台窗口变了」对到具体会话上。
     pub fn open(
         mut stream: S,
         session: SessionId,
         app: Option<String>,
+        pid: u32,
+        tid: u32,
     ) -> Result<(Self, InputSettings), ClientError> {
         write_message(
             &mut stream,
             &ClientMessage::OpenSession {
                 session,
                 app,
+                pid,
+                tid,
                 protocol: PROTOCOL_VERSION,
             },
         )?;

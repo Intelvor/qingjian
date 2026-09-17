@@ -14,9 +14,11 @@ impl Router {
             ClientMessage::OpenSession {
                 session,
                 app,
+                pid,
+                tid,
                 protocol,
             } => {
-                tracing::debug!(?session, app, protocol, "会话打开");
+                tracing::debug!(?session, app, pid, tid, protocol, "会话打开");
                 if protocol != PROTOCOL_VERSION {
                     tracing::warn!(
                         ?session,
@@ -36,6 +38,10 @@ impl Router {
                     SessionInfo {
                         app,
                         private: false,
+                        pid,
+                        tid,
+                        // 模式等 DLL 紧接着那条 ModeChanged 报来（激活时必发一次）。
+                        english: None,
                     },
                 );
                 // 按键行为设置回一次，让 DLL 不必自己读配置文件。**只回过协议版本对得上的**：
@@ -93,17 +99,17 @@ impl Router {
             }
             ClientMessage::ModeChanged { session, english } => {
                 tracing::debug!(?session, english, "中英模式");
-                self.handle_mode_changed(english);
+                self.handle_mode_changed(session, english);
                 None
             }
             ClientMessage::SyncMode { session } => Some(ServerMessage::ModeSync {
                 session,
-                english: self.take_pending_mode(),
+                english: self.take_pending_mode(session),
                 input: self.input_settings(),
             }),
             ClientMessage::ImeSwitched { session } => {
                 tracing::debug!(?session, "切成了别的输入法");
-                self.handle_ime_switched();
+                self.handle_ime_switched(session);
                 None
             }
             ClientMessage::CloseSession { session } => {
@@ -112,6 +118,7 @@ impl Router {
                     self.reset_composition();
                     self.focused = None;
                 }
+                self.drop_foreground(session);
                 self.flush_learning();
                 tracing::debug!(?session, "会话关闭");
                 None

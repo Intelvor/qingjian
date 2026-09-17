@@ -17,6 +17,16 @@ pub enum ClientMessage {
         #[serde(default)]
         app: Option<String>,
 
+        /// 宿主进程 id。系统报来「前台窗口变了」时，Server 拿前台窗口的归属与它对上，
+        /// 才知道悬浮状态条该显示哪个会话的中英模式。老 DLL 不带此字段，读成 0（对不上任何窗口）。
+        #[serde(default)]
+        pid: u32,
+
+        /// 宿主线程 id（TSF 就在这个线程上激活）。比进程 id 准：同一个应用可以有多个 TSF 线程，
+        /// 各自的中英模式互不相干。老 DLL 不带此字段，读成 0。
+        #[serde(default)]
+        tid: u32,
+
         /// DLL 编译时的 [`super::PROTOCOL_VERSION`]。升级安装后旧 DLL 仍留在没重启的应用里，
         /// Server 对不上只记警告照常服务；老 DLL 不带此字段，读成 0。
         #[serde(default)]
@@ -107,9 +117,12 @@ pub enum ClientMessage {
         session: SessionId,
     },
 
-    /// 中英模式变化 / 获得焦点：DLL 把当前会话的持久中英模式推给 Server（供悬浮状态条显示当前中 / 英）。
-    /// 单击 Shift 切换、激活、获焦时都发一次；不等回话（模式只在 DLL 侧，Server 据此刷状态条、并当作
-    /// 「这个会话此刻聚焦」）。双拼方案 Server 从自己的配置里知道，不必带。
+    /// 中英模式变化：DLL 把**本会话**的持久中英模式推给 Server，Server 记在这个会话名下。
+    /// 单击 Shift 切换、激活时都发一次；不等回话（模式只在 DLL 侧）。
+    ///
+    /// 状态条显示的是**前台会话**那一份——前台是谁由 Server 侧的 `EVENT_SYSTEM_FOREGROUND` 钩子认定，
+    /// 不看这条消息从哪来，所以后台应用报来的模式不会把状态条带跑。
+    /// 双拼方案 Server 从自己的配置里知道，不必带。
     ModeChanged {
         /// 会话标识。
         session: SessionId,
@@ -118,8 +131,11 @@ pub enum ClientMessage {
         english: bool,
     },
 
-    /// 前台、没在组句时 DLL 定时问一次：用户在悬浮状态条上点过「中 / 英」没有。中英模式只在 DLL 侧，
+    /// DLL 定时问一次：用户在悬浮状态条上点过「中 / 英」没有。中英模式只在 DLL 侧，
     /// Server 只能记下「想切成哪个」等 DLL 来取，回 [`super::ServerMessage::ModeSync`]。
+    ///
+    /// 每个加载了青简的应用都在问，而那个目标模式只属于前台那一个 —— **Server 只把它交给前台会话**，
+    /// 其余一律回 `None`，否则后台应用会先把模式切走、用户在前台看不到任何变化。
     SyncMode {
         /// 会话标识。
         session: SessionId,

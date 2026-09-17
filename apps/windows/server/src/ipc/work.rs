@@ -14,4 +14,8 @@ pub enum Work {
 
     /// UI 线程发来的候选窗口操作（鼠标点选）。
     Candidate(CandidateEvent),
+
+    /// UI 线程发来的「前台窗口变了」（WinEvent 钩子）：前台窗口的归属线索 `(线程 id, 进程 id)`，
+    /// 按可信度从高到低排。Router 拿它对会话表，认出哪个会话在前台（悬浮状态条跟它走）。
+    Foreground(Vec<(u32, u32)>),
 }

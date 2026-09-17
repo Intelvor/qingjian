@@ -3,9 +3,11 @@
 //!
 //! HWND 线程亲和：Router 在工人线程上产出内容，经通道 + `PostThreadMessageW` 唤醒交给 UI 线程应用。
 //! 线程句柄是 [`UiHandle`]，命令在 [`command`]，候选窗口在 [`candidates`]，状态条在 [`status`]，分层窗口合成在 [`layered`]。
+//! 本线程还装着「前台窗口变了」的 WinEvent 钩子（[`foreground`]），状态条靠它跟前台应用的中英模式同步。
 
 mod candidates;
 mod command;
+mod foreground;
 mod layered;
 mod monitor;
 mod painter;
@@ -32,6 +34,7 @@ use qingjian_platform::protocol::{Frame, ScreenRect};
 
 use self::candidates::CandidateWindow;
 use self::command::UiCommand;
+use self::foreground::ForegroundHook;
 use self::painter::{Painter, SharedPainter};
 use self::status::StatusBar;
 use crate::dispatch::{
@@ -43,6 +46,10 @@ pub type StatusEvents = Box<dyn Fn(StatusEvent) + Send>;
 
 /// 候选窗口上的操作（点选候选、点整句补全）回给 Router 的回调，UI 线程上调。
 pub type CandidateEvents = Box<dyn Fn(CandidateEvent) + Send>;
+
+/// 「前台窗口变了」回给 Router 的回调，UI 线程上调（见 [`foreground`]）。
+/// 参数是前台窗口的归属线索 `(线程 id, 进程 id)`，按可信度从高到低排。
+pub type ForegroundEvents = Box<dyn Fn(Vec<(u32, u32)>) + Send>;
 
 /// 唤醒 UI 线程去排空命令队列的线程消息。
 const WM_WAKE: u32 = WM_APP;
@@ -59,13 +66,25 @@ pub struct UiHandle {
 
 impl UiHandle {
     /// 起 UI 线程并等它建好候选窗口。失败返回 `Err`，调用方退化为不画。
-    pub fn spawn(on_status: StatusEvents, on_candidate: CandidateEvents) -> Result<Self> {
+    pub fn spawn(
+        on_status: StatusEvents,
+        on_candidate: CandidateEvents,
+        on_foreground: ForegroundEvents,
+    ) -> Result<Self> {
         // 用 Option<u32> 而非 Result 回报，免得 windows Error 跨线程。
         let (ready_tx, ready_rx) = mpsc::channel::<Option<u32>>();
         let (command_tx, command_rx) = mpsc::channel::<UiCommand>();
         thread::Builder::new()
             .name("qingjian-candidates".to_owned())
-            .spawn(move || run(command_rx, &ready_tx, on_status, on_candidate))
+            .spawn(move || {
+                run(
+                    command_rx,
+                    &ready_tx,
+                    on_status,
+                    on_candidate,
+                    on_foreground,
+                )
+            })
             .map_err(|_| Error::from(E_FAIL))?;
         match ready_rx.recv() {
             Ok(Some(thread_id)) => Ok(Self {
@@ -120,6 +139,7 @@ fn run(
     ready: &Sender<Option<u32>>,
     on_status: StatusEvents,
     on_candidate: CandidateEvents,
+    on_foreground: ForegroundEvents,
 ) {
     // 按物理像素定位，与应用报来的组句屏幕矩形对齐；已设过会失败，忽略。
     let _ = unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
@@ -145,6 +165,15 @@ fn run(
     if ready.send(Some(thread_id)).is_err() {
         return;
     }
+    // 前台窗口跟踪：状态条要跟前台应用的中英模式走。装不上就退化成「只按按键认前台」——
+    // 打字时仍然对，光切窗口不打字时不跟。钩子要活到本线程结束，所以绑在这里。
+    let _foreground_hook = match ForegroundHook::install(on_foreground) {
+        Ok(hook) => Some(hook),
+        Err(error) => {
+            tracing::error!(%error, "装前台窗口钩子失败，状态条只在按键时跟随前台");
+            None
+        }
+    };
     let mut msg = MSG::default();
     loop {
         let got = unsafe { GetMessageW(&mut msg, None, 0, 0) };

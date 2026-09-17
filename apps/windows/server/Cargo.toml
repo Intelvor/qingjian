@@ -46,6 +46,8 @@ windows = { version = "0.62.2", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Pipes",
     "Win32_System_Threading",
+    # 只为 SetWinEventHook / UnhookWinEvent（前台窗口跟踪，见 src/ui/foreground.rs）
+    "Win32_UI_Accessibility",
     "Win32_UI_Controls",
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",

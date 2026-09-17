@@ -53,6 +53,8 @@ fn serve_runs_the_open_type_loop_over_a_stream() {
         &ClientMessage::OpenSession {
             session: SESSION,
             app: None,
+            pid: 0,
+            tid: 0,
             protocol: PROTOCOL_VERSION,
         },
     )

@@ -60,6 +60,8 @@ fn named_pipe_round_trips_the_open_type_loop() {
         &ClientMessage::OpenSession {
             session: SESSION,
             app: None,
+            pid: 0,
+            tid: 0,
             protocol: PROTOCOL_VERSION,
         },
     )

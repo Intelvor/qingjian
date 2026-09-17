@@ -112,11 +112,12 @@ pub struct Router {
     /// 悬浮状态条输出端；Windows 上由 [`crate::ui`] 注入。
     status: Box<dyn StatusSink>,
 
-    /// 状态条要显示的中英模式；`None` 表示青简没在前台（还没有会话报过模式 / 切成了别的输入法），不显示。
-    /// 应用退出不影响它：状态条是桌面常驻的，只跟「当前输入法是不是青简」走。
-    status_mode: Option<bool>,
+    /// 前台窗口所属的会话，由 [`crate::ui`] 的 `EVENT_SYSTEM_FOREGROUND` 钩子认出来
+    /// （认不出时为 `None`：前台应用没装青简、用的是别的输入法，或老 DLL 没报进程 / 线程 id）。
+    /// 状态条显示的就是这个会话的中英模式，所以切应用时它跟着走。
+    foreground: Option<SessionId>,
 
-    /// 状态条上点出来、还没被 DLL 用 `SyncMode` 取走的目标模式。
+    /// 状态条上点出来、还没被前台 DLL 用 `SyncMode` 取走的目标模式；前台一变就作废。
     pending_mode: Option<bool>,
 
     /// 云联想配置：「☁」格翻转 `enabled` 后按它换 Predictor，热加载时跟着 `[predict]` 走。
@@ -168,7 +169,7 @@ impl Router {
             reload: None,
             candidates: Box::new(NoopSink),
             status: Box::new(NoopStatusSink),
-            status_mode: None,
+            foreground: None,
             pending_mode: None,
             predict: PredictConfig::default(),
             last_rect: None,

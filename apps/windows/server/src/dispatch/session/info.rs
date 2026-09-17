@@ -8,4 +8,14 @@ pub(crate) struct SessionInfo {
 
     /// 该会话当前落在私密输入框里（DLL 随 `ClientMessage::Privacy` 报来）；焦点切回来时按它重设 Engine。
     pub(crate) private: bool,
+
+    /// 宿主进程 id；老 DLL 不报，是 0（对不上任何窗口）。
+    pub(crate) pid: u32,
+
+    /// 宿主线程 id（TSF 在这条线程上激活）；老 DLL 不报，是 0。
+    pub(crate) tid: u32,
+
+    /// 该会话最近报来的中英模式（`true` 英文）；还没报过、或已切成别的输入法时为 `None`。
+    /// 中英模式是**每会话一份**的：状态条显示前台会话那一份，后台应用报来的只记不显。
+    pub(crate) english: Option<bool>,
 }
