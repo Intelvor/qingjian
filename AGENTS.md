@@ -52,4 +52,4 @@ Windows 本机只 `cargo check --target x86_64-pc-windows-gnu`，真编译与真
 
 交流用中文。
 
-项目长期记忆存放于 MEMORY.md ，记得时刻更新 MEMORY.md 。
+项目长期记忆存放于 MEMORY.md ，记得时刻更新 MEMORY.md 。**一切不确定的动作先不要自作主张，先直接阅读该文件是否记载！遇到有价值、值得注意的内容立刻写入该文件！**
