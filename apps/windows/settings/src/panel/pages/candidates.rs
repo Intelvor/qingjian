@@ -95,7 +95,7 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
         ),
         field(
             "悬浮状态条",
-            "桌面上常驻、可拖动的小条：点「中 / 英」切换模式（开着双拼时还显示方案名），点「，。」切全角 / 半角标点，点齿轮打开设置。只在当前输入法是青简时显示，拖到哪下次还在哪。",
+            "可拖动的小条：点「中 / 英」切换模式（开着双拼时还显示方案名），点「，。」切全角 / 半角标点，点齿轮打开设置。跟着前台应用走，显示的就是前台应用当前的模式，前台应用没在用青简时收起；拖到哪下次还在哪。",
             ToggleSwitch::new()
                 .is_on(settings.config.status_bar.enabled)
                 .on_toggled(context.callback(Message::StatusBar)),
