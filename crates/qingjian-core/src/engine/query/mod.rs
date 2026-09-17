@@ -561,6 +561,10 @@ impl Engine {
     ) -> Option<Conversion> {
         let dictionaries = self.all_dictionaries();
         let expanded = self.expand_positions(patterns, typos);
+        // 末尾单字母简拼 + 前面带 `'`（`wo'...'ni'd` → 的）：用户显式把它当独立音节，不是上一字没打完的前缀
+        let forced_tail = patterns.last().is_some_and(|p| {
+            !p.complete && self.composition.scope().ends_with(&format!("'{}", p.text))
+        });
         let k = if self.has_sentence_scorer() {
             RESCORE_PATHS
         } else {
@@ -570,6 +574,7 @@ impl Engine {
             &dictionaries,
             &expanded.positions(),
             whole,
+            forced_tail,
             k,
             &*self.language_model,
             self.personal(),

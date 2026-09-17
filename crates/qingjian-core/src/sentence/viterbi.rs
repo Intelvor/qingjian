@@ -109,6 +109,7 @@ pub fn convert_with(
         dictionaries,
         positions,
         keep_partial,
+        false,
         1,
         model,
         personal,
@@ -121,11 +122,15 @@ pub fn convert_with(
 }
 
 /// 得分最高的前 `k` 条路径（最多束宽条，按得分降序，文本相同的只留一条）：给重打分用。
+///
+/// `forced_tail` 为真时，末尾即使是不足 [`MIN_PARTIAL_LETTERS`] 的残缺音节也保留——用户用 `'`（`wo'...'ni'd`）
+/// 强制把这个单字母当成一个独立的简拼音节（的），不是上一字的未打完前缀。
 #[allow(clippy::too_many_arguments)]
 pub fn convert_paths(
     dictionaries: &[&Dictionary],
     positions: &[Vec<SyllablePattern<'_>>],
     keep_partial: bool,
+    forced_tail: bool,
     k: usize,
     model: &dyn LanguageModel,
     personal: Personal<'_>,
@@ -144,6 +149,7 @@ pub fn convert_paths(
         || last.complete
         || abbreviated_head
         || last.text.len() >= MIN_PARTIAL_LETTERS
+        || forced_tail
     {
         positions
     } else {
@@ -656,6 +662,43 @@ mod tests {
         let again = cache.len();
         assert_eq!(run(&mut cache, &["wo", "xiang", "qu", "chi"]), fresh);
         assert_eq!(cache.len(), again);
+    }
+
+    /// 末尾不足阈值时，残缺音节默认被当成上一字没打完的前缀丢掉（`wo gao su guo ni d…` → 我告诉过你）；
+    /// 但只要用户用 `'` 把它单独打断（`wo'...'ni'd` → 的），它就是显式的简拼音节，必须保留。
+    #[test]
+    fn apostrophe_forced_tail_partial_is_kept() {
+        let dictionary = Dictionary::parse(
+            "我\two\t900000\n告\tgao\t500000\n诉\tsu\t400000\n过\tguo\t300000\n你\tni\t200000\n的\tde\t100000\n",
+        )
+        .unwrap();
+        let positions = vec![
+            vec![SyllablePattern::complete("wo")],
+            vec![SyllablePattern::complete("gao")],
+            vec![SyllablePattern::complete("su")],
+            vec![SyllablePattern::complete("guo")],
+            vec![SyllablePattern::complete("ni")],
+            vec![SyllablePattern::prefix("d")],
+        ];
+        let run = |forced_tail: bool| {
+            convert_paths(
+                &[&dictionary],
+                &positions,
+                false,
+                forced_tail,
+                1,
+                &NoLanguageModel,
+                Personal::NONE,
+                |_| 0,
+                |_, _| 0.0,
+                &mut SpanCache::default(),
+            )
+            .into_iter()
+            .next()
+            .unwrap()
+        };
+        assert_eq!(run(false).text, "我告诉过你");
+        assert_eq!(run(true).text, "我告诉过你的");
     }
 
     /// 敲错变体是带代价的边：`gan xi` 在 `gan` 位多一种写法 `guan`（代价 4.5），原样凑不出像样的句子时 关系 胜出，
