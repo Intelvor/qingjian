@@ -2,7 +2,8 @@
 //!
 //! 键名跟着当前配置渲染——翻页键对、译词 / 删候选的修饰键、翻译组合键、前缀键
 //! （表达式 / 问字 / 续写）、中英切换键、注音开关，都会按「通用」「输入行为」「快捷键」
-//! 「云服务」页里选的那些变。参考文档见仓库 `docs/user/getting-started/keys.md`。
+//! 「云服务」页里选的那些变。**双拼下前缀键要先按住 Shift**（`v` `u` `i` 在那几套方案里
+//! 都是音节键），也按「通用」页选的方案渲染。参考文档见仓库 `docs/user/getting-started/keys.md`。
 
 use qingjian_platform::{KeyCombo, Modifiers, SwitchKey};
 use windows_reactor::*;
@@ -86,11 +87,21 @@ fn page_keys_name(page_keys: &str) -> &'static str {
     }
 }
 
+/// 前缀键的名字：双拼下 `v` / `u` / `i` 都是音节键，要按住 Shift 敲大写（见 `ModeKeys::shifted`）。
+fn prefix_name(key: char, shuangpin: bool) -> String {
+    if shuangpin {
+        format!("Shift + {}", key.to_ascii_uppercase())
+    } else {
+        key.to_string()
+    }
+}
+
 pub(crate) fn view(settings: &Settings, _context: &mut ViewContext<Settings>) -> View {
     let g = &settings.config.general;
     let s = &settings.config.shortcut;
     let p = &settings.config.predict;
     let m = s.mode;
+    let shuangpin = g.shuangpin().is_some();
     let (first_translation, second_translation) = s.translation_keys();
     let delete_candidate = s.delete_keys();
 
@@ -132,7 +143,8 @@ pub(crate) fn view(settings: &Settings, _context: &mut ViewContext<Settings>) ->
             key_row(
                 "1 – 9",
                 format!(
-                    "上屏当前页第 N 个候选（每页 {} 个，「通用」页可改）。",
+                    "上屏当前页第 N 个候选（每页 {} 个，「通用」页可改）；当前页没有第 N 个时，\
+                     这个数字当内容接在字母后面（敲 gpt6 就出 gpt6）。",
                     g.page_size
                 ),
             ),
@@ -195,6 +207,30 @@ pub(crate) fn view(settings: &Settings, _context: &mut ViewContext<Settings>) ->
         ],
     ));
 
+    // 英文模式下选词与翻页跟中文一样（1.0.6 起）：空格选高亮、数字选第 N 个、翻页键翻页。
+    // 「内置英文模式」关着时这一路用不上，但照「全貌」的规矩仍整节列出，只在末尾说明。
+    let mut english_rows = vec![
+        key_row("空格 / Tab", "上屏高亮那个候选；没有候选时就是空格。"),
+        key_row(
+            "1 – 9",
+            "选当前页第 N 个候选；当前页没有第 N 个时，这个数字当内容接在字母后面（敲 gpt6 就出 gpt6）。",
+        ),
+        key_row(
+            format!("{}、↑ ↓", page_keys_name(&g.page_keys)),
+            "翻页 / 移动高亮，到页边自动翻页。翻页键对在「快捷键」页改。",
+        ),
+        key_row(
+            "Enter",
+            "把所敲的字母原样上屏；带数字的标识符可以先 Enter 输出字母再敲数字。",
+        ),
+    ];
+    english_rows.push(note(if g.english_mode {
+        "Caps Lock 亮着就是英文模式，其中大小写照敲；选词、翻页与中文模式一致。"
+    } else {
+        "「内置英文模式」现在关着，这一节用不上；要打英文请按 Win + Space 切到别的输入法。"
+    }));
+    sections.push(section("英文模式", english_rows));
+
     let question_hint = format!("用拼音问一个字或一个短问题（需要云联想）。{cloud_hint}");
     let continue_hint = format!(
         "让云端接着光标前后的文字往下写一段（前缀本身不上屏），再按一次 Tab 采用。{cloud_hint}"
@@ -202,15 +238,22 @@ pub(crate) fn view(settings: &Settings, _context: &mut ViewContext<Settings>) ->
     let mut prefix_rows = vec![
         key_row("rq / sj / xq", "日期 / 时间 / 星期。"),
         key_row(
-            format!("{} + 算式或数字", m.expression),
-            "算了算式、出中文数字（v1+2 出 3，v123 出一百二十三）。",
+            format!("{} + 算式或数字", prefix_name(m.expression, shuangpin)),
+            "算了算式、出中文数字与金额（1+2 出 3，123 出一百二十三元整，\
+             123.5 出一百二十三点五 / 壹佰贰拾叁元伍角）。",
         ),
         key_row(
-            format!("{} + 四位数", m.question),
-            "出该 Unicode 码点对应的字符（u4e00 出「一」）。",
+            format!("{} + 四位数", prefix_name(m.question, shuangpin)),
+            "出该 Unicode 码点对应的字符（4e00 出「一」）。",
         ),
-        key_row(format!("{} + 拼音", m.question), question_hint),
-        key_row(format!("{} 再按 Tab", m.continue_key), continue_hint),
+        key_row(
+            format!("{} + 拼音", prefix_name(m.question, shuangpin)),
+            question_hint,
+        ),
+        key_row(
+            format!("{} 再按 Tab", prefix_name(m.continue_key, shuangpin)),
+            continue_hint,
+        ),
     ];
     if m.question_mark {
         prefix_rows.push(key_row(
@@ -218,7 +261,15 @@ pub(crate) fn view(settings: &Settings, _context: &mut ViewContext<Settings>) ->
             "没在输入拼音时敲 ? 也进问字；后面跟的不是字母时会还原成问号。",
         ));
     }
-    prefix_rows.push(note("前缀键在「快捷键」页改，三个键不能相同。"));
+    // 双拼下这三个字母是音节键，前缀要按住 Shift；注音下它们被大千布局占作音符键，带前缀的都用不了。
+    let prefix_note = if g.zhuyin {
+        "前缀键在「快捷键」页改，三个键不能相同。注音下 v / u / i 都是键盘布局里的音符键，这三条前缀用不了。"
+    } else if shuangpin {
+        "前缀键在「快捷键」页改，三个键不能相同；双拼下要先按住 Shift，因为 v / u / i 在双拼里都是音节键。"
+    } else {
+        "前缀键在「快捷键」页改，三个键不能相同。"
+    };
+    prefix_rows.push(note(prefix_note));
     sections.push(section("前缀键", prefix_rows));
 
     sections.push(section(
