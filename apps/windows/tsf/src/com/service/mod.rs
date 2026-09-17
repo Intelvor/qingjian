@@ -96,6 +96,16 @@ fn with_active(f: impl FnOnce(&TextService_Impl)) {
     }
 }
 
+/// 本线程激活的文本服务当前的中英模式；没激活时为 `None`。轮询那一拍用它把模式推给 Server。
+pub(super) fn current_english() -> Option<bool> {
+    ACTIVE.with(|active| {
+        active
+            .borrow()
+            .as_ref()
+            .map(|service| service.mode_state.english())
+    })
+}
+
 /// 用户点了语言栏的中 / 英按钮（见 [`ModeButton`](crate::com::mode::ModeButton)）：翻转模式。
 pub(super) fn toggle_mode() {
     with_active(|service| service.set_english_mode(!service.mode_state.english()));
