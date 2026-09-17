@@ -17,7 +17,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Error, PCWSTR, Result, w};
 
-use self::context::PollContext;
+use self::context::{PollContext, should_sync_mode};
 use super::composition::Shared;
 use super::log::log;
 use super::service::SharedClient;
@@ -116,10 +116,7 @@ fn poll_once(context: &PollContext) {
     context.ticks.set(tick);
     let translating = context.shared.translating();
     let composing = context.shared.composing();
-    // 切中英模式的请求**组句中也要看**：否则用户点了状态条之后马上开始打字，那个目标模式会一直
-    // 挂在 Server 那边等不到取回——表现就是「点『中 / 英』有时没反应」，要等这句敲完才生效。
-    // 没组句时仍只在前台应用里问（状态条常驻桌面，后台应用不需要）。
-    if tick.is_multiple_of(MODE_SYNC_EVERY) && (composing || context.shared.foreground()) {
+    if should_sync_mode(context) {
         sync_mode(context);
     }
     if !composing && !translating {
@@ -157,6 +154,9 @@ fn poll_once(context: &PollContext) {
 /// 取一次状态条上点出的目标模式，顺路取回 Server 下发的按键行为设置。切模式会回报 Server、要借引擎，
 /// 所以先放掉借用再切。
 fn sync_mode(context: &PollContext) {
+    if !should_sync_mode(context) {
+        return;
+    }
     let Ok(mut guard) = context.engine.try_borrow_mut() else {
         return;
     };

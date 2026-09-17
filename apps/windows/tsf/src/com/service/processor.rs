@@ -82,7 +82,6 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         }
         self.shared.reset();
         self.shared.take_server_stale();
-        self.shared.set_foreground(false);
         log("青简 TSF 已停用");
         Ok(())
     }

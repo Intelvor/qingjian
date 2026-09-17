@@ -26,9 +26,6 @@ pub(crate) struct Shared {
     /// 组句被应用强行终止过：拼音已成普通文本，但 Server 的缓冲还在，下次说话前先让它清空。
     server_stale: Cell<bool>,
 
-    /// 本线程当前有键盘焦点（`OnSetFocus`）；轮询定时器只在前台时问状态条的切模式请求。
-    foreground: Cell<bool>,
-
     /// 与 `TextService` 共用的引擎客户端；DLL 侧结束组句时要通知 Server 收候选窗口（它无从知晓）。
     client: SharedClient,
 }
@@ -42,17 +39,8 @@ impl Shared {
             translating: Cell::new(false),
             last_context: RefCell::new(None),
             server_stale: Cell::new(false),
-            foreground: Cell::new(false),
             client,
         })
-    }
-
-    pub(crate) fn foreground(&self) -> bool {
-        self.foreground.get()
-    }
-
-    pub(crate) fn set_foreground(&self, value: bool) {
-        self.foreground.set(value);
     }
 
     pub(crate) fn last_context(&self) -> Option<ITfContext> {

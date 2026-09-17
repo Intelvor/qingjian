@@ -20,7 +20,6 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     /// 获焦：补一次连接（Server 起晚了 / 重启过），并刷指示器（系统会在切换焦点时重置它）。
     /// 失焦：把敲了一半的拼音原样落定（对应 macOS 的 `commitComposition`）。
     fn OnSetFocus(&self, fforeground: BOOL) -> Result<()> {
-        self.shared.set_foreground(fforeground.as_bool());
         if fforeground.as_bool() {
             self.ensure_connected();
             self.refresh_mode_indicator();
