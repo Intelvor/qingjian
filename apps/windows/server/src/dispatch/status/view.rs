@@ -9,8 +9,8 @@ pub struct StatusView {
     /// 是否啟用大千注音。
     pub zhuyin: bool,
 
-    /// 开着双拼时的方案名，中文格里跟在「中」后面。
-    pub scheme: Option<String>,
+    /// Caps Lock 亮着（大写锁定）：模式格前面加一个「A」。
+    pub caps: bool,
 
     /// 当前模式的全角标点开着（中英各记一份配置）；关着时格子显示 `,.` 画成灰的。
     pub full_width: bool,

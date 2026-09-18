@@ -102,9 +102,10 @@ impl TextService_Impl {
     }
 
     fn note_key_up(&self, vk: u32) {
-        // Caps Lock 亮灭要刷任务栏的中 / 英图标（亮着显示「A」）
+        // Caps Lock 亮灭：刷任务栏的中 / 英图标（亮着显示「A」），并把新的 Caps 状态推给
+        // Server —— 悬浮状态条的模式格同样要在前面加那个「A」。
         if vk == u32::from(VK_CAPITAL.0) {
-            self.mode_state.notify();
+            self.refresh_mode_indicator();
         }
         if self.key_tap.key_up(vk, self.mode_state.switch_key()) {
             self.set_english_mode(!self.mode_state.english());

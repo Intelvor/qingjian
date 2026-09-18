@@ -115,9 +115,15 @@ impl Renderer {
     }
 
     /// 一格内容的宽度（像素，不含内边距）。
+    ///
+    /// 有**宽度基准串**（[`StatusCell::text_with_width`]）就按基准量 —— 文字在中 / 英 / 注、
+    /// `，。` / `,.` 之间切换时状态条长度不变；画的时候仍按实际文字居中。
     fn status_cell_width(&mut self, cell: &StatusCell, m: &Metrics) -> f32 {
         match cell {
-            StatusCell::Text { text, .. } => self.measure(text, &m.text_style()).width,
+            StatusCell::Text { text, width_of, .. } => {
+                let measured = width_of.as_deref().unwrap_or(text);
+                self.measure(measured, &m.text_style()).width
+            }
             StatusCell::Cloud { .. } => m.px(CLOUD_SIZE),
             StatusCell::Gear => m.px(GEAR_SIZE),
         }
@@ -133,7 +139,9 @@ impl Renderer {
     ) {
         let (x, y, width, height) = slot;
         match cell {
-            StatusCell::Text { text, emphasized } => {
+            StatusCell::Text {
+                text, emphasized, ..
+            } => {
                 let color = if *emphasized {
                     m.theme.colors.accent
                 } else {
@@ -216,5 +224,53 @@ mod tests {
         );
         assert!(out.rendered.pixmap.width() > out.rendered.content_width);
         assert!(out.rendered.content_x > 0);
+    }
+
+    /// 宽度基准串：全角 ↔ 半角、中 ↔ 英 ↔ 注这类来回切**不改变整条长度**；不给基准才会伸缩。
+    #[test]
+    fn width_reference_keeps_the_bar_length_stable() {
+        // 没有系统字体的环境（CI 容器）跳过
+        let Ok(library) = FontLibrary::system("zh-CN") else {
+            return;
+        };
+        let mut renderer = Renderer::new(library);
+        let theme = Theme::light();
+        let width = |renderer: &mut Renderer, cell: StatusCell| {
+            renderer
+                .render_status(&[cell], &theme, 1.0, None, None)
+                .unwrap()
+                .rendered
+                .content_width
+        };
+
+        // 给了基准：两种写法一样宽（标点格按「，。」量、模式格按「A 中」量）。
+        assert_eq!(
+            width(
+                &mut renderer,
+                StatusCell::text_with_width("，。", true, "，。")
+            ),
+            width(
+                &mut renderer,
+                StatusCell::text_with_width(",.", false, "，。")
+            ),
+            "全 / 半角切换不该改变状态条长度"
+        );
+        assert_eq!(
+            width(
+                &mut renderer,
+                StatusCell::text_with_width("中", true, "A 中")
+            ),
+            width(
+                &mut renderer,
+                StatusCell::text_with_width("A 英", true, "A 中")
+            ),
+            "Caps 亮灭、中英切换都不该改变长度"
+        );
+
+        // 不给基准（旧行为）：半角比全角窄 —— 这正是之前「点一下长度就跳」的原因。
+        assert!(
+            width(&mut renderer, StatusCell::text("，。", true))
+                > width(&mut renderer, StatusCell::text(",.", false))
+        );
     }
 }

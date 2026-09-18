@@ -32,16 +32,22 @@ impl Router {
         }
     }
 
-    /// 记下某会话报来的中英模式。中英模式是每会话一份的，状态条只显示前台那一份。
-    pub(super) fn set_mode(&mut self, session: SessionId, english: bool) {
+    /// 记下某会话报来的中英模式与 Caps Lock。两者都是每会话一份的，状态条只显示前台那一份。
+    pub(super) fn set_mode(&mut self, session: SessionId, english: bool, caps: bool) {
         if let Some(info) = self.sessions.get_mut(&session) {
             info.english = Some(english);
+            info.caps = caps;
         }
     }
 
     /// 某会话最近报来的中英模式；会话已关或还没报过为 `None`。
     pub(super) fn mode_of(&self, session: SessionId) -> Option<bool> {
         self.sessions.get(&session).and_then(|info| info.english)
+    }
+
+    /// 某会话的 Caps Lock 亮没亮；会话已关或老 DLL 没报过为 `false`。
+    pub(super) fn caps_of(&self, session: SessionId) -> bool {
+        self.sessions.get(&session).is_some_and(|info| info.caps)
     }
 
     /// 某会话切成了别的输入法：模式作废，状态条不再拿它当「青简在前台」。

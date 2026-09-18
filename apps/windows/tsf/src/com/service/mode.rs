@@ -61,15 +61,17 @@ impl TextService_Impl {
         });
     }
 
-    /// 语言栏按钮换图标、写转换模式 compartment、把模式推给 Server（悬浮状态条）。
+    /// 语言栏按钮换图标、写转换模式 compartment、把模式与 Caps 推给 Server（悬浮状态条）。
     pub(super) fn refresh_mode_indicator(&self) {
         let english = self.mode_state.english();
+        // 状态条的模式格 Caps 亮着时前面加个「A」，所以要一起报（任务栏图标那格也看它）。
+        let caps = crate::com::key::event::caps_lock_on();
         self.mode_state.notify();
         if let Some(thread_mgr) = self.thread_mgr.borrow().as_ref() {
             mode::set_indicator(thread_mgr, self.client_id.get(), english);
         }
         if let Some(client) = self.engine.borrow_mut().as_mut()
-            && let Err(error) = client.mode_changed(english)
+            && let Err(error) = client.mode_changed(english, caps)
         {
             log(&format!("上报中英模式失败: {error}"));
         }

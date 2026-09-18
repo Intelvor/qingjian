@@ -129,6 +129,11 @@ pub enum ClientMessage {
 
         /// `true` 英文模式，`false` 中文模式。
         english: bool,
+
+        /// Caps Lock 亮着（大写锁定）：状态条的模式格前面加一个「A」。
+        /// **老 DLL 不带这个字段**（升级后没重启的应用），缺省按灭处理，所以加了 `serde(default)`。
+        #[serde(default)]
+        caps: bool,
     },
 
     /// DLL 定时问一次：用户在悬浮状态条上点过「中 / 英」没有。中英模式只在 DLL 侧，

@@ -21,8 +21,8 @@ use super::Router;
 
 impl Router {
     /// DLL 报来某会话的中英模式：记在那个会话名下，它是前台会话时状态条才跟着变。
-    pub(super) fn handle_mode_changed(&mut self, session: SessionId, english: bool) {
-        self.set_mode(session, english);
+    pub(super) fn handle_mode_changed(&mut self, session: SessionId, english: bool, caps: bool) {
+        self.set_mode(session, english, caps);
         match self.foreground {
             // 后台应用也会报模式（配置改了、激活了）：记下就行，别把状态条带到别的应用去 ——
             // 那正是「切应用后中 / 英乱跳」的老毛病。
@@ -86,6 +86,11 @@ impl Router {
         self.foreground.and_then(|session| self.mode_of(session))
     }
 
+    /// 状态条上那个「A」亮不亮 = 前台会话最近报来的 Caps Lock；认不出前台会话就灭。
+    fn status_caps(&self) -> bool {
+        self.foreground.is_some_and(|session| self.caps_of(session))
+    }
+
     /// DLL 来取状态条上点出的目标模式；取走即清。**只给前台会话**：所有装了青简的应用都在轮询，
     /// 谁先来给谁就把模式切进别的应用里去了，用户在前台看不到任何变化。
     pub(super) fn take_pending_mode(&mut self, session: SessionId) -> Option<bool> {
@@ -113,7 +118,7 @@ impl Router {
                 };
                 // 先把状态条翻过来，前台 DLL 取走后回报 ModeChanged 再对一次账。
                 self.pending_mode = Some(!english);
-                self.set_mode(session, !english);
+                self.set_mode(session, !english, self.caps_of(session));
                 tracing::debug!(english = !english, "状态条：请求切换中英模式");
             }
             StatusEvent::TogglePunctuation => {
@@ -179,10 +184,7 @@ impl Router {
                 self.status.show_status(StatusView {
                     english,
                     zhuyin: self.config.zhuyin,
-                    scheme: self
-                        .config
-                        .shuangpin
-                        .map(|scheme| scheme.label().to_owned()),
+                    caps: self.status_caps(),
                     full_width: self.full_width_for(english),
                     cloud: self.predict.enabled,
                     theme: self.config.theme,

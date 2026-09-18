@@ -211,25 +211,41 @@ impl Bar {
         }
     }
 
-    /// 模式格的文字：中 / 英 / 注，开着双拼时跟方案名。
+    /// 模式格的文字：中 / 英 / 注；Caps Lock 亮着时前面加一个「A」（跟任务栏图标一个意思）。
+    ///
+    /// **方案名不进状态条**（2026-09-18 定）：它会随配置变长变短、把整条撑得很宽，而它只在换方案时
+    /// 才变；要让用户看方案，设置页「通用」里就有。去掉之后模式格只剩单个汉字，宽度也更稳。
     fn mode_text(view: &StatusView) -> String {
-        if view.english {
-            "英".to_owned()
+        let base = if view.english {
+            "英"
         } else if view.zhuyin {
-            "注".to_owned()
+            "注"
         } else {
-            match &view.scheme {
-                Some(scheme) => format!("中 · {scheme}"),
-                None => "中".to_owned(),
-            }
+            "中"
+        };
+        if view.caps {
+            format!("A {base}")
+        } else {
+            base.to_owned()
         }
     }
+
+    /// 模式格的**宽度基准**：三种模式字同宽，所以取带「A」的那一种就够 ——
+    /// 切中英、Caps 亮灭都不改变整条状态条的长度（只有配置变化才可能变）。
+    const MODE_WIDTH: &'static str = "A 中";
+
+    /// 标点格的宽度基准：全角那两个比半角宽，按它量宽，切全 / 半角时长度不变。
+    const PUNCT_WIDTH: &'static str = "，。";
 
     /// 渲染器要的四格，顺序同 [`ACTIONS`]：模式（品牌色）、标点（生效时品牌色）、☁（开着品牌色）、齿轮。
     fn status_cells(view: &StatusView) -> Vec<StatusCell> {
         [
-            StatusCell::text(Self::mode_text(view), true),
-            StatusCell::text(if view.full_width { "，。" } else { ",." }, view.full_width),
+            StatusCell::text_with_width(Self::mode_text(view), true, Self::MODE_WIDTH),
+            StatusCell::text_with_width(
+                if view.full_width { "，。" } else { ",." },
+                view.full_width,
+                Self::PUNCT_WIDTH,
+            ),
             StatusCell::cloud(view.cloud),
             StatusCell::Gear,
         ]
@@ -246,12 +262,14 @@ impl Bar {
         [
             CellSpec {
                 text: Self::mode_text(view),
+                width_of: Some(Self::MODE_WIDTH.to_owned()),
                 font: theme.text_font,
                 color: theme.accent_color,
                 action: StatusAction::ToggleMode,
             },
             CellSpec {
                 text: if view.full_width { "，。" } else { ",." }.to_owned(),
+                width_of: Some(Self::PUNCT_WIDTH.to_owned()),
                 font: theme.text_font,
                 color: if view.full_width {
                     theme.accent_color
@@ -262,6 +280,7 @@ impl Bar {
             },
             CellSpec {
                 text: "\u{2601}".to_owned(),
+                width_of: None,
                 font: theme.symbol_font,
                 color: if view.cloud {
                     theme.accent_color
@@ -272,6 +291,7 @@ impl Bar {
             },
             CellSpec {
                 text: "\u{2699}".to_owned(),
+                width_of: None,
                 font: theme.symbol_font,
                 color: theme.gloss_color,
                 action: StatusAction::OpenSettings,
@@ -349,9 +369,13 @@ impl Bar {
         self.margin.set(margin);
         let cells = self.cells(&theme);
         let hdc = unsafe { GetDC(Some(self.hwnd)) };
+        // 量宽按**基准串**（`CellSpec::width_of`）—— 文字在几种写法间切换时整条长度不变。
         let sizes: Vec<SIZE> = cells
             .iter()
-            .map(|cell| view::measure(hdc, cell.font, &cell.text))
+            .map(|cell| {
+                let measured = cell.width_of.as_deref().unwrap_or(&cell.text);
+                view::measure(hdc, cell.font, measured)
+            })
             .collect();
         unsafe { ReleaseDC(Some(self.hwnd), hdc) };
         let line = sizes.iter().map(|size| size.cy).max().unwrap_or(0);
@@ -394,7 +418,7 @@ impl Bar {
                 corner_radius: theme.corner_radius,
                 paint: &|hdc, client| {
                     unsafe { SetBkMode(hdc, TRANSPARENT) };
-                    paint_cells(hdc, client, &cells, &sizes, &widths, &theme, hovered);
+                    paint_cells(hdc, client, &cells, &widths, &theme, hovered);
                 },
             },
         )
@@ -548,20 +572,19 @@ impl Drop for StatusBar {
 }
 
 /// 每格文字居中；格间一条上下留 `inset` 的细线；鼠标停住那格先铺一层浅底色（左右各内缩 `inset`，让开细线）。
-/// 每格文字居中；格间一条上下留 `inset` 的细线；鼠标停住那格先铺一层浅底色（左右各内缩 `inset`，让开细线）。
 /// 颜色与留白都从 `theme` 取，免得参数摊一长串。
+/// 居中按**实际文字**量（`widths` 是布局宽，可能是按基准串量的，见 [`CellSpec::width_of`]）。
 fn paint_cells(
     hdc: HDC,
     client: RECT,
     cells: &[CellSpec],
-    sizes: &[SIZE],
     widths: &[i32],
     theme: &Theme,
     hovered: Option<usize>,
 ) {
     let inset = theme.padding / 2;
     let mut x = 0;
-    for (index, ((cell, size), width)) in cells.iter().zip(sizes).zip(widths).enumerate() {
+    for (index, (cell, width)) in cells.iter().zip(widths).enumerate() {
         if index > 0 {
             view::fill_rect(
                 hdc,
@@ -587,6 +610,7 @@ fn paint_cells(
                 inset,
             );
         }
+        let size = view::measure(hdc, cell.font, &cell.text);
         let ox = x + (width - size.cx) / 2;
         let oy = (client.bottom - size.cy) / 2;
         view::draw_text(hdc, cell.font, cell.color, ox, oy, &cell.text);

@@ -26,4 +26,8 @@ pub(crate) struct SessionInfo {
 
     /// 该会话最近一次报来的光标**后**文；含义同上。
     pub(crate) surrounding_after: Option<String>,
+
+    /// 该会话最近报来的 Caps Lock 状态（`ModeChanged` 一起带过来）：状态条的模式格前面加个「A」。
+    /// 老 DLL 不带这个字段（升级后没重启的应用），按灭处理。
+    pub(crate) caps: bool,
 }

@@ -45,6 +45,8 @@ impl Router {
                         // 光标前后文等新会话第一段组句起始时 DLL 报来。
                         surrounding_before: None,
                         surrounding_after: None,
+                        // Caps 等 DLL 激活时那条 ModeChanged 报来。
+                        caps: false,
                     },
                 );
                 // 按键行为设置回一次，让 DLL 不必自己读配置文件。**只回过协议版本对得上的**：
@@ -100,9 +102,13 @@ impl Router {
                 }
                 None
             }
-            ClientMessage::ModeChanged { session, english } => {
-                tracing::debug!(?session, english, "中英模式");
-                self.handle_mode_changed(session, english);
+            ClientMessage::ModeChanged {
+                session,
+                english,
+                caps,
+            } => {
+                tracing::debug!(?session, english, caps, "中英模式");
+                self.handle_mode_changed(session, english, caps);
                 None
             }
             ClientMessage::SyncMode { session } => Some(ServerMessage::ModeSync {

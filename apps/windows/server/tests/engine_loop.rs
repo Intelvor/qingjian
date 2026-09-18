@@ -767,10 +767,18 @@ impl RecordingStatus {
 
 impl StatusSink for RecordingStatus {
     fn show_status(&self, view: StatusView) {
-        let label = match (view.english, view.scheme) {
-            (true, _) => "英".to_owned(),
-            (false, Some(scheme)) => format!("中 · {scheme}"),
-            (false, None) => "中".to_owned(),
+        // 状态条模式格的实际写法：中 / 英 / 注，Caps 亮着时前面加「A」。
+        let base = if view.english {
+            "英"
+        } else if view.zhuyin {
+            "注"
+        } else {
+            "中"
+        };
+        let label = if view.caps {
+            format!("A {base}")
+        } else {
+            base.to_owned()
         };
         self.0.lock().unwrap().push(Some(label));
     }
@@ -793,7 +801,16 @@ fn status_router() -> (Router, RecordingStatus) {
 
 /// 某会话报来它的中英模式（DLL 在激活与切模式时发）。
 fn mode_changed(router: &mut Router, session: SessionId, english: bool) {
-    router.handle(ClientMessage::ModeChanged { session, english });
+    mode_changed_with(router, session, english, false);
+}
+
+/// 连 Caps Lock 一起报：状态条的模式格前面会多一个「A」。
+fn mode_changed_with(router: &mut Router, session: SessionId, english: bool, caps: bool) {
+    router.handle(ClientMessage::ModeChanged {
+        session,
+        english,
+        caps,
+    });
 }
 
 #[test]
@@ -808,6 +825,7 @@ fn status_bar_mode_click_is_handed_to_dll_via_sync_mode() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        caps: false,
     });
 
     // 点「中」：状态条先翻成「英」，DLL 来取时拿到目标模式，取一次就清。
@@ -844,6 +862,7 @@ fn status_bar_mode_click_is_ignored_when_builtin_english_is_off() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        caps: false,
     });
     assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
 
@@ -1129,8 +1148,10 @@ fn pending_mode_is_dropped_when_the_foreground_changes() {
     }
 }
 
+/// 状态条模式格只显示中 / 英 / 注 —— **双拼方案名不进状态条**（它会随配置变长变短、
+/// 把整条撑得很宽，而且只在换方案时才变；要看方案去设置页「通用」）。
 #[test]
-fn status_bar_shows_shuangpin_scheme_in_chinese() {
+fn status_bar_mode_cell_has_no_scheme_name() {
     let config = RouterConfig {
         status_enabled: true,
         shuangpin: Some(ShuangpinScheme::Xiaohe),
@@ -1140,12 +1161,23 @@ fn status_bar_shows_shuangpin_scheme_in_chinese() {
     let recorder = RecordingStatus::default();
     router.set_status_sink(Box::new(recorder.clone()));
 
-    router.handle(ClientMessage::ModeChanged {
-        session: SESSION,
-        english: false,
-    });
+    mode_changed(&mut router, SESSION, false);
 
-    assert_eq!(recorder.calls(), vec![Some("中 · 小鹤双拼".to_owned())]);
+    assert_eq!(recorder.calls(), vec![Some("中".to_owned())]);
+}
+
+/// Caps Lock 亮着时模式格前面多一个「A」；灭了就回到原样。
+#[test]
+fn status_bar_shows_caps_lock_in_the_mode_cell() {
+    let (mut router, recorder) = status_router();
+    mode_changed_with(&mut router, SESSION, false, true);
+    assert_eq!(recorder.calls().last(), Some(&Some("A 中".to_owned())));
+
+    mode_changed_with(&mut router, SESSION, true, true);
+    assert_eq!(recorder.calls().last(), Some(&Some("A 英".to_owned())));
+
+    mode_changed_with(&mut router, SESSION, false, false);
+    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
 }
 
 #[test]
@@ -1157,6 +1189,7 @@ fn status_bar_stays_hidden_when_disabled() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        caps: false,
     });
 
     assert_eq!(recorder.calls(), vec![None]);
@@ -1443,6 +1476,7 @@ fn punctuation_toggle_is_remembered_per_mode() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        caps: false,
     });
     router.handle_status_event(StatusEvent::TogglePunctuation);
     assert_eq!(press(&mut router, comma).0, KeyOutcome::Passthrough);
@@ -1450,6 +1484,7 @@ fn punctuation_toggle_is_remembered_per_mode() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: true,
+        caps: false,
     });
     assert_eq!(press(&mut router, english_comma).0, KeyOutcome::Passthrough);
     router.handle_status_event(StatusEvent::TogglePunctuation);
@@ -1458,11 +1493,13 @@ fn punctuation_toggle_is_remembered_per_mode() {
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: false,
+        caps: false,
     });
     assert_eq!(press(&mut router, comma).0, KeyOutcome::Passthrough);
     router.handle(ClientMessage::ModeChanged {
         session: SESSION,
         english: true,
+        caps: false,
     });
     assert_eq!(press(&mut router, english_comma).1, Some("，".to_owned()));
     // 英文候选组词中敲标点：先把字母原样上屏，标点也按英文那份转。
