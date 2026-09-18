@@ -48,8 +48,14 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         *self.thread_mgr.borrow_mut() = Some(thread_mgr);
         // 连 Server：它随 `OpenSession` 的回包把按键行为设置带下来，就地应用（那两个值在按键到达之前就要有）。
         self.connect();
-        // 连不上 Server 时用缺省值把模式状态建起来；连上了的话上面已应用过真实值，这里去重跳过。
-        self.apply_input_settings(InputSettings::default());
+        // 连不上 Server 时用缺省值把模式状态建起来。**Server 的设置已经到了就别再盖回去** ——
+        // 原来那句注释写的是「去重跳过」，可 `InputSettings::default()` 与真配置并不相等，一字不差地
+        // 去重根本不成立：实测激活时真配置（`control`/`chinese`）先到，1 ms 后就被这份缺省值
+        // （`shift`/`last`）盖掉，`start_mode_from_settings` 于是读到 `last`、既不设模式也不上保护，
+        // 紧接着 msctf 写回 profile 就把界面切成英文（`ee98653` 之后仍复现的那次）。
+        if self.input_settings.get().is_none() {
+            self.apply_input_settings(InputSettings::default());
+        }
         // 激活时的初始模式：按 `[general] default_mode` 定，并挡掉 msctf 随后写回 profile 的那次变化。
         self.start_mode_from_settings();
         if self.mode_state.enabled() {

@@ -53,13 +53,15 @@ impl TextService_Impl {
     /// 「设了默认中文，新开的记事本还是英文」。`conversion_guard_until` 就是给这一刻准备的，但 2026-09-18
     /// 之前它**只被读、没人写**（删 Ctrl+Space 那轮把写它的代码一起删了），所以一直是死保护。
     pub(super) fn start_mode_from_settings(&self) {
-        let Some(english) = self
-            .input_settings
-            .get()
-            .and_then(|input| input.default_mode.apply())
-        else {
+        let Some(input) = self.input_settings.get() else {
+            log("激活时的初始模式：还没拿到 Server 的设置，不动（记住上次）");
             return;
         };
+        let Some(english) = input.default_mode.apply() else {
+            log("激活时的初始模式：记住上次（不动模式）");
+            return;
+        };
+        log(&format!("激活时的初始模式：{}", input.default_mode.label()));
         self.mode_state.set_english(english);
         self.refresh_mode_indicator();
         self.conversion_guard_until
