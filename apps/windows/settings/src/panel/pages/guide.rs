@@ -318,8 +318,15 @@ pub(crate) fn view(settings: &Settings, _context: &mut ViewContext<Settings>) ->
         sections.push(section(
             "悬浮状态条",
             vec![
-                key_row("「中 / 英」", "点一下切换中英模式。"),
+                key_row(
+                    "「中 / 英」",
+                    "点一下切换中英模式；Caps Lock 亮着时前面多一个「A」（如 A 中）。",
+                ),
                 key_row("「，。」", "点一下切换全角 / 半角标点。"),
+                key_row(
+                    "「☁」",
+                    "点一下开关在线联想（与「云服务」页的开关同一项）。",
+                ),
                 key_row("齿轮", "打开这个设置窗口。"),
                 note("可以拖到屏幕任意位置；不想要了在「候选窗口」页关掉。"),
             ],
