@@ -9,6 +9,8 @@
 //! 6. 上下文得分：语言模型给的 `log P(词 | 上一个上屏的词)`（个人 bigram 插值，模型不认识的按词库词频兜底并扣分，
 //!    见 `sentence::transition_log_prob`）加用户选择次数的加分（[`weight_bonus`]，对数且封顶），模糊音命中扣 ln 2、
 //!    敲错变体命中扣那类敲错的代价（`correction::TypoKind::cost`，个人敲错表打折）。
+//!    **候选自身拼音长于用户输入时每多一个字母再扣一点**（[`EXCESS_PINYIN_PENALTY`]），
+//!    减少「敲两三个音节就蹦出长词 / 长句」压过精确命中。
 //!    这样 `ba` 在「做了」后面出 吧、句首出 把；纯词频排序两处都只能出同一个
 //! 7. 敲的原音节优先，词长短者优先，最后按字符串稳定排序保证结果可复现
 //!
@@ -31,6 +33,15 @@ pub const WEIGHT_CAP: u32 = 20;
 
 /// 模糊音命中扣的分（词频减半）。敲错变体的代价见 `correction::TypoKind`。
 pub const FUZZY_PENALTY: f64 = std::f64::consts::LN_2;
+
+/// 候选自身拼音**长于**用户输入时，每多一个字母扣这么多分（略微，约 e^0.12 ≈ 0.89 倍词频当量）。
+/// 前缀命中的长词、整句/补全比输入还长时略靠后，减少短输入直接蹦长结果。
+pub const EXCESS_PINYIN_PENALTY: f64 = 0.12;
+
+/// 候选拼音比输入长出的字母数 → 扣分。`hit_letters` 是候选各音节拼起来的字母数（不含 `'`）。
+pub fn excess_pinyin_penalty(hit_letters: usize, input_letters: usize) -> f64 {
+    EXCESS_PINYIN_PENALTY * hit_letters.saturating_sub(input_letters) as f64
+}
 
 /// 用户选择次数换算成得分加成，词级排序与整句路径共用，见 [`WEIGHT_BONUS`]。
 pub fn weight_bonus(count: u32) -> f64 {
@@ -172,6 +183,15 @@ mod tests {
         }
         rank(&mut items, usize::MAX, |_| (0, -2.0));
         assert_eq!(items[0].hit.text, "吧");
+    }
+
+    #[test]
+    fn excess_pinyin_penalty_is_slight_and_zero_when_not_longer() {
+        assert_eq!(excess_pinyin_penalty(4, 4), 0.0);
+        assert_eq!(excess_pinyin_penalty(2, 5), 0.0);
+        let p = excess_pinyin_penalty(8, 4);
+        assert!(p > 0.0 && p < 1.0, "略微降权，实际 {p}");
+        assert!((p - EXCESS_PINYIN_PENALTY * 4.0).abs() < 1e-9);
     }
 
     #[test]

@@ -300,6 +300,7 @@ impl Engine {
         // `ba` 在「做了」后面出 吧、句首出 把
         let log_total = (self.total_frequency() as f64).max(1.0).ln();
         let letters = choice_key(scope, scope.len());
+        let input_letters = scope.chars().filter(|c| *c != '\'').count();
         ranking::rank(&mut scored, MAX_CANDIDATES, |item| {
             let hit = &item.hit;
             // 纠错生效时覆盖的是纠正后的字母，换算回原串再查「这个输入串下选过什么」
@@ -316,6 +317,9 @@ impl Engine {
                 hit.text,
                 sentence::fallback_log_prob(hit.frequency, log_total),
             );
+            // 自身拼音比用户敲的还长：略降权（前缀长词、整句型词条）
+            let hit_letters: usize = hit.syllables().map(|s| s.len()).sum();
+            let log_prob = log_prob - ranking::excess_pinyin_penalty(hit_letters, input_letters);
             (choice, log_prob)
         });
         let mut items: Vec<Candidate> = scored
@@ -581,9 +585,12 @@ impl Engine {
                 if let Some((plain, model_chose_alt)) =
                     self.plain_sentence(items, segmentations, typos)
                 {
-                    // 模型在同音节切分里选了非 best 的那条（`henganrende`：hen'gan 胜过 heng'an）
-                    // → 整句直接跟在英文候选后，不再被词级前缀词（恒安）压到后面。
-                    let position = if model_chose_alt {
+                    let input_letters = keys.chars().filter(|c| *c != '\'').count();
+                    let sent_letters: usize = plain.syllables.iter().map(|s| s.len()).sum();
+                    let longer_than_input = sent_letters > input_letters;
+                    // 模型在同音节切分里选了非 best 的那条，且拼音不长于输入 → 可排英文后最前；
+                    // 拼音还比输入长的（长句/长词）跟在词级后面，避免「敲几个音节就跳整句」
+                    let position = if model_chose_alt && !longer_than_input {
                         leading_english(items)
                     } else {
                         Self::sentence_insert_position(&plain, items)

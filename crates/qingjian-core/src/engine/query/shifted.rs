@@ -159,6 +159,7 @@ impl Engine {
         let log_total = (self.total_frequency() as f64).max(1.0).ln();
         let scope = prefix;
         let letters = choice_key(scope, scope.len());
+        let input_letters = scope.chars().filter(|c| *c != '\'').count();
         ranking::rank(&mut scored, MAX_CANDIDATES, |item| {
             let hit = &item.hit;
             let covered = item.coverage;
@@ -172,6 +173,8 @@ impl Engine {
                 hit.text,
                 sentence::fallback_log_prob(hit.frequency, log_total),
             );
+            let hit_letters: usize = hit.syllables().map(|s| s.len()).sum();
+            let log_prob = log_prob - ranking::excess_pinyin_penalty(hit_letters, input_letters);
             (choice, log_prob)
         });
         out.extend(scored.iter().map(|s| chinese_candidate(&s.hit)));
