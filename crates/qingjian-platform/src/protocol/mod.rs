@@ -22,6 +22,11 @@ mod session;
 /// 就是这么来的（`unknown variant `Code``）。加变体必须同时 +1 并重装 DLL，否则连警告都不会有。
 pub const PROTOCOL_VERSION: u32 = 6;
 
+/// 从哪个协议版本起 DLL 会在 `OpenSession` 后阻塞读一条 [`ServerMessage::SessionOpened`]。
+/// 门槛是固定值而不是当前版本：以后版本再升，没重启的应用里那些旧 DLL 仍在等这条回包，
+/// 不回它们会卡在 `open()` 里（宿主 UI 线程）。
+pub const SESSION_OPENED_SINCE: u32 = 6;
+
 pub mod frame;
 pub mod key;
 

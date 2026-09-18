@@ -1,7 +1,8 @@
 //! 按消息类型分派：会话开关、按键、轮询、失焦上屏、选区 / 光标矩形 / 中英模式的通知。
 
 use qingjian_platform::protocol::{
-    ClientMessage, Frame, KeyEvent, KeyOutcome, PROTOCOL_VERSION, ServerMessage, SessionId,
+    ClientMessage, Frame, KeyEvent, KeyOutcome, PROTOCOL_VERSION, SESSION_OPENED_SINCE,
+    ServerMessage, SessionId,
 };
 
 use super::Router;
@@ -49,11 +50,11 @@ impl Router {
                         caps: false,
                     },
                 );
-                // 按键行为设置回一次，让 DLL 不必自己读配置文件。**只回过协议版本对得上的**：
-                // 老 DLL 的 `open` 是只写不读，多回一条会被它当成下一次 `Poll` 的应答而报错，
-                // 那条连接就废了（老 DLL 在没重启的应用里还会活很久）。老 DLL 从 `ModeSync` 那一拍
+                // 按键行为设置回一次，让 DLL 不必自己读配置文件。**只回给会读这条回包的 DLL**：
+                // 更老的 DLL 的 `open` 是只写不读，多回一条会被它当成下一次 `Poll` 的应答而报错，
+                // 那条连接就废了（老 DLL 在没重启的应用里还会活很久）。它们从 `ModeSync` 那一拍
                 // 也能拿到同一份（新字段它直接忽略），只是慢一拍。
-                (protocol >= PROTOCOL_VERSION).then(|| ServerMessage::SessionOpened {
+                (protocol >= SESSION_OPENED_SINCE).then(|| ServerMessage::SessionOpened {
                     session,
                     input: self.input_settings(),
                 })
