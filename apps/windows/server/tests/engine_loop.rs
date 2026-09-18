@@ -2010,9 +2010,9 @@ fn cloud_requests_carry_the_surrounding_text() {
     );
 }
 
-/// 云联想关着：Tab 交还应用（缩进 / 跳焦点），不吞键也不去现请。
+/// 云联想关着：没有整句补全时 Tab 翻下一页（#160），不再交还应用。
 #[test]
-fn tab_passes_through_when_cloud_is_off() {
+fn tab_pages_when_cloud_is_off() {
     let config = RouterConfig {
         sentence_on_tab: true,
         ..RouterConfig::default()
@@ -2021,7 +2021,7 @@ fn tab_passes_through_when_cloud_is_off() {
     type_letters(&mut router, "nihao");
 
     let (outcome, commit, frame) = press(&mut router, tab());
-    assert_eq!(outcome, KeyOutcome::Passthrough);
+    assert_eq!(outcome, KeyOutcome::Consumed, "无补全时 Tab 翻页并吞掉");
     assert_eq!(commit, None);
     assert!(!frame.sentence_pending, "没接联想，不该摆等待提示");
 }

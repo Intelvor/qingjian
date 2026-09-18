@@ -119,9 +119,15 @@ impl Router {
                     Effect::Changed(Some(self.engine.take_raw()))
                 }
             }
+            codes::TAB if event.modifiers.shift => {
+                self.page(-1);
+                Effect::Navigated
+            }
             codes::TAB if self.engine.english_mode() => {
                 Effect::Changed(Some(self.commit_highlighted()))
             }
+            // 中文模式 Tab：整句补全在手上就接受；没有就翻下一页（#160，与 macOS 一致），
+            // 不再交还应用——组句中 Tab 交给应用只会变成缩进，用户要的是翻候选。
             codes::TAB => self.chinese_tab(),
             codes::DOWN => {
                 self.move_highlight(1);
@@ -305,22 +311,21 @@ impl Router {
         Effect::Changed(None)
     }
 
-    /// 中文模式 Tab：整句补全在手上就接受；没有就先现请一次（`[predict] sentence_trigger = "tab"`），
-    /// 这一拍把键吞掉、候选窗跟着摆「☁ …」，结果回来再按一次才上屏。
-    /// 没配「按 Tab 才联想」又不缺句子时，照旧交还应用（缩进 / 跳焦点）。
+    /// 中文模式 Tab：整句补全在手上就接受；`[predict] sentence_trigger = "tab"` 时先现请一次
+    /// （这一拍吞键、候选窗摆「☁ …」，结果回来再按一次才上屏）；都没有时翻到下一页（#160）。
     fn chinese_tab(&mut self) -> Effect {
         if let Some(sentence) = self.sentence.take() {
             return Effect::Changed(Some(self.engine.accept_prediction(&sentence)));
         }
-        if !self.config.sentence_on_tab {
-            return Effect::Passthrough;
-        }
-        // 请过一次、结果还在路上：吞掉这个键等它，别重复请、也别让应用收到缩进。
-        // 等超了当没在等（`sentence_waiting`）就再请一次。
-        if self.sentence_waiting() || self.request_sentence_now() {
+        if self.config.sentence_on_tab
+            && (self.sentence_waiting() || self.request_sentence_now())
+        {
+            // 请过一次、结果还在路上：吞掉这个键等它，别重复请、也别让应用收到缩进。
+            // 等超了当没在等（`sentence_waiting`）就再请一次。
             return Effect::Waiting;
         }
-        Effect::Passthrough
+        self.page(1);
+        Effect::Navigated
     }
 
     /// 数字键在当前页对应的格子下标；这一页没有这一格（`gpt6` 只有三个候选）返回 `None`，数字当内容进缓冲区。
