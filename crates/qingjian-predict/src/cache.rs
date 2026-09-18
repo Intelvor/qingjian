@@ -5,6 +5,10 @@ use qingjian_core::PredictionRequest;
 use crate::prompt::Reply;
 
 /// 最近若干次请求的结果。退格再打回同样的内容很常见，不用再花一次请求。
+///
+/// **键里必须带上下文与候选窗第一页**：2026-09-18 试过「只按原始输入 `letters` 做几分钟的词语缓存」，
+/// 被用户当场否掉 —— 同一个拼音在不同应用 / 不同位置要的联想结果本来就不同（前文是「高等数学是」、
+/// 还是写在代码注释里，同一个 `daxue` 该给不同的词），只按字母命中等于把别处的答案搬过来。
 #[derive(Debug, Default)]
 pub struct PredictionCache {
     /// 请求内容 → 结果。
