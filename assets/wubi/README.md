@@ -4,7 +4,7 @@
 
 | 文件 | 来源 | 许可 |
 | --- | --- | --- |
-| `wubi86_jidian.dict.yaml`（上游源文件，8.9 万条） | 86 五笔极点码表，<https://github.com/sxjudya/rime-wubi86-jidian>（`version: "4.3"`） | Apache-2.0，原文见同目录 `LICENSE` |
+| `wubi86_jidian.dict.yaml`（上游源文件，8.9 万条，不进仓库） | 86 五笔极点码表，<https://github.com/sxjudya/rime-wubi86-jidian>（`version: "4.3"`） | Apache-2.0，原文见同目录 `LICENSE` |
 | `wubi86.tsv`（产品数据） | 由上面那份转换而来 | 编码来自上游（Apache-2.0）；词频是青简自己统计的 |
 
 上游还有 `wubi86_jidian_extra.dict.yaml`（扩展词）与 `wubi86_jidian_extra_district.dict.yaml`（行政区域），**暂未并入**：
@@ -18,11 +18,11 @@
 
 ## 重新生成
 
-源文件已经在仓库里，跑一次即可（`--frequency` 建议给基础词库 + 全部领域词库，覆盖率更高）：
+先从上游仓库下载 `wubi86_jidian.dict.yaml`（放哪都行，下面以 `data/raw/` 为例），再跑（`--frequency` 建议给基础词库 + 全部领域词库，覆盖率更高）：
 
 ```bash
 cargo run --release -p qingjian-dict-convert -- --out-dir assets/wubi wubi \
-    assets/wubi/wubi86_jidian.dict.yaml \
+    data/raw/wubi86_jidian.dict.yaml \
     --frequency assets/lexicon/dict.tsv assets/lexicon/dicts/*.tsv
 ```
 
