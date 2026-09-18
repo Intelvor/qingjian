@@ -364,6 +364,32 @@ fn shift_letters_join_the_buffer_only_when_configured() {
         texts.iter().any(|t| t == "GitHub"),
         "GitHub 仍在候选里，实际 {texts:?}"
     );
+
+    // 中途大写：woheAIbiancheng 后面的拼音仍要切（不能在 AI 处断掉）
+    let dictionary = Dictionary::parse(
+        "我和\two he\t50000\n编程\tbian cheng\t30000\n编\tbian\t8000\n程\tcheng\t8000\n爱\tai\t20000\n我\two\t90000\n",
+    )
+    .unwrap();
+    let words = WordList::parse("AI\tai\t5000\n").unwrap();
+    let mut engine = Engine::new(dictionary).with_english(words);
+    engine.set_shift_letter_compose(true);
+    for c in "wohe".chars() {
+        engine.push(c);
+    }
+    engine.push('A');
+    engine.push('I');
+    for c in "biancheng".chars() {
+        engine.push(c);
+    }
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t == "编程"
+            || t == "我和"
+            || t == "爱"
+            || t == "程"
+            || t == "我和编程"),
+        "AI 之后的 biancheng 仍应参与切分，实际 {texts:?}"
+    );
 }
 
 #[test]
