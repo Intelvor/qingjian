@@ -630,15 +630,9 @@ impl Engine {
             if segmentation.syllables.len() != best_len {
                 continue;
             }
-            let patterns = segmentation.patterns();
-            let inner_abbreviated = patterns
-                .iter()
-                .take(patterns.len().saturating_sub(1))
-                .any(|p| !p.complete);
-            if inner_abbreviated {
-                continue;
-            }
-            let Some(conversion) = self.convert_sentence(&patterns, typos) else {
+            // 简拼切分也要参与整句：`fchhle` 这类输入末尾的 `le`/`l` 就是「了」，
+            // 整句模型仍要能吐出「非常好了」；过碎的读法靠音节数对齐与插入位置降权兜住。
+            let Some(conversion) = self.convert_sentence(&segmentation.patterns(), typos) else {
                 continue;
             };
             if conversion.has_placeholder() || conversion.syllables.len() != best_len {

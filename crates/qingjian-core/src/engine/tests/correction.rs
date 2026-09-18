@@ -120,6 +120,23 @@ fn abbreviated_segmentations_do_not_become_leading_sentences() {
     );
 }
 
+/// 简拼末尾的 `le`/`l` 是「了」，整句不能丢掉（`fchhle` → 非常好了）。
+#[test]
+fn abbreviated_trailing_le_is_kept_in_the_sentence() {
+    let dictionary = Dictionary::parse(
+        "非常\tfei chang\t80000\n非常好\tfei chang hao\t50000\n好\thao\t90000\n\
+         了\tle\t200000\n非\tfei\t30000\n常\tchang\t20000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("fchhle");
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t.contains('了')),
+        "简拼句尾的 le 应能出「了」，实际 {texts:?}"
+    );
+}
+
 /// 同音串出来的整句仍在候选里，但不压过词库里盖住输入开头的双字词。
 #[test]
 fn homophone_stacked_sentences_do_not_beat_dictionary_words() {
