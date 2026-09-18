@@ -158,12 +158,48 @@ fn forget_requests_drop_personal_words() {
     router.watch_config(&config, config_path, dir.clone(), Some(dir.clone()));
 
     let requests = qingjian_platform::dirs::forget_requests_path(&dir);
-    std::fs::write(&requests, "合同法\n").unwrap();
+    // 首行带 UTF-8 BOM（别的工具写这个文件时会加）：BOM 不能把第一个词带歪，否则「删不掉但文件被清掉」。
+    std::fs::write(&requests, "\u{feff}合同法\n").unwrap();
     poll(&mut router);
 
     assert!(!requests.exists(), "请求文件该被处理掉");
     let words = std::fs::read_to_string(dir.join("user-words.tsv")).unwrap();
     assert!(!words.contains("合同法"), "个人词该被删掉，实际：{words}");
+    drop(router);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 个人英文词也算「个人词」：中文模式原样上屏一串字母会被记成英文词（`user-english.tsv`），
+/// 设置页的删除请求要能清掉它（2026-09-18 用户反馈 `javashiyimenbianchengyuyan` 删不掉）。
+#[test]
+fn forget_requests_drop_personal_english_words() {
+    let dir = std::env::temp_dir().join(format!("qingjian-forget-en-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let config_path = dir.join("config.toml");
+    std::fs::write(&config_path, "").unwrap();
+    let config = Config::load(&config_path).unwrap();
+    std::fs::write(
+        dir.join("user-english.tsv"),
+        "# 青简个人英文词：词\t次数\njavashiyimenbianchengyuyan\t5\nkeep\t2\n",
+    )
+    .unwrap();
+    let learner = qingjian_learning::FrequencyLearner::from_path(dir.join("user.tsv")).unwrap();
+    let engine = Engine::new(Dictionary::default()).with_learner(Box::new(learner));
+    let mut router = Router::new(engine, RouterConfig::default());
+    router.watch_config(&config, config_path, dir.clone(), Some(dir.clone()));
+
+    let requests = qingjian_platform::dirs::forget_requests_path(&dir);
+    std::fs::write(&requests, "javashiyimenbianchengyuyan\n").unwrap();
+    poll(&mut router);
+
+    assert!(!requests.exists(), "请求文件该被处理掉");
+    let words = std::fs::read_to_string(dir.join("user-english.tsv")).unwrap();
+    assert!(
+        !words.contains("javashiyimenbianchengyuyan"),
+        "个人英文词该被删掉，实际：{words}"
+    );
+    assert!(words.contains("keep"), "别的英文词不受影响，实际：{words}");
     drop(router);
     let _ = std::fs::remove_dir_all(&dir);
 }

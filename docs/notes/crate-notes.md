@@ -55,6 +55,10 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
   个人敲错表（`user-typos.tsv`，接受过的 (敲的, 要的) 音节对，词图敲错边与整段纠错的代价按它打折）与个人 n-gram（`user-ngram.tsv`，Core `sentence::UserNgram`，
   二元 + 三元在线计数，整句转换与词级排序里与静态模型插值；Tab 接受的云端整句按 `sentence::segment_text` 切词后也记；
   连着选出的两个词记够次数自动造词进用户词，一段拼音分几次选完的合成词记两次也造）。
+  **`forget` 要连个人英文词一起清**：中文模式下把一串字母原样上屏也会记成「英文词」（`learn_english` → `user-english.tsv`），
+  它不在用户词表里，漏掉就「删了跟没删一样」（2026-09-18 用户反馈 `javashiyimenbianchengyuyan` 被记住却找不到）。
+  设置页「词库 → 个人词」把 **`user-words.tsv` 与 `user-english.tsv` 合并列出**（英文词那列写「个人英文词 · 上屏过 N 次」），
+  删除走同一条请求文件；读 `forget-requests.txt` 时要**去掉首行 BOM**（别的工具写它会带 BOM，BOM 会让第一个词匹配不上）。
 - `InputLog`：输入日志（`input-log.jsonl`，每次上屏一行：敲的键、切分、看到的前几个候选、选了第几个、来源、纠错、撤销，
   Core `InputLogger` trait 的落盘实现，`[general] input_log` 缺省开，只写本机，给离线回归评测与个人模型用）。
 - `UsageStats`：输入统计（`usage.tsv`，按天记汉字 / 中文词 / 英文词 / 上屏次数，Core `UsageMeter` trait 的实现，Engine 每次上屏 `Usage::of_text` + 按来源定词数，

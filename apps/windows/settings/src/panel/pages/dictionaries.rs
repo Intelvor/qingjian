@@ -12,6 +12,12 @@ use crate::panel::{Message, Settings};
 /// 个人词文件名（`%APPDATA%\Qingjian\user-words.tsv`），与 `qingjian-learning` 里那个常量一致。
 const USER_WORDS_FILE: &str = "user-words.tsv";
 
+/// 个人英文词文件名（`%APPDATA%\Qingjian\user-english.tsv`，与 `qingjian-learning` 一致）。
+///
+/// 中文模式下把一串字母原样上屏（`javashiyimenbianchengyuyan` 这种）会被记成「英文词」，它不在
+/// 用户词表里 —— 只列 `user-words.tsv` 的话，用户根本找不到它去删（2026-09-18 用户反馈）。
+const USER_ENGLISH_FILE: &str = "user-english.tsv";
+
 /// 用户词库目录 `%APPDATA%\Qingjian\dicts`。
 fn user_dir(settings: &Settings) -> PathBuf {
     settings.data_dir().join("dicts")
@@ -231,6 +237,46 @@ fn learned_words(settings: &Settings) -> Vec<(String, String)> {
         .collect()
 }
 
+/// 个人英文词：`user-english.tsv`（`# 注释` + `词\t次数`），按词排序，第二列写成给用户看的说明。
+///
+/// 和中文个人词**列在同一份列表**里（用户找的就是「个人词」那一节），删除走同一条请求。
+fn learned_english(settings: &Settings) -> Vec<(String, String)> {
+    let path = settings.data_dir().join(USER_ENGLISH_FILE);
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    parse_english_words(&text)
+}
+
+/// `user-english.tsv` 的正文 → (词, 说明)。注释行与坏行跳过（文件可能被手改过）。
+fn parse_english_words(text: &str) -> Vec<(String, String)> {
+    let mut words: Vec<(String, String)> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| {
+            let (word, count) = line.split_once('\t')?;
+            let word = word.trim();
+            if word.is_empty() {
+                return None;
+            }
+            let count: u32 = count.trim().parse().unwrap_or(0);
+            Some((word.to_owned(), format!("个人英文词 · 上屏过 {count} 次")))
+        })
+        .collect();
+    words.sort();
+    words
+}
+
+/// 个人词（中文用户词 + 个人英文词），按词排序。
+fn all_learned(settings: &Settings) -> Vec<(String, String)> {
+    let mut words = learned_words(settings);
+    words.extend(learned_english(settings));
+    words.sort();
+    words.dedup_by(|a, b| a.0 == b.0);
+    words
+}
+
 /// 词或拼音里含筛选串（大小写不敏感）；`query` 为空 / 只有空白 = 不过滤（光是多敲了个空格就把列表清空太扎眼）。
 fn filter_words(words: &[(String, String)], query: Option<&str>) -> Vec<(String, String)> {
     let query = query.unwrap_or_default().trim().to_lowercase();
@@ -248,7 +294,7 @@ fn filter_words(words: &[(String, String)], query: Option<&str>) -> Vec<(String,
 
 /// 当前筛选条件下的个人词。翻页要按**筛选后**的总数算页数，所以 `update` 也调这里。
 pub(crate) fn matched_words(settings: &Settings) -> Vec<(String, String)> {
-    filter_words(&learned_words(settings), settings.word_query.as_deref())
+    filter_words(&all_learned(settings), settings.word_query.as_deref())
 }
 
 /// 「个人词」：不在词库里、由你选过 / 云端接过来的词。分页显示，可以逐个删掉。
@@ -257,11 +303,11 @@ pub(crate) fn matched_words(settings: &Settings) -> Vec<(String, String)> {
 /// 这里只往 `forget-requests.txt` 里写一行，Server 每秒看一次、`forget` 完立刻落盘
 /// （见 `qingjian_platform::dirs::forget_requests_path`）。
 fn learned_list(settings: &Settings, context: &mut ViewContext<Settings>) -> View {
-    let all = learned_words(settings);
+    let all = all_learned(settings);
     if all.is_empty() {
         return note(
-            "还没有个人词。选中词库里没有的词（造词、接受云端词）之后会记在这里；\
-             列表里可以逐个删掉。",
+            "还没有个人词。选中词库里没有的词（造词、接受云端词）、或在中文模式下原样上屏过一串字母，\
+             都会记在这里；列表里可以逐个删掉。",
         );
     }
     let matched = filter_words(&all, settings.word_query.as_deref());
@@ -283,7 +329,7 @@ fn learned_list(settings: &Settings, context: &mut ViewContext<Settings>) -> Vie
                     .text(settings.word_query.clone().unwrap_or_default())
                     .on_text_changed(context.callback(Message::WordQuery)),
                 note(&format!(
-                    "共 {} 条{}，删掉之后青简立刻忘掉它（含它的个人 n-gram 痕迹）。",
+                    "共 {} 条{}（中文个人词 + 个人英文词），删掉之后青简立刻忘掉它（含它的个人 n-gram 痕迹）。",
                     all.len(),
                     if matched.len() == all.len() {
                         String::new()
@@ -492,5 +538,23 @@ mod tests {
         let start = last * WORDS_PER_PAGE;
         let end = (start + WORDS_PER_PAGE).min(total);
         assert_eq!(end - start, 7);
+    }
+
+    /// `user-english.tsv` 的读法：跳过表头注释与坏行，第二列写成给用户看的说明
+    /// （个人英文词以前不在列表里，用户找不到 `javashiyimenbianchengyuyan` 那种被记住的整串字母）。
+    #[test]
+    fn english_words_are_listed_with_a_readable_note() {
+        let text = "# 青简个人英文词：词\t次数\nJava\t3\njavashiyimenbianchengyuyan\t5\n\n坏行没有制表符\n  ds\t2\n";
+        assert_eq!(
+            parse_english_words(text),
+            [
+                ("Java".to_owned(), "个人英文词 · 上屏过 3 次".to_owned()),
+                ("ds".to_owned(), "个人英文词 · 上屏过 2 次".to_owned()),
+                (
+                    "javashiyimenbianchengyuyan".to_owned(),
+                    "个人英文词 · 上屏过 5 次".to_owned()
+                ),
+            ]
+        );
     }
 }

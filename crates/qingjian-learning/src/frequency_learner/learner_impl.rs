@@ -172,6 +172,13 @@ impl Learner for FrequencyLearner {
             self.words_dirty = true;
             self.rebuild_words();
         }
+        // 个人英文词（`user-english.tsv`）：中文模式下把一串字母原样上屏也会被记成「英文词」
+        // （`learn_english`），它不在用户词表里 —— 设置页的「个人词」列表把两边都列出来，
+        // 删除时也要两边都清，否则删了跟没删一样（2026-09-18 用户反馈：`javashiyimenbianchengyuyan`
+        // 被记住了却在个人词库里找不到）。
+        if self.forget_english(text) {
+            forgotten.learning = true;
+        }
         if self.counts.remove(text).is_some() {
             forgotten.learning = true;
             self.dirty = true;

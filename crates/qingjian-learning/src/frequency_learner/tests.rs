@@ -241,6 +241,23 @@ fn forget_removes_the_user_word_and_every_trace_of_learning() {
     assert!(learner.forget_english("Gist"));
     assert!(!learner.forget_english("gist"));
     assert!(learner.user_english().is_none());
+    // `forget` 也要清个人英文词：中文模式下把一串字母原样上屏会被记成英文词（`learn_english`），
+    // 它不在用户词表里，删除时漏掉就「删了跟没删一样」（2026-09-18 用户反馈）。
+    learner.learn_english("javashiyimenbianchengyuyan");
+    let forgotten = learner.forget("javashiyimenbianchengyuyan");
+    assert!(
+        forgotten.learning,
+        "只有英文词记录时也算删掉了东西（否则请求方以为没删）"
+    );
+    assert!(
+        learner.user_english().is_none(),
+        "个人英文词要被清掉，实际还有 {} 条",
+        learner.user_english().map_or(0, |list| list.len())
+    );
+    // 大小写不同也认（英文表按小写存键）
+    learner.learn_english("Gist");
+    assert!(learner.forget("gist").learning);
+    assert!(learner.user_english().is_none());
 }
 
 #[test]

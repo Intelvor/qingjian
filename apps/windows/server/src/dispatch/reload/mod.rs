@@ -174,6 +174,9 @@ impl Router {
         let Ok(text) = std::fs::read_to_string(&path) else {
             return;
         };
+        // 首行可能带 UTF-8 BOM（别的工具写这个文件时会加，2026-09-18 用 PowerShell `Set-Content -Encoding UTF8`
+        // 试出来的）：BOM 会让第一个词匹配不上，删不掉。
+        let text = text.trim_start_matches('\u{feff}');
         let words: Vec<&str> = text
             .lines()
             .map(str::trim)
