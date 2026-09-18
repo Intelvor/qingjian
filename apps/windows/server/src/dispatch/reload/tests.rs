@@ -134,3 +134,36 @@ fn dictionary_changes_do_not_retry_broken_config() {
     drop(router);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// 设置页请求删掉的个人词：Server 处理请求文件、`forget` 完**立刻落盘**，再把请求文件清掉。
+/// 设置程序不直接改 `user-words.tsv` 是有原因的 —— 学习数据在 Server 内存里是权威、每 60 秒才落一次盘，
+/// 直接改会被覆盖回去（见 `qingjian_platform::dirs::forget_requests_path` 的注释）。
+#[test]
+fn forget_requests_drop_personal_words() {
+    let dir = std::env::temp_dir().join(format!("qingjian-forget-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let config_path = dir.join("config.toml");
+    std::fs::write(&config_path, "").unwrap();
+    let config = Config::load(&config_path).unwrap();
+    // 个人词表里先躺着一个「合同法」（词表与词频文件同目录，`from_path` 按 sibling 读它）。
+    std::fs::write(
+        dir.join("user-words.tsv"),
+        "# 青简用户词：词\t拼音\t词频，与主词库同格式\n合同法\the tong fa\t10000\n",
+    )
+    .unwrap();
+    let learner = qingjian_learning::FrequencyLearner::from_path(dir.join("user.tsv")).unwrap();
+    let engine = Engine::new(Dictionary::default()).with_learner(Box::new(learner));
+    let mut router = Router::new(engine, RouterConfig::default());
+    router.watch_config(&config, config_path, dir.clone(), Some(dir.clone()));
+
+    let requests = qingjian_platform::dirs::forget_requests_path(&dir);
+    std::fs::write(&requests, "合同法\n").unwrap();
+    poll(&mut router);
+
+    assert!(!requests.exists(), "请求文件该被处理掉");
+    let words = std::fs::read_to_string(dir.join("user-words.tsv")).unwrap();
+    assert!(!words.contains("合同法"), "个人词该被删掉，实际：{words}");
+    drop(router);
+    let _ = std::fs::remove_dir_all(&dir);
+}

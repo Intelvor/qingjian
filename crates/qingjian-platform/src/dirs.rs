@@ -8,7 +8,7 @@
 //!
 //! 只查环境变量、不碰系统 API，其他平台也能编（拿不到为 `None`）。macOS 有自己的 `paths.rs`，不走这里。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// 用户数据目录 `%APPDATA%\Qingjian`。
 pub fn user_dir() -> Option<PathBuf> {
@@ -23,4 +23,14 @@ pub fn config_path() -> Option<PathBuf> {
 /// 运行日志目录 `%LOCALAPPDATA%\Qingjian\logs`，不负责创建。
 pub fn log_dir() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA").map(|base| PathBuf::from(base).join("Qingjian").join("logs"))
+}
+
+/// 「设置页请求删掉某个个人词」的投递文件：设置程序往里写词（一行一个），Server 每秒看一次、
+/// 逐个 `Engine::forget_word` 并**立刻落盘**，然后把这个文件删掉。
+///
+/// **为什么不直接改 `user-words.tsv`**：学习数据在 Server 内存里是权威，而它**每 60 秒**才落盘
+/// 一次（`LEARNING_FLUSH_INTERVAL`）—— 直接改文件会被那份内存数据的下一次落盘覆盖回去；而且
+/// `forget_word` 还会顺手清个人 n-gram / 敲错表里的痕迹，改文件做不到。
+pub fn forget_requests_path(user_dir: &Path) -> PathBuf {
+    user_dir.join("forget-requests.txt")
 }

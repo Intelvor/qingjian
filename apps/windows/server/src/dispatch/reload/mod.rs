@@ -123,13 +123,23 @@ impl Router {
 
     /// 空闲时调；一秒内只真正看一次文件。解析失败保持原配置，mtime 照记（不每秒重试同一个坏文件）。
     pub fn poll_config_reload(&mut self) {
+        // 「该不该看」与 `user_dir` 先取出来：下面处理删除请求要 `&mut self`，`reload` 的借用得先放下。
+        let user_dir = {
+            let Some(reload) = &mut self.reload else {
+                return;
+            };
+            if reload.last_check.elapsed() < CONFIG_POLL_INTERVAL {
+                return;
+            }
+            reload.last_check = Instant::now();
+            reload.user_dir.clone()
+        };
+        // 设置页请求删掉的个人词：它读不到我们内存里那份学习数据，所以只投个请求过来，
+        // 由我们 `forget` 完立刻落盘 —— 直接改 `user-words.tsv` 会被下一次落盘（60 秒一次）覆盖回去。
+        self.apply_forget_requests(user_dir.as_deref());
         let Some(reload) = &mut self.reload else {
             return;
         };
-        if reload.last_check.elapsed() < CONFIG_POLL_INTERVAL {
-            return;
-        }
-        reload.last_check = Instant::now();
         let files = user_dicts_dir(reload.user_dir.as_deref())
             .map(|dir| extra_dictionaries::snapshot(&dir))
             .unwrap_or_default();
@@ -152,6 +162,40 @@ impl Router {
                 tracing::info!("配置已热加载");
             }
             Err(error) => tracing::error!(%error, "配置热加载解析失败，保持原配置"),
+        }
+    }
+
+    /// 处理设置页投过来的「删掉这些个人词」请求：逐个 [`Engine::forget_word`]，然后**立刻落盘**
+    /// （`flush_learning`），最后把请求文件删掉。幂等：删不掉（文件被占）时留着，下一拍再试。
+    fn apply_forget_requests(&mut self, user_dir: Option<&Path>) {
+        let Some(path) = user_dir.map(qingjian_platform::dirs::forget_requests_path) else {
+            return;
+        };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let words: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        if words.is_empty() {
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
+        let mut removed = 0;
+        for word in &words {
+            if !self.engine.forget_word(word).is_nothing() {
+                removed += 1;
+            }
+        }
+        // 落盘把删除写进 `user-words.tsv`：不落的话设置页再读文件还是能看见它。
+        self.flush_learning();
+        match std::fs::remove_file(&path) {
+            Ok(()) => tracing::info!(asked = words.len(), removed, "按设置页的请求删掉个人词"),
+            Err(error) => {
+                tracing::warn!(%error, asked = words.len(), removed, "删掉个人词后清不掉请求文件")
+            }
         }
     }
 

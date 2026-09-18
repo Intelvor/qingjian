@@ -80,6 +80,10 @@ pub(crate) enum Message {
     /// 挪进 dicts\removed，不真删。
     RemoveUserDict(String),
     ImportDictionary,
+    /// 「个人词」列表上面那个框里的筛选文字。
+    WordQuery(String),
+    /// 请青简删掉一个学到的词（写请求文件，Server 那边 forget 后立刻落盘）。
+    ForgetWord(String),
 
     // 高级页
     VerboseLog(bool),

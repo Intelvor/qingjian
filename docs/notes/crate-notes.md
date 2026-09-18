@@ -178,6 +178,7 @@ TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解
 深浅各一套（浅底上品牌色要更深才压得住白，深底上要更亮才读得出来），所以是 `Palette::light_with(accent)` / `dark_with(accent)`。
 **两条画法都要给**：青简渲染器在 `ui/painter/`（`Painter` 存一份 `Accent`，`configure` 里主题色变了只换配色、**不重建字体库** —— 那是几十毫秒的重扫）；GDI 那条在 `ui/candidates/theme/`，没有 alpha，按各色的不透明度**预混**到背景上写成不透明值。
 主题色到达两个窗口的路径：`RenderSettings.accent`（配置类型 `AccentColor`）→ UI 线程 `UiCommand::Configure` → `window.set_accent()` / `status.set_accent()` 各存一份 → 各自 `sync_theme` 里与「造当前主题时用的那份」比对后重建。
+**设置页要改 Server 内存里的东西，走「请求文件」而不是直接改数据文件**（2026-09-18，个人词删除）：学习数据在 Server 内存里是权威、**每 60 秒**才落盘一次（`LEARNING_FLUSH_INTERVAL`），设置程序直接改 `user-words.tsv` 会被那份内存数据的下一次落盘**覆盖回去**；而且 `Engine::forget_word` 还会顺手清个人 n-gram 与按输入串的选择，改文件做不到。现在的做法：设置页往 `dirs::forget_requests_path()`（`%APPDATA%\Qingjian\forget-requests.txt`，一行一个词）追加，Server 在 `poll_config_reload`（1 秒一拍）里逐个 `forget`、**立刻 `flush_learning()`**、再把请求文件删掉；幂等（删不掉就下一拍再试）。**判据**：只要「数据在对方内存里 + 对方会周期性落盘」，就别用直接改文件那条路。
 整句补全的时机在 `[predict] sentence_trigger`：`idle` 是停键自动请，`tab` 是按下 Tab 现请一次（`Engine::request_sentence_once` 让这一拍破例要句子）；
 请出去到结果回来的这段由 `Router.sentence_pending` 驱动候选窗摆「☁ …」。云联想关着时按 Tab 交还应用（缩进 / 跳焦点）。
 

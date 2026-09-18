@@ -169,15 +169,31 @@ impl Engine {
             | CandidateKind::Emoji => Forgotten::default(),
         };
         if !forgotten.is_nothing() {
-            self.forget_span_cache();
-            *self.correction_cache.borrow_mut() = None;
-            if self.chain.mentions(&candidate.text) {
-                self.chain.reset();
-            }
-            self.recent_commits.retain(|c| c.text != candidate.text);
-            tracing::debug!(text = %candidate.text, ?forgotten, "删除候选");
+            self.after_forget(&candidate.text, forgotten);
         }
         forgotten
+    }
+
+    /// 按**词面**删一个中文词：设置页的「个人词」列表用它（那里只有词与拼音，没有候选对象）。
+    /// 与 [`Self::forget`] 里中文 / 云端候选那条路完全同一套（删用户词 + 清学习痕迹）。
+    pub fn forget_word(&mut self, text: &str) -> Forgotten {
+        let forgotten = self.learner.forget(text);
+        if forgotten.is_nothing() {
+            return forgotten;
+        }
+        self.after_forget(text, forgotten);
+        forgotten
+    }
+
+    /// 删掉一个词之后的公共收尾：缓存作废、它也不再当下一句的上文。
+    fn after_forget(&mut self, text: &str, forgotten: Forgotten) {
+        self.forget_span_cache();
+        *self.correction_cache.borrow_mut() = None;
+        if self.chain.mentions(text) {
+            self.chain.reset();
+        }
+        self.recent_commits.retain(|c| c.text != text);
+        tracing::debug!(text, ?forgotten, "删除候选");
     }
 
     /// 把学习数据与输入日志落盘。壳在停用输入法时调，激活期间也可以定时调（进程被杀时少丢）：

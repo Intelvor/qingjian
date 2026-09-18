@@ -9,6 +9,9 @@ use windows_reactor::*;
 use crate::panel::controls::{note, page, repo_resource};
 use crate::panel::{Message, Settings};
 
+/// 个人词文件名（`%APPDATA%\Qingjian\user-words.tsv`），与 `qingjian-learning` 里那个常量一致。
+const USER_WORDS_FILE: &str = "user-words.tsv";
+
 /// 用户词库目录 `%APPDATA%\Qingjian\dicts`。
 fn user_dir(settings: &Settings) -> PathBuf {
     settings.data_dir().join("dicts")
@@ -189,6 +192,13 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
                 note("接受青简 TSV、Rime .dict.yaml、.qj、.txt；导入会转成 <名字>.qj 放进上面的目录。"),
             )),
     );
+    rows.push(
+        TextBlock::new()
+            .text("个人词")
+            .font_weight(FontWeight::SEMI_BOLD)
+            .into(),
+    );
+    rows.push(learned_list(settings, context));
     rows.push(note(&settings.dictionary_status));
     let body = StackPanel::new().spacing(12.0).keyed_children(
         rows.into_iter()
@@ -196,6 +206,115 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
             .map(|(index, view)| KeyedView::new(index.to_string(), view)),
     );
     page("词库", body)
+}
+
+/// 学到的个人词：`user-words.tsv`（`词\t拼音\t词频`，按词排序）。读不出来（还没学过）就是空。
+fn learned_words(settings: &Settings) -> Vec<(String, String)> {
+    let path = settings.data_dir().join(USER_WORDS_FILE);
+    let Ok(dictionary) = qingjian_core::dictionary::Dictionary::from_path(&path) else {
+        return Vec::new();
+    };
+    dictionary
+        .entries()
+        .map(|entry| (entry.text.to_owned(), entry.pinyin.to_owned()))
+        .collect()
+}
+
+/// 一页最多画多少行：词多起来（几千条）时整页构建会卡，给个上限 + 提示，筛选框能缩小范围。
+const LEARNED_ROWS: usize = 200;
+
+/// 「个人词」：不在词库里、由你选过 / 云端接过来的词。可以逐个删掉。
+///
+/// 删除**不直接改文件**：学习数据在 Server 内存里是权威、每 60 秒才落盘一次，直接改会被覆盖回去；
+/// 这里只往 `forget-requests.txt` 里写一行，Server 每秒看一次、`forget` 完立刻落盘
+/// （见 `qingjian_platform::dirs::forget_requests_path`）。
+fn learned_list(settings: &Settings, context: &mut ViewContext<Settings>) -> View {
+    let words = learned_words(settings);
+    if words.is_empty() {
+        return note(
+            "还没有个人词。选中词库里没有的词（造词、接受云端词）之后会记在这里；\
+             列表里可以逐个删掉。",
+        );
+    }
+    let query = settings
+        .word_query
+        .clone()
+        .unwrap_or_default()
+        .to_lowercase();
+    let matched: Vec<&(String, String)> = words
+        .iter()
+        .filter(|(word, pinyin)| {
+            query.is_empty()
+                || word.to_lowercase().contains(&query)
+                || pinyin.to_lowercase().contains(&query)
+        })
+        .collect();
+    let mut rows: Vec<View> = Vec::new();
+    rows.push(
+        StackPanel::new()
+            .orientation(Orientation::Horizontal)
+            .spacing(12.0)
+            .children((
+                TextBox::new()
+                    .width(220.0)
+                    .placeholder_text("筛选：词或拼音")
+                    .text(query.clone())
+                    .on_text_changed(context.callback(Message::WordQuery)),
+                note(&format!(
+                    "共 {} 条{}，删掉之后青简立刻忘掉它（含它的个人 n-gram 痕迹）。",
+                    words.len(),
+                    if matched.len() == words.len() {
+                        String::new()
+                    } else {
+                        format!("，当前筛出 {} 条", matched.len())
+                    }
+                )),
+            )),
+    );
+    for (word, pinyin) in matched.iter().take(LEARNED_ROWS) {
+        let label: View = TextBlock::new()
+            .text(format!("{word} · {pinyin}"))
+            .text_wrapping(TextWrapping::Wrap)
+            .into();
+        let row = StackPanel::new()
+            .orientation(Orientation::Horizontal)
+            .spacing(12.0)
+            .children((
+                label,
+                Button::new()
+                    .on_click(context.message(Message::ForgetWord(word.clone())))
+                    .content("删除"),
+            ));
+        rows.push(row);
+    }
+    if matched.len() > LEARNED_ROWS {
+        rows.push(note(&format!(
+            "只列出前 {LEARNED_ROWS} 条（共 {} 条），用上面的筛选框缩小范围。",
+            matched.len()
+        )));
+    }
+    StackPanel::new().spacing(6.0).keyed_children(
+        rows.into_iter()
+            .enumerate()
+            .map(|(index, view)| KeyedView::new(index.to_string(), view)),
+    )
+}
+
+/// 把「删掉这个词」写进请求文件（一行一个，去重），等 Server 来处理。
+pub(crate) fn request_forget(settings: &mut Settings, word: &str) {
+    let path = qingjian_platform::dirs::forget_requests_path(settings.data_dir());
+    let old = std::fs::read_to_string(&path).unwrap_or_default();
+    if old.lines().any(|line| line.trim() == word) {
+        settings.dictionary_status = format!("「{word}」已经请过了，等青简处理。");
+        return;
+    }
+    let mut text = old;
+    text.push_str(word);
+    text.push('\n');
+    settings.dictionary_status = match std::fs::write(&path, text) {
+        Ok(()) => format!("已请青简删掉「{word}」——一秒内生效，刷新这一页就看不到它了。"),
+        Err(error) => format!("请求删除「{word}」失败：{error}"),
+    };
 }
 
 /// 挪进 `dicts\removed`，不真删（与 macOS 一致）。

@@ -75,6 +75,7 @@ impl Component for Settings {
             dictionary_status: String::new(),
             families: qingjian_render::system_fonts::families(),
             font_query: None,
+            word_query: None,
         }
     }
 
@@ -272,6 +273,10 @@ impl Component for Settings {
                 dictionaries::import(self);
                 self.reload();
             }
+            Message::WordQuery(text) => {
+                self.word_query = (!text.is_empty()).then_some(text);
+            }
+            Message::ForgetWord(word) => dictionaries::request_forget(self, &word),
 
             // 高级页
             Message::VerboseLog(on) => {
