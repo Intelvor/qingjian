@@ -1,58 +1,70 @@
-//! 提示词与回复解析。模型只输出约定的 JSON，其余一概不信；拼音校验在 Core 里再做一遍。
+//! 提示词与回复解析。
+//!
+//! **2026-09-18 改口径**：给模型的东西不再做任何本地加工 —— 只发**用户敲的原始按键 + 光标前后文 +
+//! 候选窗第一页**，让模型自己去理解意图；本地也不再拿拼音去校验模型给的整句（旧版会要求模型自报
+//! `sentence_pinyin` 并与本地切分逐音节对，拼音切不开的输入（`javashiyimenbianchengyuyan` 这种夹着
+//! 英文词的）会被这一条整片挡掉）。现在只保留两条「组装」层面的清理：剥掉模型重复写进来的
+//! before / after，别让它复述下文；以及**不与候选窗第一页重复**。
 
-use qingjian_core::{
-    CloudWord, PredictionKind, PredictionRequest, mismatch_count, sentence_tolerance,
-};
+use qingjian_core::{CloudWord, PredictionKind, PredictionRequest};
 use serde::{Deserialize, Serialize};
 
 /// 系统提示。语言跟随上下文，不限定中文。
+///
+/// 只讲「你会收到什么、要输出什么」+ 几个示例把行为框住，不塞本地切分 / 候选之类会误导模型的东西。
 pub const SYSTEM_PROMPT: &str = "\
-你是一个拼音输入法的云端联想引擎。用户正在打拼音，还没选词。你会收到一段 JSON：\
-letters（用户实际敲的字母，**可能有错字、漏字、多字、音节切错**）、pinyin（输入法按 letters 做的切分，' 分隔音节，单个字母是声母缩写，切分可能是错的）、\
-syllables（切分出的音节数，仅供参考）、before / after（当前光标前后的文本，应用给不出时为空——**判断用户在写什么主要靠它们**，
-别只看 letters 猜：before 是「高等数学是」时 `d'x` 出「大学」，不要出「大象」）、\
-local_sentence（本地整句转换的结果，可能错）、local_candidates（本地词库排在前面的候选，第一个是本地首选）、max_items、want_sentence。
+你是一个中文输入法的联想引擎。用户正在打字、还没选词，你要猜他接下来想打什么。你会收到一段 JSON：
 
-用户经常**中英混排**：letters 可能整个是英文词（docker、linux、API）、可能全是拼音，也可能一半一半（今天 qu gongsi、我不了解 linux）；\
-before / after 里也常夹英文术语。按 letters 与上下文判断他到底想打什么，别硬往中文或英文一头拉。
+- letters：**用户实际敲的原始按键**，没有加工过。可能全是拼音、可能整个是英文词、可能中英夹杂（`jintian qu gongsi`、
+  `buzhidao linux zenme yong`、`javashiyimenbianchengyuyan`），也可能带简单的错字 / 漏字 / 多字 / 前后颠倒。
+- scheme：用户的**输入方式**（`全拼` / `小鹤双拼` / `自然码` / `微软双拼` / `搜狗双拼` / `小浪双拼` / `大千注音` /
+  `五笔（86 版）` / `五笔（86 版）+ 全拼（混输）` 这类）。双拼与注音的 letters **已经还原成全拼**，按拼音理解即可；
+  **五笔（以及混输里的五笔部分）的 letters 是字根编码、不是拼音**（`wqiy` 是「你」、`trnt` 是「我」），要按五笔理解。
+- traditional：true 表示用户要**繁体**输出（默认 false 简体），words 与 sentence 直接用对应字形写。
+- before / after：光标前后的文本（可能是空串）。**判断用户想写什么主要靠它们**：before 是「高等数学是」时
+  `daxue` 该出「大学」而不是「大雪」。
+- candidates：**候选窗口第一页已经给出的候选**（本地词库 / 本地整句转换的结果，按顺序）。它们只是本地能给的东西，
+  可能不对、也可能不完整，别被带偏。
+- max_items：words 最多要几条（0 表示只要整句，不要词）。
+- want_sentence：要不要整句预测。
 
-**local_candidates 和 local_sentence 只是本地的猜测，可能全错。**它们的用途是告诉你本地已经能给什么：\
-和它们重复的词会被丢掉，所以不要照抄；也不要被它们带偏——请只根据 letters 与 before / after 独立判断用户想打什么。
+输出 JSON：{\"words\": [{\"text\": \"…\"}], \"sentence\": \"…\" 或 null}
 
-输出 JSON：{\"words\": [{\"text\": \"…\", \"pinyin\": \"…\"}], \"sentence\": \"…\" 或 null, \"sentence_pinyin\": \"…\" 或 null}
+words（0 到 max_items 条，按可能性从高到低）：
+- 按 letters 推断用户想打什么：他敲的可能是错拼、可能是简拼（单字母是声母）、可能夹着英文词或数字；忽略简单拼写错误。
+  例：`zhgdoima` → 这个东西吗；`javashiyimenbianchengyuyan` → 只要词就给 Java 这类英文词。
+- 中英混排时该给什么就给什么：中文语境里更常用英文说法就写英文原样（Docker、API、Linux），别硬翻成中文。
+- 只给真实存在的词或短语，不要生造、不要凑数；不确定就给空数组。
+- **不要重复 candidates 里已经有的候选**（包括它的同音变体）；本地已经给对了就不必再给。
+- 你的价值在本地给不出的：术语、新词、人名机构名、缩写、按上下文选对的同音词、错拼纠正。
 
-words：用户最可能想输入、而本地又给不出（或排错了）的词或短语，0 到 max_items 个，按可能性排序。要求：
-- 按 letters 推断用户想打什么，允许纠正错字、漏字、多字（如 zhgdoima → 这个东西吗）；pinyin 给该词**正确**的全拼，音节间用空格，字数等于音节数，\
-  不要比用户敲的多出或少掉音节；
-- 你的价值在：本地词库缺的术语、新词、人名机构名、缩写扩展；按 before / after 体现的领域（财务、软件开发、医学……）选对同音词；纠正错拼；
-- 中文语境里更常用英文说法时就给英文词 / 术语（Docker、API、Linux系统）：text 写原文，pinyin 填同一个词的小写（`docker`、`linux xi tong`）——\
-  本地按 letters 对这个字符串，不是拼音也能进候选；
-- **letters 里的单个字母是声母缩写，不是完整音节**：不要按缩写拼凑出词来（「复合语气」「符号映射」这种首字母硬凑的不算答案，宁可不给）；
-- 只给真实存在的词，不要生造（「不态」「步太」这种组合）；不确定就少给；
-- 本地首选已经对了就不必再给同一个词，也不必给它的同音变体；没有更好的就给空数组，不要凑数。
+sentence（want_sentence 为 true 时给，否则 null）：**替换用户这段输入**的一句话。
+- 有 after 时，sentence 只填 before 与 after 中间缺的那一小段（通常 1 到 6 个字），**不要重复 after、连改写也不行**，
+  不要带句末标点。例：before=高等数学是、letters=jichu、after=最重要的基础课程之一 → sentence=\"基础\"。
+- 没有 after 时，给一条完整的话，接住 before 的话题往下写、要有信息量；不要「是一种很好的选择」这类空话，
+  也不要把 before 抄一遍。例：before=笛卡儿积、letters=shiyizhong → sentence=\"是一种二元运算\"。
+- 以 letters 敲出来的东西开头（用户敲什么就补什么）。实在想不出合适的就给 null。
+- 可以中英混排（我不了解Linux系统、部署完成后调用API验证），数字也常混在里面：按中文书写习惯来 ——
+  金额、数量、序号、年份、代码写阿拉伯数字（我花 123 元、第 3 章、2024 年），口语量词与成语里的固定说法写汉字
+  （三个月、一个人、一心一意）。用户敲的拼音按汉字念（`yibaiershisanyuan` 就是 123 元），照念法还原。
+- **letters 为空是「续写」**（用户没敲东西、直接按了 Tab 让你接着写）：只看 before / after 往下写，
+  不给词、sentence 就是接着写的内容。
 
-sentence：want_sentence 为 true 时给一段文字，它**只替换这段拼音**。分两种情况：
-- **有 after**（光标后面已有文字）：sentence 只是填在 before 与 after 之间的那一小段，通常 1 到 6 个字，会被原样插在 before 之后、after 之前。
-  例：before=高等数学是、拼音 d'x、after=最重要的基础课程之一 → sentence 给「大学」（拼起来是 高等数学是大学最重要的基础课程之一）。
-  **不要重复 after，连改写也不行**（「大学阶段学习的重要基础课程之一」这种等于把 after 又写了一遍，拼起来会重复），不要带句末标点，不要写成能独立成句的完整句子。
-- **没有 after**：才给一条完整的短句，接住 before 的话题往下写、给出有信息量的续写（before 是 笛卡儿积、拼音 shiyizhong → 笛卡儿积是一种二元运算）；
-  不要「是一种很好的选择」「对身体健康非常重要」这类与话题无关的空话。**不要把 before 的内容抄进来**。
-- **sentence 必须以 letters 拼出来的那个词开头**（就是 local_candidates 里的词），哪怕 before / after 的语义更像另一个词——用户敲什么就补什么。
-  例：before=高等数学是一门非常重要的、拼音 d'x、after=课程 → 以「大学」开头（能接上 after 的说法），**不要「基础」**：`d'x` 拼不出基础，用户想打的是大学。
-  实在拼不出合适的就给 null，不要硬凑。
-- **sentence_pinyin 必须给**（不给整句直接丢弃，等于白答）：用户敲的这段拼音对应的**正确**全拼，
-  一个音节一个拼音、用空格隔开（就是 `syllables` 个音节）；本地会拿它和 letters 对（简拼、少量错字都算过）。
-- sentence 可以**中英混排**（我不了解Linux系统、部署完成后调用API验证），数字也常混在里面。给 sentence_pinyin 时\
-  **按用户敲的字母给，不是按写出来的字**：中文给全拼；英文与字母数字混排的照原样小写（`mp3` 是敲 `mp` 加 `san`，就给 `mp san`；`C盘` 给 `cpan`）；\
-  **阿拉伯数字按念法给拼音**（`123` → `yi bai er shi san`），它没有字母可对。
-- **数字与符号怎么写由你判断**，按中文习惯来：金额、数量、序号、年份、代码这类写阿拉伯数字（我花 123 元、第 3 章、2024 年）；\
-  口语量词与成语里的固定说法写汉字（三个月、一个人、一心一意）。同一个句子里两种混着来才自然——「我花 123 元买了三个 mp3」比\
-  「我花一百二十三元买了3个mp3」更像人写的。用户敲的拼音是按汉字念的（`yibaiershisanyuan` 就是 123 元），照念法还原即可。
-- **letters 为空是「续写」**（用户没敲拼音、直接按了触发键让你接着写）：只看 before / after 往下写，不必考虑拼音与 local_candidates，
-  sentence_pinyin 给空字符串即可；其余要求（接住话题、不重复 after、不带句末标点、不写空话）照旧。
-want_sentence 为 false 时给 null。语言跟随上下文。
+示例（输入 → 输出）：
+1. {\"letters\":\"javashiyimenbianchengyuyan\",\"scheme\":\"全拼\",\"traditional\":false,\"before\":\"\",\"after\":\"\",\"candidates\":[\"就啊\",\"骄傲\"],\"max_items\":0,\"want_sentence\":true}
+   → {\"words\":[],\"sentence\":\"Java 是一门编程语言\"}
+2. {\"letters\":\"wqiy\",\"scheme\":\"五笔（86 版）\",\"traditional\":false,\"before\":\"\",\"after\":\"\",\"candidates\":[\"你\"],\"max_items\":4,\"want_sentence\":false}
+   → {\"words\":[{\"text\":\"你好\"}],\"sentence\":null}
+3. {\"letters\":\"zhege dongxi zenme yong\",\"scheme\":\"全拼\",\"traditional\":false,\"before\":\"\",\"after\":\"\",\"candidates\":[\"这个\"],\"max_items\":4,\"want_sentence\":false}
+   → {\"words\":[{\"text\":\"这个东西怎么用\"}],\"sentence\":null}
+4. {\"letters\":\"daxue\",\"scheme\":\"全拼\",\"traditional\":false,\"before\":\"高等数学是\",\"after\":\"最重要的基础课程之一\",\"candidates\":[\"大学\",\"大雪\"],\"max_items\":4,\"want_sentence\":true}
+   → {\"words\":[],\"sentence\":\"大学\"}
+5. {\"letters\":\"docker\",\"scheme\":\"全拼\",\"traditional\":false,\"before\":\"用\",\"after\":\"部署服务\",\"candidates\":[\"多克\"],\"max_items\":4,\"want_sentence\":true}
+   → {\"words\":[{\"text\":\"Docker\"}],\"sentence\":\"Docker\"}
+6. {\"letters\":\"\",\"scheme\":\"全拼\",\"traditional\":false,\"before\":\"笛卡儿积\",\"after\":\"\",\"candidates\":[],\"max_items\":0,\"want_sentence\":true}
+   → {\"words\":[],\"sentence\":\"是一种二元运算\"}
 
-不解释、不加引号、不加序号。";
+不解释、不加引号、不加序号，只输出 JSON。";
 
 /// 问字模式的系统提示：用户用拼音问一个字（或一个短答案）。
 pub const QUESTION_SYSTEM_PROMPT: &str = "\
@@ -87,22 +99,23 @@ pub fn system_prompt(request: &PredictionRequest) -> &'static str {
     }
 }
 
-/// 发给模型的用户消息：把请求原样序列化，模型看到的和我们记日志的完全一致。
+/// 发给模型的用户消息：**只有用户敲的原始按键、光标前后文、候选窗第一页**，不做任何本地加工
+///（不切分、不纠错、不塞本地整句），让模型自己理解意图。序列化出来就是模型看到的全部内容。
 #[derive(Serialize)]
 struct UserMessage<'a> {
     letters: &'a str,
 
-    pinyin: &'a str,
+    /// 用户当前的输入方式（「全拼」/「小鹤双拼」/「大千注音」/「五笔（86 版）」/「五笔（86 版）+ 全拼（混输）」…）。
+    scheme: &'a str,
 
-    syllables: usize,
+    /// 输出简体还是繁体。
+    traditional: bool,
 
     before: &'a str,
 
     after: &'a str,
 
-    local_sentence: &'a str,
-
-    local_candidates: &'a [String],
+    candidates: &'a [String],
 
     max_items: usize,
 
@@ -148,12 +161,11 @@ pub fn user_prompt(request: &PredictionRequest) -> String {
     }
     serde_json::to_string(&UserMessage {
         letters: &request.letters,
-        pinyin: &request.pinyin,
-        syllables: request.syllables,
+        scheme: &request.scheme,
+        traditional: request.traditional,
         before: &request.before,
         after: &request.after,
-        local_sentence: &request.guess,
-        local_candidates: &request.candidates,
+        candidates: &request.candidates,
         max_items: request.max_items,
         want_sentence: request.want_sentence,
     })
@@ -221,20 +233,18 @@ pub fn parse_reply(content: &str, request: &PredictionRequest) -> Reply {
     }
     let mut reply = Reply::default();
     let mut seen: Vec<String> = Vec::new();
-    let first_local = request.candidates.first().map(String::as_str);
     for word in raw.words {
         let text = clean(&word.text);
+        // `pinyin` 现在只是可选信息（提示词不再要求）：给了就带着（上屏时记用户词用得上），
+        // 没给也不影响进候选 —— 本地不再拿它去校验。
         let syllables: Vec<String> = word
             .pinyin
             .split(|c: char| c.is_whitespace() || c == '\'')
             .filter(|s| !s.is_empty())
             .map(|s| s.to_ascii_lowercase())
             .collect();
-        if text.is_empty()
-            || syllables.is_empty()
-            || Some(text.as_str()) == first_local
-            || seen.contains(&text)
-        {
+        // 不与候选窗第一页重复（用户定的口径：本地已经给了的东西不必再来一条），也不自己重复。
+        if text.is_empty() || request.candidates.contains(&text) || seen.contains(&text) {
             continue;
         }
         seen.push(text.clone());
@@ -250,54 +260,22 @@ pub fn parse_reply(content: &str, request: &PredictionRequest) -> Reply {
     if request.want_sentence
         && let Some(raw_sentence) = raw.sentence
     {
-        // 整句只替换拼音：模型爱把 before 的尾巴和 after 的开头抄进来，两头都剥掉；
-        // 剥不干净的（模型把 after 改写一遍再接上来）也不收：宁可不补，也不要拼出重复的一句。
+        // 组装层面只做两件清理：剥掉模型重复写进来的 before / after（不剥的话上屏会重复一遍），
+        // 以及整句与候选窗第一页完全一样时不必再来一条（本地已经给了）。
+        // **不再拿拼音校验整句**：模型不用给 `sentence_pinyin`，拼音切不开的输入（夹英文词的）也能出整句。
         let sentence = strip_after(
             &strip_before(&clean(&raw_sentence), &request.before),
             &request.after,
         );
-        let syllables: Vec<String> = raw
-            .sentence_pinyin
-            .as_deref()
-            .unwrap_or_default()
-            .split(|c: char| c.is_whitespace() || c == '\'')
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_ascii_lowercase())
-            .collect();
-        // 开头那几个字要对得上敲的字母（整句专用容错 [`sentence_tolerance`]，比云端词宽一档：简拼、少量错字 / 漏字 / 多字都算过）。
-        // 模型没给 sentence_pinyin、或拼音是先想词再编的（敲 d'x 回「基础」），整句不收——
-        // 本地词库没有的词不受影响：这里只看拼音，不查词库。
-        let letters = request.letters.chars().count();
-        // 续写（没敲拼音）没有拼音可对：只看句子本身。
-        let continuing = request.letters.is_empty();
-        // 整句比云端词更宽（句子长、模型常扩展），光标后无文字时给的是完整短句、更容易扩出对不齐的音节，再松一档。
-        let sentence_allowed = sentence_tolerance(letters) + usize::from(request.after.is_empty());
-        // 整句与本地首选是同一个词时：只有「没有下文」才算重复（本地已经给了那个词，整句再来一条没意义）。
-        // 有下文时整句填的是 before 与 after 中间那一段，用途与词候选完全不同——而答案恰恰常常就是本地首选
-        // 那个词（敲 daxue 在「高等数学是 ⋯ 最重要的基础课程之一」里填「大学」），这条判据会把填空整片挡掉。
-        let duplicated_local = request.after.is_empty() && Some(sentence.as_str()) == first_local;
-        // 只比用户敲的那一段（前 `syllables` 个音节）：模型接着往下续写的字不属于这次拼音，
-        // 整段去比会把「公园散步放松一下」这种续写长的句子整片丢掉（敲 gongyuan 只对应前两个音节）。
-        // 用 `syllables` 而不是数 `pinyin` 里的 `'`：简拼段写作 `dx` 但切出来是 2 个音节。
-        let head: Vec<String> = syllables
-            .iter()
-            .take(request.syllables.max(1))
-            .cloned()
-            .collect();
-        let fits = !sentence.is_empty()
-            && !duplicated_local
-            && !restates_after(&sentence, &request.after)
-            && (continuing
-                || (!head.is_empty()
-                    && mismatch_count(&request.pinyin, &head) <= sentence_allowed));
+        let duplicated_local = request.after.is_empty() && request.candidates.contains(&sentence);
+        let fits =
+            !sentence.is_empty() && !duplicated_local && !restates_after(&sentence, &request.after);
         if fits {
             reply.sentence = Some(sentence);
         } else {
             tracing::debug!(
                 %sentence,
-                ?syllables,
-                letters,
-                "整句补全不收（空 / 本地首选 / 复述下文 / 拼音对不上）"
+                "整句补全不收（空 / 与候选窗第一页重复 / 复述下文）"
             );
         }
     }
@@ -431,6 +409,8 @@ mod tests {
             after: String::new(),
             pinyin: pinyin.into(),
             letters: pinyin.replace('\'', ""),
+            scheme: "全拼".into(),
+            traditional: false,
             syllables: 2,
             candidates: vec!["张涛".into(), "张贴".into()],
             guess: String::new(),
@@ -442,19 +422,22 @@ mod tests {
     }
 
     #[test]
-    fn user_prompt_is_the_request_as_json() {
+    fn user_prompt_is_the_raw_input_and_first_page() {
         let prompt = user_prompt(&request("zhang'tao", true));
+        // 只发用户原始输入 + 上下文 + 候选窗第一页；切分 / 音节数 / 本地整句都不再喂给模型
         assert!(prompt.contains("\"letters\":\"zhangtao\""));
-        assert!(prompt.contains("\"pinyin\":\"zhang'tao\""));
-        assert!(prompt.contains("\"syllables\":2"));
-        assert!(prompt.contains("\"local_candidates\":[\"张涛\",\"张贴\"]"));
+        assert!(prompt.contains("\"before\":\"我们今天\""));
+        assert!(prompt.contains("\"candidates\":[\"张涛\",\"张贴\"]"));
+        assert!(prompt.contains("\"want_sentence\":true"));
+        assert!(!prompt.contains("pinyin"));
+        assert!(!prompt.contains("syllables"));
     }
 
     #[test]
-    fn reply_keeps_words_with_pinyin_and_drops_the_local_first() {
+    fn reply_keeps_words_and_drops_the_first_page_duplicates() {
         let reply = r#"{"words": [{"text": "账套", "pinyin": "zhang tao"}, {"text": "张涛", "pinyin": "zhang tao"},
             {"text": "涨停", "pinyin": ""}, {"text": " 章台 ", "pinyin": "Zhang'Tai"}, {"text": "张套", "pinyin": "zhang tao"}],
-            "sentence": " 账套已经建好了\n", "sentence_pinyin": "zhang tao"}"#;
+            "sentence": " 账套已经建好了\n"}"#;
         let parsed = parse_reply(reply, &request("zhang'tao", true));
         let texts: Vec<(&str, Vec<&str>)> = parsed
             .words
@@ -466,13 +449,9 @@ mod tests {
                 )
             })
             .collect();
-        assert_eq!(
-            texts,
-            [
-                ("账套", vec!["zhang", "tao"]),
-                ("章台", vec!["zhang", "tai"])
-            ]
-        );
+        // 「张涛」与候选窗第一页重复 → 丢；「涨停」没给拼音也能进（本地不再校验拼音了）；
+        // `max_items` 是 2，到这里就够数了。
+        assert_eq!(texts, [("账套", vec!["zhang", "tao"]), ("涨停", vec![])]);
         assert_eq!(parsed.sentence.as_deref(), Some("账套已经建好了"));
         // 没要整句就不收
         assert_eq!(
@@ -480,15 +459,14 @@ mod tests {
             None
         );
         // 整句里抄了 before 的，去掉重叠部分
-        let echoed = r#"{"words": [], "sentence": "我们今天账套已经建好了", "sentence_pinyin": "zhang tao"}"#;
+        let echoed = r#"{"words": [], "sentence": "我们今天账套已经建好了"}"#;
         assert_eq!(
             parse_reply(echoed, &request("zhang'tao", true))
                 .sentence
                 .as_deref(),
             Some("账套已经建好了")
         );
-        let partial =
-            r#"{"words": [], "sentence": "今天账套已经建好了", "sentence_pinyin": "zhang tao"}"#;
+        let partial = r#"{"words": [], "sentence": "今天账套已经建好了"}"#;
         assert_eq!(
             parse_reply(partial, &request("zhang'tao", true))
                 .sentence
@@ -571,71 +549,37 @@ mod tests {
         );
     }
 
-    /// 整句开头那几个字拼不出 letters（敲 `d'x` 回「基础」）时不收；词库没有的词不受影响——这里只看拼音，不查词库。
+    /// **不再校验整句的拼音**（2026-09-18 改口径）：模型不用给 `sentence_pinyin`，句子直接采纳 ——
+    /// 这样「拼音切不开」的输入（夹着英文词的 `javashiyimenbianchengyuyan`）也能出整句。
     #[test]
-    fn reply_drops_a_sentence_whose_pinyin_does_not_match_the_letters() {
-        let mut req = request("dx", true);
-        req.before = "高等数学是一门非常重要的".into();
-        req.after = "课程".into();
-        // 模型按 before / after 的语义填了「基础」，但 d'x 拼不出 ji chu
-        let semantic = r#"{"words": [{"text": "大学", "pinyin": "da xue"}], "sentence": "基础", "sentence_pinyin": "ji chu"}"#;
-        let parsed = parse_reply(semantic, &req);
-        assert_eq!(parsed.words[0].text, "大学", "词那一路不受影响");
-        assert!(
-            parsed.sentence.is_none(),
-            "拼音对不上不该收，实际 {:?}",
-            parsed.sentence
-        );
-        // 词库里没有的词也可以收：只要拼音对得上
-        let coined = r#"{"words": [], "sentence": "氘氙反应堆", "sentence_pinyin": "dao xian"}"#;
+    fn a_sentence_is_taken_as_is_without_any_pinyin() {
+        let mut req = request("javashiyimenbianchengyuyan", true);
+        req.before = String::new();
+        req.candidates = vec!["就啊".into(), "骄傲".into()];
+        let mixed = r#"{"words": [], "sentence": "Java 是一门编程语言"}"#;
         assert_eq!(
-            parse_reply(coined, &req).sentence.as_deref(),
-            Some("氘氙反应堆")
+            parse_reply(mixed, &req).sentence.as_deref(),
+            Some("Java 是一门编程语言")
         );
-        // 没给 sentence_pinyin：没法校验，不收
-        let no_pinyin = r#"{"words": [], "sentence": "大学"}"#;
-        assert!(parse_reply(no_pinyin, &req).sentence.is_none());
-        // 少量错字算过（适当纠错）：dhxue 容 1 个错
-        let mut typo = request("dhxue", true);
-        typo.before = "高等数学是".into();
-        let corrected =
-            r#"{"words": [], "sentence": "大学阶段的课程", "sentence_pinyin": "da xue"}"#;
+        // 模型按语义填了别的词（以前「拼音对不上」会被拒），现在照收
+        let mut gap = request("dx", true);
+        gap.before = "高等数学是一门非常重要的".into();
+        gap.after = "课程".into();
+        let semantic = r#"{"words": [], "sentence": "基础", "sentence_pinyin": "ji chu"}"#;
         assert_eq!(
-            parse_reply(corrected, &typo).sentence.as_deref(),
-            Some("大学阶段的课程")
+            parse_reply(semantic, &gap).sentence.as_deref(),
+            Some("基础")
         );
     }
 
-    /// 中度放宽：整句容错比云端词宽，光标后无文字时再松一档。同一句敲 `xiang` 模型给了 `shang`
-    /// （差 2 个字母）：有下文时只容 1 个错被拒，没下文时容 2 个被收。
+    /// 续写（用户没敲拼音，敲了续写键按 Tab）：只看句子本身成不成立。
     #[test]
-    fn sentence_tolerance_is_loose_and_looser_without_after_text() {
-        let reply = r#"{"words": [], "sentence": "尚", "sentence_pinyin": "shang"}"#;
-        let mut with_after = request("xiang", true);
-        with_after.after = "课".into();
-        assert!(
-            parse_reply(reply, &with_after).sentence.is_none(),
-            "有下文时整句差 2 个字母不该收"
-        );
-        let bare = request("xiang", true);
-        assert_eq!(
-            parse_reply(reply, &bare).sentence.as_deref(),
-            Some("尚"),
-            "没下文时整句差 2 个字母应收下"
-        );
-    }
-
-    /// 续写（用户没敲拼音，敲了续写键按 Tab）：没有拼音可对，只看句子本身成不成立。
-    #[test]
-    fn continuation_replies_skip_the_pinyin_check() {
+    fn continuation_replies_are_taken_as_is() {
         let mut req = request("", true);
         req.letters = String::new();
-        req.pinyin = String::new();
-        req.syllables = 0;
         req.candidates.clear();
         req.before = "笛卡儿积是一种二元运算，把两个集合".into();
         req.after = "按顺序两两配对组成有序对。".into();
-        // 模型没给 sentence_pinyin（续写不用给），句子照样收
         let reply = r#"{"words": [], "sentence": "中的元素"}"#;
         assert_eq!(
             parse_reply(reply, &req).sentence.as_deref(),
@@ -648,40 +592,24 @@ mod tests {
         assert!(parse_reply(r#"{"words": []}"#, &req).sentence.is_none());
     }
 
-    /// 有下文（填空）时，整句与本地首选是同一个词也要收——它填的是 before 与 after 之间那一段，
-    /// 与词候选用途不同，而答案常常就是本地首选那个词。
+    /// 有下文（填空）时，整句与候选窗第一页里某个候选相同也要收——它填的是 before 与 after 之间那一段，
+    /// 与词候选用途不同，而答案常常就是本地那个词。
     #[test]
-    fn a_gap_filling_sentence_may_match_the_local_first_candidate() {
+    fn a_gap_filling_sentence_may_match_a_first_page_candidate() {
         let mut req = request("da'xue", true);
         req.before = "高等数学是".into();
         req.after = "最重要的基础课程之一".into();
         req.candidates = vec!["大学".into(), "大雪".into()];
-        let reply = r#"{"words": [], "sentence": "大学", "sentence_pinyin": "da xue"}"#;
+        let reply = r#"{"words": [], "sentence": "大学"}"#;
         assert_eq!(
             parse_reply(reply, &req).sentence.as_deref(),
             Some("大学"),
-            "填空时答案就是本地首选那个词，不该当重复丢掉"
+            "填空时答案就是本地那个词，不该当重复丢掉"
         );
         // 没有下文时仍然不收：本地已经给了同一个词，整句再来一条是重复
         let mut bare = request("da'xue", true);
         bare.candidates = vec!["大学".into()];
         assert!(parse_reply(reply, &bare).sentence.is_none());
-    }
-
-    /// 模型接着往下续写的部分不算「拼音对不上」：敲 gongyuan（2 音节），模型给「公园散步放松一下」
-    /// （8 音节），前两个音节对得上就该收；但前两个本身对不上（回 kai fa）还是要拒。
-    #[test]
-    fn a_sentence_may_extend_beyond_the_typed_syllables() {
-        let mut req = request("gong'yuan", true);
-        req.before = "今天天气不错，我打算去".into();
-        let reply = r#"{"words": [], "sentence": "公园散步放松一下",
-            "sentence_pinyin": "gong yuan san bu fang song yi xia"}"#;
-        assert_eq!(
-            parse_reply(reply, &req).sentence.as_deref(),
-            Some("公园散步放松一下")
-        );
-        let wrong = r#"{"words": [], "sentence": "开发", "sentence_pinyin": "kai fa san bu"}"#;
-        assert!(parse_reply(wrong, &req).sentence.is_none());
     }
 
     #[test]

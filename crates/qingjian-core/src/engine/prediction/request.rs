@@ -23,6 +23,15 @@ pub struct PredictionRequest {
     /// 用户实际敲的字母（不含 `'`），给模型纠错用。
     pub letters: String,
 
+    /// 用户当前的**输入方式**（中文标签，给模型看）：「全拼」/「小鹤双拼」/「大千注音」/「五笔（86 版）」/
+    /// 「五笔 + 全拼」这种。**五笔（或混输）下 `letters` 是字根编码、不是拼音**（`wqiy` 是「你」），
+    /// 模型得知道这回事才不会当拼音猜。
+    pub scheme: String,
+
+    /// 输出简体还是繁体（`[general] traditional`）：让模型直接用对应字形写，
+    /// 免得它按简体写完再被本地转一遍。
+    pub traditional: bool,
+
     /// 本地切分的音节数，只是参考。
     pub syllables: usize,
 

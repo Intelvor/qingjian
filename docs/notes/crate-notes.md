@@ -67,14 +67,21 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 ## crates/qingjian-predict
 
 - `CloudPredictor`：`Predictor` trait 的网络实现（async-openai，OpenAI 兼容接口，默认 DeepSeek），后台线程防抖 / 缓存 / 超时，`submit` / `poll` 非阻塞。
-  `PredictConfig` 是配置的 `[predict]` 分节。只在组句中联想，一次请求给云端词（容错校验后补进候选第一页末尾 `[predict] slots` 格，缺省 2，不预留不占位，
+  `PredictConfig` 是配置的 `[predict]` 分节。只在组句中联想，一次请求给云端词（补进候选第一页末尾 `[predict] slots` 格，缺省 2，不预留不占位，
   前面的本地候选不挪；排布在 Core `CandidateLayout`）和整句补全（preedit 右侧，Tab）；上屏后不联想，本地历史不进请求。
-  简拼（半数以上音节是缩写）的请求 `max_items = 0`，只求整句补全（`prediction::mostly_abbreviated`）：按声母凑出来的词大多是生造词，
-  拼音校验又按首字母序列匹配放行缩写，拦不住；问字模式的答案不受这条限制。
-  双拼 / 注音与拼音同一套：请求与校验都先 `Engine::decode` 把敲的键换成全拼再走（`prediction/mod.rs` 里 `request_prediction` 与 `validate_cloud_words`），
-  简拼判定、容错复用，不另开路径（cloud.rs 三个用例覆盖）。
-  整句补全的拼音校验用单独的 `sentence_tolerance`（比云端词的 `tolerance` 宽一档，短输入 <4 仍严格），光标后无文字时再松 1 个错（`prompt.rs::parse_reply`）：
-  整句长、模型常扩展换措辞，逐音节全对太难，原档整句成功率偏低；云端词要求字=音节数且错了混进候选，不跟着放宽。
+  **2026-09-18 改口径：给模型的东西不做任何本地加工，回什么就采纳什么。**
+  请求里只有「**用户敲的原始按键** + **候选窗第一页**（最多 9 格，`PREDICTION_CANDIDATE_HINTS`）+ 光标前后文 +
+  `scheme`（输入方式：全拼 / 小鹤双拼 / 大千注音 / 五笔（86 版）/ 五笔 + 全拼（混输））+ `traditional`（简繁）+
+  `max_items` / `want_sentence`」——不再发本地切分（`pinyin` / `syllables`）、本地整句（`local_sentence`），
+  也不要求模型回 `sentence_pinyin`。提示词（`qingjian-predict/src/prompt.rs::SYSTEM_PROMPT`）用一段说明 + 六个示例
+  把行为框住：忽略简单拼写错误、中英混排照写、**不与候选窗第一页重复**、有 after 时只填中间那段、数字按中文习惯写、
+  `letters` 为空是续写。**五笔 / 混输**时提示词会点明 `letters` 是字根编码不是拼音（`scheme` 字段就是为这个）。
+  解析（`parse_reply`）只做组装层面的两件清理：剥掉模型重复写进来的 before / after、**不与候选窗第一页重复**；
+  云端词与整句都**不再拿拼音校验**（Core 侧的 `validate_cloud_words` 与 `prediction/fuzzy.rs` 已删）。
+  不要云端词的情形：`[predict] slots = 0`、简拼（`mostly_abbreviated`），以及**敲到 20 个字母**（`WORD_PREDICTION_MAX_LETTERS`，
+  这么长的输入本来就是一整句，只要整句预测；问字模式不受这条限制）。
+  双拼 / 注音与拼音同一套：请求前先 `Engine::decode` 把敲的键换成全拼再发（模型看不懂双拼击键），
+  `letters` 因此是全拼；简拼判定照旧（cloud.rs 覆盖）。
 - `CloudGlossFiller`：释义兜底（Core `GlossFiller` trait，与 Predictor 分开的线程与通道，攒 1.5 秒 / 8 个词发一次，问过不再问）：
   随包释义表没有的词库词 / 云端词上屏后入队，结果壳每秒 `Engine::poll_glosses` 经 `Translator::learn` 写进 `qingjian-translate::PersonalGlossary`
   （`user-glossary-<语言>.tsv`，`LayeredTranslator` 个人表优先）；随云联想开关一起开。

@@ -41,9 +41,9 @@ fn shuangpin_prediction_uses_decoded_full_pinyin() {
     assert!(engine.composition().is_empty());
 }
 
-/// 双拼下模型给出的词若拼音与解码后的全拼对不上，一样被容错校验过滤。
+/// 双拼下模型给的词照样直接采纳 —— 本地已经**不再**按拼音校验云端词（2026-09-18 改口径）。
 #[test]
-fn shuangpin_cloud_words_are_validated_against_decoded_pinyin() {
+fn shuangpin_cloud_words_come_through_unvalidated() {
     let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let mut engine = xiaohe().with_predictor(Box::new(EchoPredictor {
         submitted,
@@ -61,7 +61,14 @@ fn shuangpin_cloud_words_are_validated_against_decoded_pinyin() {
     engine.set_input("ni'hc");
     engine.request_prediction(None, &[]);
     let prediction = engine.poll_prediction().unwrap();
-    assert_eq!(prediction.words, [cloud("你好", &["ni", "hao"])]);
+    assert_eq!(
+        prediction.words,
+        [
+            cloud("你好", &["ni", "hao"]),
+            cloud("你想", &["ni", "xiang"]),
+            cloud("乱码", &["zx", "ma"]),
+        ]
+    );
 }
 
 /// 注音大千键位标出的拼音比键短/长：请求带解码后的全拼，校验按全拼走。
@@ -394,8 +401,14 @@ fn stale_predictions_are_dropped_and_accept_clears_composition() {
     let prediction = engine.poll_prediction().unwrap();
     assert_eq!(prediction.sequence, 2);
     assert_eq!(prediction.sentence.as_deref(), Some("开发输入法"));
-    // 开花 的拼音对不上 kaifa，被过滤
-    assert_eq!(prediction.words, [cloud("凯发", &["kai", "fa"])]);
+    // 云端词直接采纳（不再按拼音过滤）
+    assert_eq!(
+        prediction.words,
+        [
+            cloud("开花", &["kai", "hua"]),
+            cloud("凯发", &["kai", "fa"]),
+        ]
+    );
     assert_eq!(engine.poll_prediction(), None);
 
     // 取消后连当前序号的结果也不要
@@ -408,8 +421,50 @@ fn stale_predictions_are_dropped_and_accept_clears_composition() {
     assert_eq!(engine.history().text(), "开发输入法");
 }
 
+/// 请求里带上**输入方式与简繁**（2026-09-18 加）：模型据此判断 `letters` 是拼音还是字根码，
+/// 也据此决定用简体还是繁体写。
 #[test]
-fn cloud_words_tolerate_typos_but_not_unrelated_words() {
+fn the_request_tells_the_model_the_scheme_and_script() {
+    let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut engine = engine().with_predictor(Box::new(EchoPredictor {
+        submitted: submitted.clone(),
+        sentence: false,
+        replies: Vec::new(),
+    }));
+    assert_eq!(engine.scheme_label(), "全拼");
+    engine.set_input("kaifa");
+    engine.request_prediction(None, &[]);
+    let request = submitted.borrow().last().cloned().unwrap();
+    assert_eq!(request.scheme, "全拼");
+    assert!(!request.traditional);
+
+    engine.set_shuangpin(Some(crate::shuangpin::Scheme::Xiaohe));
+    assert_eq!(engine.scheme_label(), "小鹤双拼");
+    engine.set_shuangpin(None);
+    engine.set_zhuyin_mode(true);
+    assert_eq!(engine.scheme_label(), "大千注音");
+
+    // 五笔：字根编码，标出来模型才知道 letters 不是拼音
+    let table = qingjian_dictionary::CodeTable::parse("你\twqiy\t900\n").unwrap();
+    engine.set_zhuyin_mode(false);
+    engine.set_code_table(Some(table));
+    assert_eq!(engine.scheme_label(), "五笔（86 版）+ 全拼（混输）");
+    engine.set_phonetic(false);
+    assert_eq!(engine.scheme_label(), "五笔（86 版）");
+
+    // 繁体输出也一并告诉模型
+    engine.set_phonetic(true);
+    engine.set_traditional_mode(true);
+    engine.set_input("kaifa");
+    engine.request_prediction(None, &[]);
+    let request = submitted.borrow().last().cloned().unwrap();
+    assert!(request.traditional);
+    assert_eq!(request.scheme, "五笔（86 版）+ 全拼（混输）");
+}
+
+/// 云端词一律直接采纳：对得上、对不上、甚至没给拼音，都进候选（本地不再做拼音校验）。
+#[test]
+fn cloud_words_are_taken_as_the_model_gives_them() {
     let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let mut engine = engine().with_predictor(Box::new(EchoPredictor {
         submitted,
@@ -419,6 +474,8 @@ fn cloud_words_tolerate_typos_but_not_unrelated_words() {
             words: vec![
                 cloud("这个东西吗", &["zhe", "ge", "dong", "xi", "ma"]),
                 cloud("知道", &["zhi", "dao"]),
+                cloud("根本不认识", &["gen", "ben"]),
+                cloud("连拼音都没给", &[]),
             ],
             sentence: None,
         }],
@@ -427,10 +484,12 @@ fn cloud_words_tolerate_typos_but_not_unrelated_words() {
     engine.request_prediction(None, &[]);
     let prediction = engine.poll_prediction().unwrap();
     assert_eq!(
-        prediction.words,
-        [cloud("这个东西吗", &["zhe", "ge", "dong", "xi", "ma"])]
+        prediction.words.len(),
+        4,
+        "云端词直接采纳：{:?}",
+        prediction.words
     );
-    // 云端词上屏吃掉整段（按音节对不上的）拼音
+    // 云端词上屏吃掉整段（哪怕音节对不上）拼音
     let word = Candidate {
         text: "这个东西吗".into(),
         kind: CandidateKind::Cloud,
@@ -442,27 +501,34 @@ fn cloud_words_tolerate_typos_but_not_unrelated_words() {
     assert!(engine.composition().is_empty());
 }
 
+/// 敲得够长（≥ 20 字母）就不要再要云端词，只要整句预测；短输入照旧要词。
 #[test]
-fn cloud_words_are_validated_against_abbreviated_pinyin() {
+fn long_input_asks_for_the_sentence_only() {
     let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let mut engine = engine().with_predictor(Box::new(EchoPredictor {
-        submitted,
-        sentence: false,
-        replies: vec![Prediction {
-            sequence: 1,
-            words: vec![
-                cloud("账套", &["zhang", "tao"]),
-                cloud("张涛涛", &["zhang", "tao", "tao"]),
-                cloud("知道", &["zhi", "dao"]),
-                cloud("不是音节", &["zx", "tq", "a", "b"]),
-            ],
-            sentence: None,
-        }],
+        submitted: submitted.clone(),
+        sentence: true,
+        replies: Vec::new(),
     }));
-    engine.set_input("zt");
+    // 用户实测过的那句：21 个字母，夹着英文词
+    engine.set_input("javashiyimenbianchengyuyan");
     engine.request_prediction(None, &[]);
-    let prediction = engine.poll_prediction().unwrap();
-    assert_eq!(prediction.words, [cloud("账套", &["zhang", "tao"])]);
+    let request = submitted
+        .borrow()
+        .last()
+        .cloned()
+        .expect("长输入也要发请求");
+    assert_eq!(
+        request.letters, "javashiyimenbianchengyuyan",
+        "发的是原始按键"
+    );
+    assert_eq!(request.max_items, 0, "≥20 字母不再要云端词");
+    assert!(request.want_sentence, "只留整句预测");
+
+    engine.set_input("kaifa");
+    engine.request_prediction(None, &[]);
+    let request = submitted.borrow().last().cloned().expect("短输入照发");
+    assert!(request.max_items > 0, "短输入还要云端词");
 }
 
 #[test]

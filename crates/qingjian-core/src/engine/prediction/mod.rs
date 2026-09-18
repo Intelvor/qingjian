@@ -7,7 +7,6 @@
 //! Engine 这一侧的实现：组句中发请求、收结果校验、Tab 接受整句；翻译选中文字也走这里。
 
 mod cloud_word;
-mod fuzzy;
 mod kind;
 mod policy;
 mod predictor;
@@ -18,7 +17,6 @@ mod script;
 mod surrounding_text;
 
 pub use cloud_word::CloudWord;
-pub use fuzzy::{mismatch_count, sentence_tolerance, tolerance};
 pub use kind::PredictionKind;
 pub use policy::PredictionPolicy;
 pub use predictor::{NoPredictor, Predictor};
@@ -136,19 +134,24 @@ impl Engine {
             after,
             pinyin,
             letters: pinyin_source.replace('\'', ""),
+            scheme: self.scheme_label(),
+            traditional: self.traditional,
             syllables,
+            // 候选窗第一页整页给模型（最多 9 格，见 [`PREDICTION_CANDIDATE_HINTS`]）：
+            // 它据此知道本地已经给了什么、别重复，也据此判断本地缺什么。
             candidates: candidates
                 .iter()
                 .take(PREDICTION_CANDIDATE_HINTS)
                 .map(|c| c.text.clone())
                 .collect(),
             guess,
-            // 简拼（半数以上音节是缩写）不问词：模型按声母凑出来的大多是生造词（复合语气、符号映射），
-            // 只问整句补全；问字模式的答案不受这条限制（答案本来就对不上问题的拼音）。
-            max_items: if abbreviated && !question {
-                0
-            } else {
+            // 不要词的情况：① 简拼（半数以上音节是缩写）——模型按声母凑出来的大多是生造词；
+            // ② 敲得够长（`WORD_PREDICTION_MAX_LETTERS`）——这么长的输入本来就是整句，只要整句预测。
+            // 问字模式的答案不受这两条限制（答案本来就对不上问题的拼音）。
+            max_items: if question || (!abbreviated && letters < WORD_PREDICTION_MAX_LETTERS) {
                 policy.max_items
+            } else {
+                0
             },
             want_sentence: (policy.sentence || std::mem::take(&mut self.sentence_once))
                 && !question,
@@ -177,6 +180,8 @@ impl Engine {
             after: String::new(),
             pinyin: String::new(),
             letters: String::new(),
+            scheme: String::new(),
+            traditional: false,
             syllables: 0,
             candidates: Vec::new(),
             guess: String::new(),
@@ -202,7 +207,7 @@ impl Engine {
     pub fn poll_prediction(&mut self) -> Option<Prediction> {
         while let Some(mut prediction) = self.predictor.poll() {
             if prediction.sequence == self.prediction_sequence {
-                // 问字的答案、翻译的译文和敲的拼音本来就对不上，只有组句联想的云端词要校验
+                // 问字的答案、翻译的译文和敲的拼音本来就对不上，只有组句联想的云端词要处理
                 if self.last_prediction_kind == PredictionKind::Question {
                     let guess = &self.last_question_guess;
                     prediction
@@ -211,11 +216,11 @@ impl Engine {
                 } else if self.last_prediction_kind == PredictionKind::Compose
                     && !self.question_mode()
                 {
+                    // **云端词不再拿拼音校验**（2026-09-18 改口径）：发给模型的就是用户原始按键，
+                    // 模型按自己的理解给词，本地直接采纳（只要求不与候选窗第一页重复，那一条在解析里做）。
+                    // 这里只按槽位裁剪：用户不要云端词就只留整句补全。
                     if self.predictor.policy().slots == 0 {
-                        // 用户不要云端词，只留整句补全
                         prediction.words.clear();
-                    } else {
-                        self.validate_cloud_words(&mut prediction.words);
                     }
                     if !prediction.is_empty() {
                         // 给过用户什么：紧接着的上屏说明接没接受（本地联想能不能替代云端的尺子）
@@ -256,25 +261,33 @@ impl Engine {
         None
     }
 
-    /// 只留下拼音对得上的云端词：字数等于音节数、每个音节合法、全拼与用户敲的字母的编辑距离在容许范围内
-    /// （简拼不算错，允许少量错字 / 漏字 / 多字，纠错就靠这个）。模型偶尔会给出根本不是这个拼音的词，这些不进候选。
-    pub(super) fn validate_cloud_words(&self, words: &mut Vec<CloudWord>) {
-        let decoded = self.decode(self.composition.scope());
-        let typed = decoded
-            .as_ref()
-            .map_or(self.composition.scope(), |d| d.pinyin());
-        let letters = typed.chars().filter(|c| *c != '\'').count();
-        let allowed = tolerance(letters);
-        words.retain(|word| {
-            let fits = !word.syllables.is_empty()
-                && word.text.chars().count() == word.syllables.len()
-                && word.syllables.iter().all(|s| parser::is_syllable(s))
-                && mismatch_count(typed, &word.syllables) <= allowed;
-            if !fits {
-                tracing::debug!(text = %word.text, syllables = ?word.syllables, "云端词与拼音不符，丢弃");
-            }
-            fits
-        });
+    /// 用户当前的输入方式（给云端模型看的中文标签）：拼音侧一个名字，形码开着时前面缀上「五笔」。
+    ///
+    /// 拼音侧：全拼 / 小鹤双拼 / 自然码 / 微软双拼 / 搜狗双拼 / 小浪双拼 / 大千注音；拼音侧关着（只用形码）就只写「五笔」。
+    /// 模型据此判断 `letters` 是什么：**五笔与混输下是字根编码，不是拼音**。
+    pub fn scheme_label(&self) -> String {
+        let phonetic = if self.zhuyin {
+            "大千注音"
+        } else if let Some(scheme) = self.shuangpin {
+            scheme.label()
+        } else if self.phonetic {
+            "全拼"
+        } else {
+            ""
+        };
+        if !self.is_code_mode() {
+            return if phonetic.is_empty() {
+                // 两条轴都关着（配置写坏）：至少别让模型以为这是拼音
+                "无（拼音与形码都关着）".to_owned()
+            } else {
+                phonetic.to_owned()
+            };
+        }
+        if phonetic.is_empty() {
+            "五笔（86 版）".to_owned()
+        } else {
+            format!("五笔（86 版）+ {phonetic}（混输）")
+        }
     }
 
     /// 用户接受一条整句补全：作用域内的拼音作废、句子上屏。句子没有拼音，记不了词频与用户词，

@@ -44,7 +44,7 @@ pub use marked::{MarkedKind, MarkedSegment};
 pub use mode_keys::{ModeKeys, QUESTION_PREFIX};
 pub use prediction::{
     CloudWord, NoPredictor, Prediction, PredictionKind, PredictionPolicy, PredictionRequest,
-    Predictor, SurroundingText, mismatch_count, sentence_tolerance, tolerance,
+    Predictor, SurroundingText,
 };
 
 pub use query::Query;
@@ -317,8 +317,13 @@ pub const EXPLICIT_TRANSITION_WEIGHT: u32 = 2;
 /// 拼音短于这个字母数不联想：一两个字母的意图太模糊，白花一次请求。
 const MIN_PREDICTION_LETTERS: usize = 2;
 
-/// 随联想请求附带的本地候选条数。
-const PREDICTION_CANDIDATE_HINTS: usize = 5;
+/// 随联想请求附带的本地候选条数：**候选窗第一页整页给模型**（每页最多 9 格，见 `MAX_PAGE_SIZE`），
+/// 模型据此知道本地已经给了什么（别重复）、缺什么。
+const PREDICTION_CANDIDATE_HINTS: usize = 9;
+
+/// 敲到这个字母数（含）就不再要云端词，只留整句预测：这么长的输入本来就是一整句话，
+/// 逐个词联想没有意义（2026-09-18 用户定）。20 是「明显超过一个词的拼音长度」的经验值。
+const WORD_PREDICTION_MAX_LETTERS: usize = 20;
 
 /// 一次查询最多给壳多少条候选。同音字最多的音节也不到这个数，再往后都是长词，没人会翻到。
 const MAX_CANDIDATES: usize = 500;
