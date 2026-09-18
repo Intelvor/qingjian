@@ -17,10 +17,10 @@ use std::time::Instant;
 
 use clap::Parser;
 use qingjian_core::{EmojiTable, Engine, FuzzyRules, Language};
-use qingjian_dictionary::{Dictionary, WordList};
+use qingjian_dictionary::{CodeTable, Dictionary, WordList};
 use qingjian_learning::FrequencyLearner;
 use qingjian_lm::BigramModel;
-use qingjian_platform::Config;
+use qingjian_platform::{Config, Scheme};
 use qingjian_predict::CloudPredictor;
 use qingjian_translate::Glossary;
 
@@ -46,7 +46,10 @@ fn run() -> Result<(), CliError> {
     engine.set_chinese_first(args.chinese_first);
     tuning::apply(&mut engine, &args.tune)?;
     if let Some(path) = &args.replay {
-        let report = replay::run(&mut engine, path, args.misses)?;
+        // 日志里形码那些行也要能重放：回放按每条的方案切引擎，所以它自己得留一份码表
+        // （`build_engine` 那份的所有权已经交给引擎了）
+        let code_table = args.wubi.as_ref().map(CodeTable::from_path).transpose()?;
+        let report = replay::run(&mut engine, path, args.misses, code_table)?;
         print!("{report}");
         return Ok(());
     }
@@ -235,21 +238,28 @@ fn build_engine(args: &Args) -> Result<Engine, CliError> {
     engine.set_traditional_mode(config.general.traditional);
     engine.set_fuzzy(config.fuzzy);
     engine.set_mode_keys(config.shortcut.mode);
+    // `--shuangpin` 现在写的是 [general] scheme（同一个维度的旧键已经并进去），off 就是全拼
     if let Some(scheme) = &args.shuangpin {
-        config.general.shuangpin = if scheme == "off" {
-            String::new()
+        config.general.scheme = if scheme == "off" {
+            Scheme::Pinyin.key().to_owned()
         } else {
             scheme.clone()
         };
     }
-    if let Some(scheme) = config.general.shuangpin() {
-        tracing::info!(%scheme, "双拼已启用");
+    // 两条轴：拼音侧看 `[general] scheme`，形码侧看 `[general] wubi`；`--wubi` 给了码表就算开着形码。
+    // 两边都开就是混输，见 docs/user/input/fuzzy-and-shuangpin.md
+    let scheme = config.general.scheme();
+    let wubi = config.general.wubi() || args.wubi.is_some();
+    tracing::info!(pinyin = scheme.key(), wubi, "输入方案已启用");
+    engine.set_shuangpin(scheme.shuangpin());
+    engine.set_zhuyin_mode(scheme == Scheme::Zhuyin);
+    // 拼音侧关掉且形码开着才是「只用形码」；两边都关着时留拼音兜底
+    engine.set_phonetic(scheme.is_on() || !wubi);
+    // 形码的码表由 `--wubi` 显式给（方案本身只说「用哪套」，码表文件在哪由壳决定）
+    if let Some(path) = &args.wubi {
+        engine.set_code_table(Some(CodeTable::from_path(path)?));
+        tracing::info!(table = %path.display(), "形码码表已载入");
     }
-    if config.general.zhuyin {
-        tracing::info!("大千注音已启用");
-    }
-    engine.set_shuangpin(config.general.shuangpin());
-    engine.set_zhuyin_mode(config.general.zhuyin);
     if config.predict.enabled {
         let predictor = CloudPredictor::new(&config.predict)?;
         engine = engine.with_predictor(Box::new(predictor));

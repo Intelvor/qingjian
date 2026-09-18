@@ -154,7 +154,7 @@ Linux    → IBus / Fcitx
 代码以 **GPL-3.0-or-later** 发布（见 [LICENSE](LICENSE)）：可以自由使用、修改与再分发，修改后分发须同样开源。
 「青简」名字与 logo 不在授权范围内。青简在官方渠道免费；若你为获得它向他人付费，你被骗了。
 
-随包数据（词库、语言模型、释义表、emoji、英文词表、词汇等级）各自遵循来源的许可证，清单见 [docs/design/landscape.md](docs/design/landscape.md)，偏好设置「关于」页也列了一份。
+随包数据（词库、语言模型、释义表、emoji、英文词表、词汇等级、五笔码表）各自遵循来源的许可证，清单见 [docs/design/landscape.md](docs/design/landscape.md)，偏好设置「关于」页也列了一份。
 
 ---
 

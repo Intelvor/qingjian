@@ -6,8 +6,9 @@ impl Engine {
     /// 这段作用域生效的拼写纠正（带缓存）：拼音不像话、用户没对它回车原样上屏过、
     /// 且一处编辑后能凑出至少一个两音节词时，取整句转换得分最高的那个纠正。
     pub(super) fn active_correction(&self, scope: &str) -> Option<Correction> {
-        // 双拼敲错一个键换掉的是整个声母 / 韵母，全拼那套「一处编辑」的纠错模型不适用
-        if self.shuangpin.is_some() {
+        // 双拼敲错一个键换掉的是整个声母 / 韵母，全拼那套「一处编辑」的纠错模型不适用；
+        // 形码敲的是字根编码，更不是拼音
+        if self.shuangpin.is_some() || self.code.is_some() {
             return None;
         }
         if let Some((cached_scope, cached)) = self.correction_cache.borrow().as_ref()

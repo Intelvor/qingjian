@@ -53,7 +53,35 @@ cargo check --target x86_64-pc-windows-gnu -p qingjian-windows-server -p qingjia
 cargo test -p qingjian-windows-server -p qingjian-windows-tsf
 ```
 
-真正编译与试用都在 Windows 机器上（MSVC 工具链）：
+真正编译与试用都在 Windows 机器上（MSVC 工具链）。
+
+### 本地联调：`scripts/test-local.ps1`
+
+改了 Server 或 DLL 之后要试手，用这个脚本，别手敲：
+
+```powershell
+pwsh -File apps\windows\scripts\test-local.ps1            # 编译 + 换 Server + 起，DLL 那步要管理员
+pwsh -File apps\windows\scripts\test-local.ps1 -SkipBuild -SkipRegister
+```
+
+它做四件事：编 Server 与 TSF DLL（带 `QINGJIAN_UIACCESS=0`，没签名的 exe 带 uiAccess 起不来）、
+停掉在跑的 Server、把**已安装目录整份拷到 `~\qingjian-devtest`** 再换上新的 Server 与随包数据、
+起 Server 并打印剩下要手动做的事（注册 DLL、设方案、敲哪几组键）。
+
+> **脚本存成带 BOM 的 UTF-8**（`sign-local.ps1` 也是）。Windows PowerShell 5.1 对没有 BOM 的 `.ps1`
+> 按系统 ANSI 码页解析，中文会变成乱码、引号配对跟着崩，报出来的却是「字符串缺少终止符」这种语法错。
+> 编辑时别把 BOM 去掉。PS7 两种都读得对，所以只用 `pwsh` 验会漏掉这个问题。
+
+**为什么不在仓库里直接跑**：`bundled_root()` 按 exe 位置找数据，`target\debug\` 下会落到仓库根，
+而 `data\generated\` 是 gitignore 的、本机多半没有，于是退回 `assets\sample\` 样例——形码候选照样出得来
+（码表独立），但译文几乎全空，会让人误以为释义那条设计没生效。
+
+**为什么两边要一起换**：`qingjian_core::Candidate` 是线上格式的一部分（见 `protocol/mod.rs`）。
+Core 加一个 `CandidateKind` 变体，老 DLL 就解不出整条帧、把按键原样放行——表现是「输入法突然只出英文」，
+日志里只有一句 `unknown variant`。所以 Server 与 DLL 必须同一份源码编出来的；协议版本号对不上时
+Server 会记警告，但**它只警告、不拒绝**，别指望它兜住。
+
+### 手工步骤（脚本里也在做，供对照）
 
 ```bat
 :: 1) 编译出 DLL 与 Server

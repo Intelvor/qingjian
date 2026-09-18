@@ -16,6 +16,10 @@ mod session;
 
 /// 协议版本，DLL 开会话时带上。加消息 / 改字段语义时 +1；Server 只对不上时记警告（老 DLL 在没重启的
 /// 应用里还会活很久，serde 的缺省字段 / 忽略未知字段让两边仍能对话）。
+///
+/// **加枚举变体不在「仍能对话」之列**：`qingjian_core::Candidate` 是线上格式的一部分（见本模块文档），
+/// 给它加一个 `kind` 变体，老 DLL 解不出来会整条帧失败、按键直接放行——测试时看到的「输入法突然只出英文」
+/// 就是这么来的（`unknown variant `Code``）。加变体必须同时 +1 并重装 DLL，否则连警告都不会有。
 pub const PROTOCOL_VERSION: u32 = 6;
 
 pub mod frame;

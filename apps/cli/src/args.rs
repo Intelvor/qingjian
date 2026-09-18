@@ -81,6 +81,10 @@ pub struct Args {
     #[arg(long)]
     pub shuangpin: Option<String>,
 
+    /// 形码码表（五笔）的 TSV 文件（`词\t编码\t词频`）：给了就用编码查表，不走拼音那一套
+    #[arg(long, value_name = "码表")]
+    pub wubi: Option<PathBuf>,
+
     /// 神经重打分：字级 Transformer 的 .qjm 文件或导出目录（model.safetensors / config.json / vocab.json），整句前几条路径用它重排
     #[arg(long)]
     pub neural: Option<PathBuf>,

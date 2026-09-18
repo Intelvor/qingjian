@@ -355,13 +355,18 @@ impl Host {
                 self.settings
                     .set_value("apps", "english_candidates_off", apps);
             }
-            // 弹出菜单第 0 项是「关」，之后按 ShuangpinScheme::ALL 的顺序
-            (Setting::Shuangpin, SettingValue::Index(index)) => {
-                let key = index
-                    .checked_sub(1)
-                    .and_then(|i| ShuangpinScheme::ALL.get(i))
-                    .map_or("", |scheme| scheme.key());
-                self.settings.set_value("general", "shuangpin", key);
+            // 弹出菜单按 Scheme::ALL 的顺序。写的是 [general] scheme（旧键 shuangpin 已并入它）：
+            // 写旧键的话，配置里 scheme 的缺省值非空、解析时优先，用户选的方案会被静默忽略。
+            (Setting::Scheme, SettingValue::Index(index)) => {
+                let key = Scheme::ALL
+                    .get(index)
+                    .map_or(Scheme::Pinyin.key(), |scheme| scheme.key());
+                self.settings.set_value("general", "scheme", key);
+            }
+            // 五笔：勾上就是 86 版，取消就是关。与上面的拼音方案同时开着就是混输。
+            (Setting::Wubi, SettingValue::Bool(on)) => {
+                self.settings
+                    .set_value("general", "wubi", if on { "wubi86" } else { "" });
             }
             // 文本框失焦也会发 action：值没变就不写，免得每次切窗口都重写一遍配置
             (Setting::BaseUrl, SettingValue::Text(text)) => {

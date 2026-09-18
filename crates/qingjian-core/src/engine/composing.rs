@@ -87,14 +87,30 @@ impl Engine {
         });
     }
 
-    /// 键盘方案的键（双拼方案如 `xiaohe`、注音为 `zhuyin`），全拼为空；输入日志用。
+    /// 键盘方案的键，输入日志用。全拼为空串（老日志里没有这个字段就是全拼），双拼是 `xiaohe` 这类，
+    /// 注音是 `zhuyin`，只用形码是 `wubi`，**混输是 `<拼音侧>+wubi`**（`pinyin+wubi` / `xiaohe+wubi`）。
+    ///
+    /// 日志里必须能分辨这几种：形码那些行的「拼音」列其实是编码，回放要照着它装配引擎，
+    /// 混输的行两边都要装配。`wubi` 单独出现是「只用形码」，不是「全拼 + 五笔」。
     pub(super) fn scheme_key(&self) -> String {
-        if self.zhuyin {
+        let phonetic = if self.zhuyin {
             "zhuyin".to_owned()
         } else {
             self.shuangpin
                 .map_or_else(String::new, |s| s.key().to_owned())
+        };
+        if self.code.is_none() {
+            return phonetic;
         }
+        if !self.phonetic {
+            return "wubi".to_owned();
+        }
+        let base = if phonetic.is_empty() {
+            "pinyin"
+        } else {
+            &phonetic
+        };
+        format!("{base}+wubi")
     }
 
     /// 组句里要删东西了：第一次删之前把缓冲区留个快照，上屏时对比最终键串，不同就是一次重打（`retype`）。

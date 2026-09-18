@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod code;
 mod english_tail;
 mod result;
 mod snapshot;
@@ -94,6 +95,24 @@ impl Engine {
         if is_raw(keys, self.modes(), self.shuangpin, self.zhuyin) {
             return Ok(self.query_raw(keys, rest, start));
         }
+        // 形码与拼音是两条平行的管线，在进切分之前分岔。放在这里是为了让 `?` 问字与
+        // `-` 直输段仍然先分派出去：形码下 `v` / `u` / `i` 是字根键，模式键已由 `modes()` 让位。
+        match self.code.is_some() {
+            // 只用形码：拼音侧整个不走（`[general] scheme = "none"`）
+            true if !self.phonetic => Ok(self.query_code(keys, rest, start)),
+            // 混输：两边都出候选
+            true => self.query_mixed(keys, rest, start),
+            false => self.query_phonetic(keys, rest, start),
+        }
+    }
+
+    /// 拼音侧（全拼 / 双拼 / 注音）的候选生成：整段作用域是一串读音。
+    fn query_phonetic(
+        &self,
+        keys: &str,
+        rest: String,
+        start: Instant,
+    ) -> Result<Query, ParseError> {
         // 双拼先解成全拼（音节间已用 `'` 连好，切分没有歧义），之后与全拼同路；解不动的键当尾巴
         let decoded = self.decode(keys);
         let scope: &str = decoded.as_ref().map_or(keys, |d| d.pinyin());

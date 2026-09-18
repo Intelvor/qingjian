@@ -115,6 +115,13 @@ impl Engine {
                 typos = self.accepted_typos(candidate);
                 (consumed, input)
             }
+            // 形码的候选没有音节，对不上拼音；编码是整段一起敲的，上屏吃掉整个作用域
+            CandidateKind::Code => {
+                self.learner.record(candidate);
+                let (consumed, input) = self.whole_scope();
+                self.learner.record_choice(&input, &candidate.text);
+                (consumed, input)
+            }
             // 英文词带出的 emoji 没有音节，和英文词一样对应整段作用域
             CandidateKind::Emoji if candidate.syllables.is_empty() => self.whole_scope(),
             CandidateKind::Sentence => {
@@ -174,7 +181,7 @@ impl Engine {
         // 词库里有、释义表里没有的词：交给释义兜底在后台问云端，写进个人释义表，下次就有译词；私密输入中不问
         if matches!(
             candidate.kind,
-            CandidateKind::Chinese | CandidateKind::Cloud
+            CandidateKind::Chinese | CandidateKind::Cloud | CandidateKind::Code
         ) && self.gloss_filler.is_enabled()
             && !self.private
             && self.translator.language() != Language::Chinese
@@ -186,7 +193,8 @@ impl Engine {
         self.composition.drain_prefix(consumed);
         let buffer_left = !self.composition.is_empty();
         match candidate.kind {
-            CandidateKind::Chinese | CandidateKind::Cloud => {
+            CandidateKind::Chinese | CandidateKind::Cloud | CandidateKind::Code => {
+                // 形码没有音节，`record_word` 里按音节数做的整段造词自然不会触发
                 self.record_word(
                     &candidate.text,
                     &candidate.syllables,
@@ -238,7 +246,10 @@ impl Engine {
         self.history.record(&candidate.text);
         let learned = matches!(
             candidate.kind,
-            CandidateKind::Chinese | CandidateKind::Cloud | CandidateKind::Sentence
+            CandidateKind::Chinese
+                | CandidateKind::Code
+                | CandidateKind::Cloud
+                | CandidateKind::Sentence
         );
         let commit = if learned {
             LastCommit {
@@ -247,7 +258,7 @@ impl Engine {
                 input,
                 chosen: matches!(
                     candidate.kind,
-                    CandidateKind::Chinese | CandidateKind::Cloud
+                    CandidateKind::Chinese | CandidateKind::Code | CandidateKind::Cloud
                 )
                 .then(|| candidate.text.clone()),
                 transitions: std::mem::take(&mut self.recording),

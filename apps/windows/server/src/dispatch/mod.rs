@@ -1,9 +1,10 @@
 //! 协议分派：把 DLL 发来的 [`ClientMessage`] 交给 Engine，产出回给 DLL 的 [`ServerMessage`]。
 //! 消息分派在 [`message`]，会话在 [`session`]，组句展示状态在 [`composed`]，按键在 [`key`]，
 //! 候选窗口输出在 [`candidates`]，状态条在 [`status`]，翻译选中文字在 [`translate`]，配置热加载在 [`reload`]，
-//! 本地整句模型在 [`rescore`]。
+//! 本地整句模型在 [`rescore`]，形码码表在 [`code`]。
 
 mod candidates;
+mod code;
 mod composed;
 mod config;
 mod key;
@@ -20,12 +21,14 @@ use std::time::{Duration, Instant};
 
 use qingjian_core::Engine;
 use qingjian_platform::LocalModelConfig;
+use qingjian_platform::Scheme;
 use qingjian_platform::protocol::{
     ClientMessage, Frame, InputSettings, ScreenRect, ServerMessage, SessionId,
 };
 use qingjian_predict::PredictConfig;
 
 pub use self::candidates::{CandidateEvent, CandidateSink, NoopSink, RenderSettings};
+pub use self::code::find_code_table;
 use self::composed::Composed;
 pub use self::config::RouterConfig;
 use self::reload::ConfigReload;
@@ -123,6 +126,9 @@ pub struct Router {
     /// 本地整句模型（`.qjm` 或三件套目录）；没有模型文件为 `None`。
     model_path: Option<PathBuf>,
 
+    /// 形码码表（`wubi/wubi86.tsv`，启动时找好的，见 [`code::find_code_table`]）；没有为 `None`。
+    code_table: Option<PathBuf>,
+
     /// 进行中的模型加载；加载完接到 Engine 上就清掉。
     model_loader: Option<ModelLoader>,
 
@@ -164,6 +170,7 @@ impl Router {
             last_rect: None,
             last_shown: None,
             model_path: None,
+            code_table: None,
             model_loader: None,
             applied_model: LocalModelConfig::default(),
             rescore: RescoreState::default(),
@@ -177,7 +184,7 @@ impl Router {
             switch_mode: self.config.switch_mode,
             english_mode: self.config.english_mode,
             default_mode: self.config.default_mode,
-            zhuyin: self.config.zhuyin,
+            zhuyin: self.config.scheme == Scheme::Zhuyin,
         }
     }
 

@@ -261,9 +261,11 @@ pub(crate) fn view(settings: &Settings, _context: &mut ViewContext<Settings>) ->
             "没在输入拼音时敲 ? 也进问字；后面跟的不是字母时会还原成问号。",
         ));
     }
-    // 双拼下这三个字母是音节键，前缀要按住 Shift；注音下它们被大千布局占作音符键，带前缀的都用不了。
-    let prefix_note = if g.zhuyin {
+    // 双拼下这三个字母是音节键，前缀要按住 Shift；注音下它们被大千布局占作音符键；五笔下每个字母都是字根键。
+    let prefix_note = if g.is_zhuyin() {
         "前缀键在「快捷键」页改，三个键不能相同。注音下 v / u / i 都是键盘布局里的音符键，这三条前缀用不了。"
+    } else if g.wubi() {
+        "前缀键在「快捷键」页改，三个键不能相同。五笔下每个字母都是字根键，这三条前缀用不了（`?` 进问字还留着）。"
     } else if shuangpin {
         "前缀键在「快捷键」页改，三个键不能相同；双拼下要先按住 Shift，因为 v / u / i 在双拼里都是音节键。"
     } else {
@@ -299,7 +301,7 @@ pub(crate) fn view(settings: &Settings, _context: &mut ViewContext<Settings>) ->
         ],
     ));
 
-    if g.zhuyin {
+    if g.is_zhuyin() {
         sections.push(section(
             "注音模式（已开启）",
             vec![
@@ -334,12 +336,15 @@ pub(crate) fn view(settings: &Settings, _context: &mut ViewContext<Settings>) ->
         ));
     }
 
-    let scheme = if g.zhuyin {
-        "大千注音".to_owned()
+    let scheme = if g.wubi() {
+        // 五笔与拼音是两条轴：混输时两个名字都写出来。
+        if g.scheme().is_on() {
+            format!("{} + 五笔", g.scheme().label())
+        } else {
+            "五笔（86 版）".to_owned()
+        }
     } else {
-        g.shuangpin().map_or("全拼".to_owned(), |scheme| {
-            format!("双拼（{}）", scheme.label())
-        })
+        g.scheme().label().to_owned()
     };
     sections.push(section(
         "现在的输入方案",

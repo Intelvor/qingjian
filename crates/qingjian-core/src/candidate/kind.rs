@@ -6,6 +6,9 @@ pub enum CandidateKind {
     /// 中文词库里的词。
     Chinese,
 
+    /// 形码码表里的字词（五笔）。编码平铺，没有音节：`syllables` 为空，上屏吃掉整段编码。
+    Code,
+
     /// 英文词表里的词（中英混输），上屏时吃掉整段输入。
     English,
 

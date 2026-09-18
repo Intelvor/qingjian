@@ -202,7 +202,7 @@ fn format_candidate(candidate: &Candidate, width: usize) -> String {
         })
         .unwrap_or_default();
     let marker = match candidate.kind {
-        qingjian_core::CandidateKind::Chinese => "",
+        qingjian_core::CandidateKind::Chinese | qingjian_core::CandidateKind::Code => "",
         qingjian_core::CandidateKind::English => "[en] ",
         qingjian_core::CandidateKind::Cloud => "☁ ",
         qingjian_core::CandidateKind::Shortcut => "[v] ",

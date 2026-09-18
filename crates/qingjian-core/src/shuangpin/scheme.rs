@@ -37,8 +37,8 @@ impl Scheme {
         Self::Xiaolang,
     ];
 
-    /// 配置文件里的写法。
-    pub fn key(self) -> &'static str {
+    /// 配置文件里的写法。`const`：设置界面要按方案列表建常量表（见 `qingjian_platform::Scheme`）。
+    pub const fn key(self) -> &'static str {
         match self {
             Self::Xiaohe => "xiaohe",
             Self::Ziranma => "ziranma",
@@ -48,8 +48,8 @@ impl Scheme {
         }
     }
 
-    /// 界面上的名字。
-    pub fn label(self) -> &'static str {
+    /// 界面上的名字。`const` 的理由同上。
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Xiaohe => "小鹤双拼",
             Self::Ziranma => "自然码",

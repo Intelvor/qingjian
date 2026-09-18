@@ -54,6 +54,35 @@ impl Engine {
         self.zhuyin
     }
 
+    /// 换形码码表（五笔），`None` 回到拼音的诸方案。编码与拼音是两套键，纠错缓存一并清掉。
+    pub fn set_code_table(&mut self, table: Option<CodeTable>) {
+        self.code = table;
+        *self.correction_cache.borrow_mut() = None;
+        self.forget_span_cache();
+    }
+
+    /// 当前的形码码表；`None` 表示走拼音（全拼 / 双拼 / 注音）。
+    pub fn code_table(&self) -> Option<&CodeTable> {
+        self.code.as_ref()
+    }
+
+    /// 是否处在形码方案下。
+    pub fn is_code_mode(&self) -> bool {
+        self.code.is_some()
+    }
+
+    /// 拼音侧参不参与查询。形码开着时把它关掉就是「只用形码」（`[general] scheme = "none"`）；
+    /// 两边都开是混输，见 [`Self::set_code_table`] 与 [`Self::query_mixed`]。
+    pub fn set_phonetic(&mut self, on: bool) {
+        self.phonetic = on;
+        *self.correction_cache.borrow_mut() = None;
+        self.forget_span_cache();
+    }
+
+    pub fn is_phonetic(&self) -> bool {
+        self.phonetic
+    }
+
     /// 判斷注音模式下目前是否還需要輸入聲調。
     /// 供殼（平台層）用來判斷空白鍵是應該進緩衝區作為聲調，還是直接用來選詞。
     pub fn zhuyin_needs_tone(&self) -> bool {
@@ -83,9 +112,11 @@ impl Engine {
             .is_some_and(|scheme| scheme.decode(body).pending_initial())
     }
 
-    /// 有效的模式键：双拼下换成大写字母。
+    /// 有效的模式键：双拼下换成大写字母；形码下所有字母都是字根键，连大写也让位，只剩 `?` 开头的问字。
     pub(super) fn modes(&self) -> ModeKeys {
-        if self.shuangpin.is_some() {
+        if self.code.is_some() {
+            self.modes.letterless()
+        } else if self.shuangpin.is_some() {
             self.modes.shifted()
         } else {
             self.modes
@@ -117,7 +148,11 @@ impl Engine {
     }
 
     /// 光标后剩余拼音的显示形式：双拼先解码；能切就按音节用 `'` 连上，切不动就原样。
+    /// 形码的剩余段是编码，原样显示。
     pub(super) fn marked_rest(&self, rest: &str) -> String {
+        if self.code.is_some() {
+            return rest.to_owned();
+        }
         match self.decode(rest) {
             Some(decoded) => decoded.marked(),
             None => marked_rest(rest),

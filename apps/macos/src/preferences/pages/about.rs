@@ -35,6 +35,10 @@ pub const ATTRIBUTIONS: &[(&str, &str)] = &[
         "词汇等级",
         "The CEFR-J Wordlist Version 1.5（Yukio Tono，Tokyo University of Foreign Studies，cefr-j.org）；Octanove Vocabulary Profile C1/C2（CC BY-SA 4.0）；JLPT 词表（tanos.co.uk，CC BY；经 elzup/jlpt-word-list 整理，MIT）。",
     ),
+    (
+        "五笔码表",
+        "86 五笔极点码表（sxjudya/rime-wubi86-jidian，Apache-2.0）；编码来自上游，词频由青简词库按词面回填。",
+    ),
 ];
 
 /// 官网。

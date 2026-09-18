@@ -30,6 +30,17 @@ pub fn bundled_dicts_dir() -> Option<PathBuf> {
     dir.is_dir().then_some(dir)
 }
 
+/// 形码码表（五笔）：用户目录 `wubi/wubi86.tsv` 里有就用它（自己换的表），
+/// 否则用包里的 `Resources/wubi/wubi86.tsv`；都没有是 `None`。
+pub fn code_table_path() -> Option<PathBuf> {
+    let user = user_data_dir()?.join("wubi/wubi86.tsv");
+    if user.is_file() {
+        return Some(user);
+    }
+    let bundled = resources_dir().ok()?.join("wubi/wubi86.tsv");
+    bundled.is_file().then_some(bundled)
+}
+
 /// 配置文件：`~/Library/Application Support/Qingjian/config.toml`。
 pub fn config_file() -> Option<PathBuf> {
     user_data_dir().map(|dir| dir.join("config.toml"))

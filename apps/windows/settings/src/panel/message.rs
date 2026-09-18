@@ -9,8 +9,8 @@ pub(crate) enum Message {
     // 通用页
     LearningLanguage(Option<usize>),
     PageSize(Option<f64>),
-    Shuangpin(Option<usize>),
-    Zhuyin(bool),
+    Scheme(Option<usize>),
+    Wubi(bool),
     Traditional(bool),
     EnglishCandidates(bool),
     ChineseFirst(bool),

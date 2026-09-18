@@ -21,7 +21,7 @@ impl Host {
         self.apply_custom_phrases(&config);
         self.engine.set_mode_keys(config.shortcut.mode);
         self.engine.set_chinese_first(config.general.chinese_first);
-        self.engine.set_shuangpin(config.general.shuangpin());
+        self.apply_scheme(config.general.scheme(), config.general.wubi());
         self.engine.set_learning(config.general.learning);
         logging::set_level(config.general.log_level);
         self.translation_keys = config.shortcut.translation_keys();
@@ -179,6 +179,36 @@ impl Host {
         if self.last_flush.elapsed() >= LEARNING_FLUSH_INTERVAL {
             self.engine.flush_learning();
             self.last_flush = std::time::Instant::now();
+        }
+    }
+
+    /// 按配置的两条轴装配引擎：拼音侧（全拼 / 双拼 / 注音 / 关）与形码侧（五笔）。
+    /// 两边都开就是混输——形码候选在前，见 `Engine::query_mixed`。
+    ///
+    /// 开了形码却找不到码表时只警告并退回只用拼音——配置说五笔、引擎一个字都打不出更糟。
+    fn apply_scheme(&mut self, pinyin: Scheme, wubi: bool) {
+        self.engine.set_shuangpin(pinyin.shuangpin());
+        self.engine.set_zhuyin_mode(pinyin == Scheme::Zhuyin);
+        // 拼音侧关掉且形码开着才是「只用形码」；两边都关着时留拼音兜底（否则一个候选都没有）
+        self.engine.set_phonetic(pinyin.is_on() || !wubi);
+        if !wubi {
+            self.engine.set_code_table(None);
+            return;
+        }
+        let Some(path) = paths::code_table_path() else {
+            tracing::warn!("选了形码方案但找不到码表，仍按拼音输入；随包数据里应当带一份");
+            self.engine.set_code_table(None);
+            return;
+        };
+        match qingjian_dictionary::CodeTable::from_path(&path) {
+            Ok(table) => {
+                tracing::info!(table = %path.display(), entries = table.len(), "形码码表已载入");
+                self.engine.set_code_table(Some(table));
+            }
+            Err(error) => {
+                tracing::error!(%error, table = %path.display(), "形码码表读不了，仍按拼音输入");
+                self.engine.set_code_table(None);
+            }
         }
     }
 }

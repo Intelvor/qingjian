@@ -1,8 +1,7 @@
-use qingjian_core::ShuangpinScheme;
 use qingjian_platform::protocol::KeyModifiers;
 use qingjian_platform::{
     AccentColor, AppsConfig, CandidateRenderer, Config, DefaultMode, KeyCombo, LayoutMode,
-    PreeditMode, SwitchKey, ThemeMode,
+    PreeditMode, Scheme, SwitchKey, ThemeMode,
 };
 
 use super::RenderSettings;
@@ -68,9 +67,6 @@ pub struct RouterConfig {
     /// 英文模式的那一份（`[general] english_full_width_punctuation`）。
     pub english_full_width: bool,
 
-    /// 大千注音（[general] zhuyin）。
-    pub zhuyin: bool,
-
     /// 按应用的设置（`[apps]`），按宿主 exe 名认。
     pub apps: AppsConfig,
 
@@ -89,8 +85,11 @@ pub struct RouterConfig {
     /// 状态条记住的位置（`[status_bar] x` / `y`，内容左上角物理像素）。
     pub status_pos: Option<(i32, i32)>,
 
-    /// 双拼方案（`[general] shuangpin`）；全拼为 `None`。
-    pub shuangpin: Option<ShuangpinScheme>,
+    /// 拼音侧方案（`[general] scheme`）。
+    pub scheme: Scheme,
+
+    /// 形码侧开没开（`[general] wubi`）。与拼音同时开着就是混输。
+    pub wubi: bool,
 }
 
 impl RouterConfig {
@@ -131,7 +130,6 @@ impl From<&Config> for RouterConfig {
             switch_mode: config.shortcut.switch_mode,
             full_width: config.general.full_width_punctuation,
             english_full_width: config.general.english_full_width_punctuation,
-            zhuyin: config.general.zhuyin,
             apps: config.apps.clone(),
             translation_keys: {
                 let (first, second) = config.shortcut.translation_keys();
@@ -141,7 +139,8 @@ impl From<&Config> for RouterConfig {
             translate_selection: config.shortcut.translate_selection,
             status_enabled: config.status_bar.enabled,
             status_pos: config.status_bar.x.zip(config.status_bar.y),
-            shuangpin: config.general.shuangpin(),
+            scheme: config.general.scheme(),
+            wubi: config.general.wubi(),
         }
     }
 }

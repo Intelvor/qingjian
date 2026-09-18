@@ -11,7 +11,7 @@ use qingjian_platform::protocol::{
     ClientMessage, Frame, InputSettings, KeyEvent, KeyModifiers, KeyOutcome, PROTOCOL_VERSION,
     ServerMessage, SessionId,
 };
-use qingjian_platform::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, PreeditMode};
+use qingjian_platform::{AppsConfig, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, PreeditMode, Scheme};
 use qingjian_windows_server::dispatch::{CandidateEvent, StatusEvent, StatusSink, StatusView};
 use qingjian_windows_server::{AssemblySpec, Router, RouterConfig, assembly};
 
@@ -80,7 +80,7 @@ fn router_in(config: RouterConfig, app: Option<String>) -> Router {
     })
     .expect("assemble engine from sample data");
     // 与 main.rs 一样，双拼方案是启动时直接设给 Engine 的。
-    engine.set_shuangpin(config.shuangpin);
+    engine.set_shuangpin(config.scheme.shuangpin());
     let mut router = Router::new(engine, config);
     // 协议版本与 Server 一致：开会话时把按键行为设置回一次（DLL 不读配置文件，靠它拿切换键）。
     open_session(&mut router, SESSION, app);
@@ -1154,7 +1154,7 @@ fn pending_mode_is_dropped_when_the_foreground_changes() {
 fn status_bar_mode_cell_has_no_scheme_name() {
     let config = RouterConfig {
         status_enabled: true,
-        shuangpin: Some(ShuangpinScheme::Xiaohe),
+        scheme: Scheme::Shuangpin(ShuangpinScheme::Xiaohe),
         ..RouterConfig::default()
     };
     let mut router = router_with(config);
@@ -1414,7 +1414,7 @@ fn bare_question_mark_is_half_width_when_full_width_is_off() {
 #[test]
 fn shuangpin_semicolon_stays_in_buffer_in_question_mode() {
     let mut router = router_asking_with(RouterConfig {
-        shuangpin: Some(ShuangpinScheme::Microsoft),
+        scheme: Scheme::Shuangpin(ShuangpinScheme::Microsoft),
         ..RouterConfig::default()
     });
     // 微软双拼的 `;` 是 ing 键：问字模式下末尾有落单声母时进缓冲区，而不是把候选上屏。
@@ -1429,7 +1429,7 @@ fn shuangpin_semicolon_stays_in_buffer_in_question_mode() {
 #[test]
 fn shuangpin_enters_modes_with_shifted_letters() {
     let mut router = router_with(RouterConfig {
-        shuangpin: Some(ShuangpinScheme::Xiaohe),
+        scheme: Scheme::Shuangpin(ShuangpinScheme::Xiaohe),
         ..RouterConfig::default()
     });
     // Shift+V 进表达式：数字和运算符进缓冲区，空格上屏结果。
@@ -1923,7 +1923,7 @@ fn shuangpin_continue_key_is_the_shifted_letter() {
     let cloud = Arc::new(Mutex::new(FakeCloud::default()));
     let config = RouterConfig {
         sentence_on_tab: true,
-        shuangpin: Some(ShuangpinScheme::Xiaohe),
+        scheme: Scheme::Shuangpin(ShuangpinScheme::Xiaohe),
         ..RouterConfig::default()
     };
     let mut router = router_in(config, None);
@@ -2098,7 +2098,7 @@ fn a_passthrough_key_keeps_the_picked_text_for_the_next_poll() {
 /// 与 `main.rs` 一样，注音开关既给 Router 也给 Engine（分派看的是 Engine 的状态）。
 fn router_zhuyin() -> Router {
     let mut router = router_with(RouterConfig {
-        zhuyin: true,
+        scheme: Scheme::Zhuyin,
         ..RouterConfig::default()
     });
     router.engine_mut().set_zhuyin_mode(true);

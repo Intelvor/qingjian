@@ -1,6 +1,7 @@
 //! 把数据源转换成青简的 TSV 格式，或打包成 `.qj`。
 //!
 //! - `lexicon`：青简基础词库，「输入法字词库_分类整理版」数据包（规范字 / 常用词 / THUOCL 领域词）+ Unihan 读音 + LLM 多音字标注 → `dict.tsv`
+//! - `wubi`：Rime 形码码表（极点 86 五笔，Apache-2.0）→ `wubi86.tsv`（`词\t编码\t词频`，词频由青简词库按词面回填）
 //! - `cedict`：CC-CEDICT（CC BY-SA 4.0）→ `glossary-en.tsv`（释义表的备用来源，现在用 gloss-gen 的 LLM 表）
 //! - `english`：`词\t编码` 英文词表（数据包的 `05_english`，ESDB / CSpell，MIT）→ `english.tsv`
 //! - `emoji`：Unicode CLDR annotations（Unicode License v3，`--language zh|en`）→ `emoji-<语言>.tsv`（可发布，放 `assets/emoji/`）
@@ -22,6 +23,7 @@ mod lexicon;
 mod oov_filter;
 mod pack;
 mod phrases;
+mod wubi;
 
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
@@ -64,6 +66,20 @@ fn run() -> Result<(), ConvertError> {
             domain_keep_min,
             &args.out_dir,
         ),
+        Command::Wubi {
+            input,
+            frequency,
+            name,
+        } => {
+            let converted = wubi::convert(&input, &frequency, &args.out_dir.join(name))?;
+            tracing::info!(
+                entries = converted.entries,
+                from_corpus = converted.with_frequency,
+                unknown = converted.unknown,
+                "形码码表已写出"
+            );
+            Ok(())
+        }
         Command::Cedict { input } => cedict::convert(&input, &args.out_dir.join("glossary-en.tsv")),
         Command::English { inputs, frequency } => english::convert(
             &inputs,

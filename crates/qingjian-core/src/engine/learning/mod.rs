@@ -158,7 +158,9 @@ impl Engine {
         }
         let candidate = &candidate_owned;
         let forgotten = match candidate.kind {
-            CandidateKind::Chinese | CandidateKind::Cloud => self.learner.forget(&candidate.text),
+            CandidateKind::Chinese | CandidateKind::Code | CandidateKind::Cloud => {
+                self.learner.forget(&candidate.text)
+            }
             CandidateKind::English => Forgotten {
                 user_word: self.learner.forget_english(&candidate.text),
                 learning: false,
