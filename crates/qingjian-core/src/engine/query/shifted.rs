@@ -1,7 +1,8 @@
-//! 中文模式下 Shift 敲的大写字母：拼音仍按整段小写走普通查询，大写只影响英文合并与上屏字面。
+//! 中文模式下 Shift 敲的大写字母：**大写字母永不参与拼音**，只作英文/专名。
 //!
-//! - 普通路径：`scope()`（全小写）做查词 / 整句，**中途大写（`AI`）后面的拼音不会断**；
-//! - `merge_shifted_extras`：合并英文候选；开头大写且剩余能切拼音时（`Cpan`）给中文候选拼上大写字面 → `C盘`。
+//! - `Nihao`：`N` 是英文，后面的 `ihao` 不是合法拼音 → 只出英文候选，不出「你好」；
+//! - `Cpan`：`C` 是英文 + `pan` 拼「盘」→ 候选 `C盘`（上屏一次吃完整段）；
+//! - `CyuyanheAIbiancheng`：多段大写 → 中英混排候选 `C语言和AI编程`。
 
 use super::*;
 
@@ -9,7 +10,7 @@ use super::*;
 pub(super) struct ShiftedSplit {
     /// 逐字母命中且够常见时的领衔英文。
     pub leading: Option<Candidate>,
-    /// 其余英文候选。
+    /// 其余英文候选（含开头大写字母本身）。
     pub items: Vec<Candidate>,
     /// 开头连续大写（`C`）；仅当「去掉这些大写后的剩余」能切拼音时非空。
     pub leading_upper: String,
@@ -80,26 +81,25 @@ impl Engine {
             .char_indices()
             .find(|(_, c)| c.is_ascii_uppercase())
             .map(|(i, _)| i);
+        let leading_run: String = typed
+            .chars()
+            .take_while(|c| c.is_ascii_uppercase())
+            .collect();
 
         // 开头大写且剩余能切拼音时，上屏要拼大写字面（Cpan → C盘）
-        let leading_upper = match first_upper {
-            Some(0) => {
-                let upper: String = typed
-                    .chars()
-                    .take_while(|c| c.is_ascii_uppercase())
-                    .collect();
-                let after: String = typed
-                    .chars()
-                    .skip_while(|c| c.is_ascii_uppercase())
-                    .collect();
-                let after_lower = after.to_ascii_lowercase();
-                if !after_lower.is_empty() && parser::segment(&after_lower).is_ok() {
-                    upper
-                } else {
-                    String::new()
-                }
+        let leading_upper = if first_upper == Some(0) && !leading_run.is_empty() {
+            let after_lower: String = typed
+                .chars()
+                .skip_while(|c| c.is_ascii_uppercase())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            if !after_lower.is_empty() && parser::segment(&after_lower).is_ok() {
+                leading_run.clone()
+            } else {
+                String::new()
             }
-            _ => String::new(),
+        } else {
+            String::new()
         };
 
         // 整段小写命中英文词表：逐字母相同且常见才领衔
@@ -140,6 +140,18 @@ impl Engine {
             }
         }
 
+        // 开头大写字母本身作为英文候选（`Nihao` 的 `N`、`Cpan` 的 `C`）：上屏只吃这一段
+        if !leading_run.is_empty()
+            && leading.is_none()
+            && !items.iter().any(|c| c.text == leading_run)
+        {
+            push(
+                &mut items,
+                &leading_run,
+                vec![leading_run.to_ascii_lowercase()],
+            );
+        }
+
         ShiftedSplit {
             leading,
             items,
@@ -154,16 +166,29 @@ impl Engine {
     /// 只留英文与中英混排候选。
     pub(super) fn merge_shifted_extras(&self, items: &mut Vec<Candidate>, typed: &str) {
         let split = self.shifted_split(typed);
+        // 大写字母永不参与拼音：普通路径里**消耗到大写位置**的中文/整句一律丢掉
+        //（`Nihao` 的「你好」、`Cyuyanhe…` 的「从语言」都在这里被清掉）。
+        let scope = self.composition.scope();
+        let shifted: Vec<bool> = typed
+            .chars()
+            .zip(scope.chars())
+            .map(|(t, _)| t.is_ascii_uppercase())
+            .collect();
+        items.retain(|c| {
+            if !matches!(c.kind, CandidateKind::Chinese | CandidateKind::Sentence) {
+                return true;
+            }
+            let (consumed, _) = self.consumed_by(c);
+            let limit = scope[..consumed.min(scope.len())].chars().count();
+            !shifted.iter().take(limit).any(|s| *s)
+        });
         let mixed = self.build_mixed_candidate(typed);
-        if mixed.is_some() {
-            items.retain(|c| !matches!(c.kind, CandidateKind::Chinese | CandidateKind::Sentence));
-        }
         if let Some(leading) = split.leading
             && !items.iter().any(|c| c.text == leading.text)
         {
             items.insert(0, leading);
         }
-        // 开头大写且剩余可拼音：丢掉吃不掉前面大写字母的裸词（Cpan 的「盘」）
+        // 开头是单段大写、且剩余能切拼音（Cpan）：丢掉吃不掉前面大写字母的裸词
         if !split.leading_upper.is_empty() {
             let head = split.leading_upper.to_ascii_lowercase();
             items.retain(|c| {
@@ -171,22 +196,17 @@ impl Engine {
                     || c.syllables.first().map(String::as_str) == Some(head.as_str())
             });
         }
-        let lower = typed.to_ascii_lowercase();
-        let after_upper: String = typed
-            .chars()
-            .skip_while(|c| c.is_ascii_uppercase())
-            .collect::<String>()
-            .to_ascii_lowercase();
-        let stripped: String = typed
-            .chars()
-            .filter(|c| !c.is_ascii_uppercase())
-            .collect::<String>()
-            .to_ascii_lowercase();
         let mut extra = Vec::new();
-        // 单段大写才补查 after_upper/stripped；多段大写的中文由混排候选负责，别再引入把大写读成拼音的结果
-        if mixed.is_none() {
-            if !split.leading_upper.is_empty() && !after_upper.is_empty() {
-                self.lookup_pinyin_words(&after_upper, &mut extra);
+        // 单段开头大写 + 剩余拼音：拼上大写字面（Cpan → C盘）。
+        // 多段大写交给混排候选；剩余切不开（Nihao）则不出中文 —— 大写不参与拼音。
+        if mixed.is_none() && !split.leading_upper.is_empty() {
+            let after_lower: String = typed
+                .chars()
+                .skip_while(|c| c.is_ascii_uppercase())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            if !after_lower.is_empty() {
+                self.lookup_pinyin_words(&after_lower, &mut extra);
                 let head = split.leading_upper.to_ascii_lowercase();
                 for item in extra.iter_mut() {
                     if item.kind != CandidateKind::Chinese {
@@ -197,9 +217,6 @@ impl Engine {
                     syllables.extend(item.syllables.iter().cloned());
                     item.syllables = syllables;
                 }
-            }
-            if stripped != lower && !stripped.is_empty() && stripped != after_upper {
-                self.lookup_pinyin_words(&stripped, &mut extra);
             }
         }
         if let Some(mixed) = mixed {

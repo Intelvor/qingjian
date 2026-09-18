@@ -301,7 +301,7 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     assert_eq!(engine.take_raw(), "Cpan");
     assert!(engine.composition().is_empty());
 
-    // 误触 Caps：Nihao → 你好（不拼成 N你好），commit 清空
+    // 句首大写不参与拼音：Nihao → 只出英文 N，不出「你好」
     let dictionary = Dictionary::parse("你好\tni hao\t90000\n盘\tpan\t9000\n").unwrap();
     let mut engine = Engine::new(dictionary);
     engine.set_shift_letter_compose(true);
@@ -311,24 +311,25 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     }
     let texts = texts_of(&engine);
     assert!(
-        texts.iter().any(|t| t == "你好"),
-        "Nihao 应出你好，实际 {texts:?}"
+        !texts.iter().any(|t| t == "你好"),
+        "句首大写不得参与拼音，Nihao 不该出你好，实际 {texts:?}"
     );
     assert!(
-        !texts.iter().any(|t| t == "N你好"),
-        "整段当拼音时不加大写头，实际 {texts:?}"
+        texts.iter().any(|t| t == "N"),
+        "应出大写字母本身作为英文候选，实际 {texts:?}"
     );
-    let nihao = engine
+    let n = engine
         .query()
         .unwrap()
         .candidates
         .items
         .iter()
-        .find(|c| c.text == "你好")
-        .expect("你好")
+        .find(|c| c.text == "N")
+        .expect("N")
         .clone();
-    assert_eq!(engine.commit(&nihao), "你好");
-    assert!(engine.composition().is_empty());
+    // 只吃掉大写那一段，剩下的留给下一拍
+    assert_eq!(engine.commit(&n), "N");
+    assert_eq!(engine.composition().text(), "ihao");
 
     // 大写在中间：前面拼音照常
     let dictionary = Dictionary::parse("你好\tni hao\t90000\n").unwrap();
