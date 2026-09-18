@@ -88,6 +88,30 @@ fn typo_edges_in_the_lattice_correct_legal_but_unlikely_pinyin() {
     assert!(query.candidates.items.iter().all(|c| c.text != "是的"));
 }
 
+/// 简拼拆出来的一长串单字（`zonghu` → 在哦那个和）不该当整句顶掉正常词候选。
+#[test]
+fn abbreviated_segmentations_do_not_become_leading_sentences() {
+    let dictionary = Dictionary::parse(
+        "总会\tzong hui\t9000\n纵火\tzong huo\t5000\n总汇\tzong hui\t3000\n\
+         总\tzong\t20000\n和\the\t80000\n在\tzai\t90000\n哦\to\t1000\n那\tna\t50000\n\
+         个\tge\t60000\n宗\tzong\t3000\n互\thu\t4000\n户\thu\t5000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("zonghu");
+    let texts = texts_of(&engine);
+    assert!(
+        !texts.iter().any(|t| t == "在哦那个和"),
+        "简拼串出来的单字堆不该当整句顶在前面，实际 {texts:?}"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|t| t == "总会" || t == "纵火" || t == "总"),
+        "正常词候选仍在，实际 {texts:?}"
+    );
+}
+
 /// 模糊音规则之间不叠加：zhen 开 z/zh + en/eng 时词库里叠出来的 zeng 读法不该被模糊命中。
 #[test]
 fn fuzzy_rules_do_not_stack_across_initial_and_final() {

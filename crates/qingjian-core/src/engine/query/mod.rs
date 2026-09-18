@@ -563,13 +563,29 @@ impl Engine {
     const ALTERNATIVE_SEGMENTATIONS: usize = 4;
 
     /// 在最优切分之外找一条「不用敲错边、也没有占位音节」的整句读法，给 [`Self::plain_sentence`] 兜底。
+    ///
+    /// **只收与最优切分音节数相同的读法**（`zhenandaobushi` 的 zhe'nan… 与 zhen'an… 都是 5 段）。
+    /// 简拼拆出来的一长串单字（`zonghu` 的 z…o…n…g…hu → 在哦那个和）音节数对不上，不是「同一句话的另一种切法」，
+    /// 拿它当整句会顶掉 总会 这类正常词候选。
     fn plain_alternative(&self, segmentations: &[Segmentation], typos: bool) -> Option<Conversion> {
+        let best_len = segmentations.first()?.syllables.len();
         segmentations
             .iter()
             .skip(1)
             .take(Self::ALTERNATIVE_SEGMENTATIONS)
             .find_map(|segmentation| {
-                let conversion = self.convert_sentence(&segmentation.patterns(), typos)?;
+                if segmentation.syllables.len() != best_len {
+                    return None;
+                }
+                let patterns = segmentation.patterns();
+                let inner_abbreviated = patterns
+                    .iter()
+                    .take(patterns.len().saturating_sub(1))
+                    .any(|p| !p.complete);
+                if inner_abbreviated {
+                    return None;
+                }
+                let conversion = self.convert_sentence(&patterns, typos)?;
                 (!conversion.altered() && !conversion.has_placeholder()).then_some(conversion)
             })
     }
@@ -605,6 +621,11 @@ impl Engine {
             }
         }
         if conversion.has_placeholder() {
+            return None;
+        }
+        // 整句读法的音节数要贴住引擎显示的那条切分；差一截的多半是简拼串成的一串单字
+        // （`zonghu` → 在哦那个和），空格上屏会很怪，不进候选首位。
+        if conversion.syllables.len() != best.syllables.len() {
             return None;
         }
         // 整段本来就是一个词时不出整句；但路径靠敲错变体把整段读成的一个词（`meiganxi` → 没关系）是噪声信道的判断，
