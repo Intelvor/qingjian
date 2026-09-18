@@ -98,11 +98,8 @@ pub struct TextService {
     /// （每一拍 `SyncMode` 都带着它，见 [`TextService_Impl::apply_input_settings`]）。
     input_settings: Cell<Option<InputSettings>>,
 
-    /// 这一个 TextService 实例（= 一条线程 / 一个窗口）**首次激活**时按 `[general] default_mode`
-    /// 设过一次模式没有。只设一次：之后窗口内用户怎么切就怎么切，切走再切回也不打回默认。
-    default_mode_applied: Cell<bool>,
-
-    /// 激活后一小段时间内忽略转换模式 compartment 的变化，见 [`TextService_Impl::sync_from_conversion_mode`]。
+    /// 激活后一小段时间内忽略转换模式 compartment 的变化（msctf 会把线程 profile 里记的模式写回来，
+    /// 那不是用户操作），见 [`TextService_Impl::start_mode_from_settings`] 与 `sync_from_conversion_mode`。
     conversion_guard_until: Cell<Option<Instant>>,
 }
 
@@ -166,7 +163,6 @@ impl TextService {
             profile_cookie: Cell::new(None),
             translate_combo: Cell::new(None),
             input_settings: Cell::new(None),
-            default_mode_applied: Cell::new(false),
             conversion_guard_until: Cell::new(None),
         }
     }

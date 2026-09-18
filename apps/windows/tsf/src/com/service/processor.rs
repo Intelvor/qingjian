@@ -50,8 +50,8 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         self.connect();
         // 连不上 Server 时用缺省值把模式状态建起来；连上了的话上面已应用过真实值，这里去重跳过。
         self.apply_input_settings(InputSettings::default());
-        self.mode_state.set_english(false);
-        self.refresh_mode_indicator();
+        // 激活时的初始模式：按 `[general] default_mode` 定，并挡掉 msctf 随后写回 profile 的那次变化。
+        self.start_mode_from_settings();
         if self.mode_state.enabled() {
             self.add_lang_bar_item();
             // 放在初始写指示器之后，别被自己那次写触发。

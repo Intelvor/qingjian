@@ -62,9 +62,8 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
         ),
         field(
             "新窗口的输入模式",
-            "新窗口（新的一条输入线程）第一次激活时用哪种模式：\
-             「记住上次」（缺省）不动，沿用系统记住的那份；选中文 / 英文就在首次激活时设一次。\
-             只在首次激活设一次，之后窗口内单击切换键照常生效，切走再切回也不会被打回默认。",
+            "新窗口（新的一条输入线程）激活时用哪种模式：「记住上次」（缺省）沿用系统记住的那份；\
+             选中文 / 英文就在激活时设成它。窗口里手动切过的模式在切走再切回时会被重置。",
             default_mode_combo(g.default_mode, context.callback(Message::DefaultMode)),
         ),
         field(

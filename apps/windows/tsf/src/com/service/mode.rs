@@ -2,7 +2,7 @@
 //! 用户点任务栏中 / 英时由 compartment 回调反向同步。切换键与内置英文模式开关由 Server 经协议下发
 //! （[`TextService_Impl::apply_input_settings`]），DLL 不读配置文件。
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use windows::Win32::UI::TextServices::ITfLangBarItemMgr;
 use windows::core::Interface;
@@ -13,6 +13,10 @@ use qingjian_platform::protocol::InputSettings;
 use super::TextService_Impl;
 use crate::com::log::log;
 use crate::com::mode::{self, ModeButton, conversion};
+
+/// 激活后挡掉 msctf 写回 profile 的窗口。实测它约在激活后 90 ms 到，留足余量又不至于把用户
+/// 手点任务栏中 / 英也挡掉（那个动作不会发生在激活后 0.5 秒内）。
+const CONVERSION_RESTORE_WINDOW: Duration = Duration::from_millis(500);
 
 impl TextService_Impl {
     /// 应用中英模式的两项设置：激活时与配置变更时都走这里。
@@ -39,15 +43,27 @@ impl TextService_Impl {
             input.default_mode.key()
         ));
         self.apply_mode_settings(input.english_mode, input.switch_mode);
-        // 新窗口（这条线程第一次激活）：按配置设一次默认模式。只设一次 —— 之后窗口内用户怎么切
-        // 就怎么切，切走再切回也不打回默认（那会在切应用时把正在打的中文顶掉）。
-        if !self.default_mode_applied.get() {
-            self.default_mode_applied.set(true);
-            if let Some(english) = input.default_mode.apply() {
-                log(&format!("新窗口默认模式：{}", input.default_mode.label()));
-                self.set_english_mode(english);
-            }
-        }
+    }
+
+    /// 激活时把模式定到配置要的那一种，并把接下来一小段时间里 **msctf 写回 profile** 的那次变化挡掉。
+    ///
+    /// `[general] default_mode`：`chinese` / `english` 按它设；`last` = **不设**，让 msctf 把线程 profile
+    /// 里记的「上次」写回来（这正是改动前实测的观感 —— 我们设的中文本来就被那次写回盖掉了）。
+    /// **为什么要这段保护**：实测激活后约 90 ms msctf 会写回 profile，把刚设的值盖掉 —— 用户看到的就是
+    /// 「设了默认中文，新开的记事本还是英文」。`conversion_guard_until` 就是给这一刻准备的，但 2026-09-18
+    /// 之前它**只被读、没人写**（删 Ctrl+Space 那轮把写它的代码一起删了），所以一直是死保护。
+    pub(super) fn start_mode_from_settings(&self) {
+        let Some(english) = self
+            .input_settings
+            .get()
+            .and_then(|input| input.default_mode.apply())
+        else {
+            return;
+        };
+        self.mode_state.set_english(english);
+        self.refresh_mode_indicator();
+        self.conversion_guard_until
+            .set(Some(Instant::now() + CONVERSION_RESTORE_WINDOW));
     }
 
     /// 切模式：先把组着的内容原样落定，再刷指示器。
