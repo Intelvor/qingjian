@@ -31,7 +31,7 @@ pub fn find_code_table(user_dir: Option<&Path>, bundled_root: &Path) -> Option<P
 }
 
 /// 按配置的两条轴装配引擎：拼音侧（全拼 / 双拼 / 注音 / 关）与形码侧（五笔）。
-/// 两边都开就是混输——形码候选在前，见 `Engine::query_mixed`。
+/// 两边都开就是混输——编码打全的形码候选在前，见 `Engine::query_mixed`。
 ///
 /// 没开形码时把码表卸掉；开了但码表不在就警告并退回只用拼音（配置说五笔、引擎一个字都打不出
 /// 更糟）。`table` 是启动时用 [`find_code_table`] 找好的路径（与本地模型一样，热加载时不重新找）。

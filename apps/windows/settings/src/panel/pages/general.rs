@@ -73,7 +73,7 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
         ),
         field(
             "五笔（86 版）",
-            "与拼音方案同时开着就是混输：五笔候选在前，打不出的字直接打拼音。\
+            "与拼音方案同时开着就是混输：编码打全的五笔词在前，打不出的字直接打拼音。\
              单用五笔请把拼音方案关掉；第 5 个字母起五笔查不到东西，自动只剩拼音。\
              译词、生词记录与学习照常。",
             ToggleSwitch::new()

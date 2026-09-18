@@ -222,7 +222,7 @@ impl GeneralConfig {
         false
     }
 
-    /// 拼音与形码同时开着 = 混输：两边都出候选，形码在前。
+    /// 拼音与形码同时开着 = 混输：两边都出候选，编码打全的形码词在前。
     pub fn mixed(&self) -> bool {
         self.scheme().is_on() && self.wubi()
     }

@@ -183,7 +183,7 @@ impl Host {
     }
 
     /// 按配置的两条轴装配引擎：拼音侧（全拼 / 双拼 / 注音 / 关）与形码侧（五笔）。
-    /// 两边都开就是混输——形码候选在前，见 `Engine::query_mixed`。
+    /// 两边都开就是混输——编码打全的形码候选在前，见 `Engine::query_mixed`。
     ///
     /// 开了形码却找不到码表时只警告并退回只用拼音——配置说五笔、引擎一个字都打不出更糟。
     fn apply_scheme(&mut self, pinyin: Scheme, wubi: bool) {

@@ -247,7 +247,7 @@ pub struct Engine {
     /// 拼音侧（全拼 / 双拼 / 注音）参不参与查询，缺省参与。
     ///
     /// 与 `code` 组合出三种情形：只有拼音（形码关）、只有形码（拼音关，`[general] scheme = "none"`）、
-    /// **两边都开 = 混输**（形码候选在前，见 [`Engine::query_mixed`]）。两个都关着时按拼音走。
+    /// **两边都开 = 混输**（编码打全的形码候选在前，见 [`Engine::query_mixed`]）。两个都关着时按拼音走。
     phonetic: bool,
 
     /// emoji 表，没有就不出 emoji 候选。
