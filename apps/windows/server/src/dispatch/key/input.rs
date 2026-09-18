@@ -185,14 +185,15 @@ impl Router {
         self.apply_printable(c, event)
     }
 
-    /// 当前模式开着全角就让 Core 转（数字后的 `.` 保持半角）；转不了的原样交给应用并告知 Core。
+    /// 当前模式开着全角就让 Core 转（数字后的 `.` 与小键盘的键保持半角）；转不了的原样交给应用并告知 Core。
     ///
     /// `-` `=` 例外：没有全角映射，但**不放行、由我们插入**——放行要等宿主把键交回应用，实测在部分宿主
     /// （Edge / QQ 等）里这个键到不了应用，用户看到的是「中文模式按 `-` 没反应」。插入与全角标点同一条路，
     /// 一定出得来，仍是半角。
     fn apply_punctuation(&mut self, c: char, event: &KeyEvent) -> Effect {
         let english = event.modifiers.caps || event.modifiers.english_mode;
-        if self.full_width_for(english)
+        if !codes::is_keypad(event.virtual_key)
+            && self.full_width_for(english)
             && let Some(text) = self.engine.punctuate(c)
         {
             return Effect::Changed(Some(text.to_owned()));
