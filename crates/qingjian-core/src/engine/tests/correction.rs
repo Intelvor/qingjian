@@ -112,6 +112,28 @@ fn abbreviated_segmentations_do_not_become_leading_sentences() {
     );
 }
 
+/// 同音/近音单字串出来的怪句（`neibusiweilian` → 那不是威廉）不抢第 1，词库里的「内部」在前。
+#[test]
+fn homophone_stacked_sentences_do_not_beat_dictionary_words() {
+    let dictionary = Dictionary::parse(
+        "内部\tnei bu\t8000\n内埔\tnei bu\t3000\n那\tna\t50000\n那\tnei\t20000\n\
+         不\tbu\t80000\n不是\tbu shi\t30000\n死\tsi\t40000\n思\tsi\t30000\n\
+         威廉\twei lian\t9000\n内\tnei\t50000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_input("neibusiweilian");
+    let texts = texts_of(&engine);
+    assert!(
+        !texts.iter().any(|t| t == "那不是威廉" || t == "那不死威廉"),
+        "同音单字堆叠句不该在第 1，实际 {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|t| t == "内部"),
+        "词库词「内部」应在候选里，实际 {texts:?}"
+    );
+}
+
 /// 模糊音规则之间不叠加：zhen 开 z/zh + en/eng 时词库里叠出来的 zeng 读法不该被模糊命中。
 #[test]
 fn fuzzy_rules_do_not_stack_across_initial_and_final() {

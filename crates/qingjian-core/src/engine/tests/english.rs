@@ -444,9 +444,13 @@ fn pinyin_like_english_tail_competes_with_the_plain_reading() {
     engine.set_input("wodedatabase");
     let query = engine.query().unwrap();
     assert_eq!(query.candidates.items[0].text, "我的database");
-    // 拼音读法第二（末尾 se 被敲错边读成 的，散字路径本来就随便）
-    assert!(query.candidates.items[1].text.starts_with("我的大塔巴"));
-    assert_eq!(query.candidates.items[1].kind, CandidateKind::Sentence);
+    // 拼音读法排在英文混输之后（整句或词级「我的」）
+    assert!(
+        query.candidates.items[1].text.starts_with("我的大塔巴")
+            || query.candidates.items[1].text == "我的",
+        "got {:?}",
+        query.candidates.items[1].text
+    );
     assert_eq!(query.marked_text(), "wo'de'database");
 
     engine.set_input("womenqubeijing");

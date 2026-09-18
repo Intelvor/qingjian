@@ -637,6 +637,39 @@ impl Engine {
         } else {
             return None;
         };
+        // 单字堆叠的整句不抢第 1（**干净词库也会发生**，不是个人词库问题）：
+        // `neibusiweilian` 里 nei 既是「内」也是口语「那(nèi)」、si 既是「思」也是「死」，
+        // 语言模型容易串出「那不死威廉」这类高频单字 + 专名，词库里的「内部」反而被盖住。
+        // 判据：至少 3 个词、且一半以上是单字 → 不当首位整句，交给词级排序。
+        if kind == CandidateKind::Sentence {
+            let singles = conversion
+                .words
+                .iter()
+                .filter(|w| w.text.chars().count() == 1)
+                .count();
+            // 单字堆叠：≥3 词且过半单字
+            if conversion.word_count() >= 3 && singles * 2 >= conversion.word_count() {
+                return None;
+            }
+            // 敲错边/同音串出来的多词整句：以单字开头，且词级已有**不是整句前缀**的双字词盖住输入开头
+            //（`neibusiweilian` 的「内部」vs「那不是威廉」）→ 不抢第 1。
+            // 整句本身以该词开头的（「我的」→「我的大塔巴瑟」）仍保留，那是同一读法的长短两种展示。
+            if conversion.altered()
+                && conversion.word_count() >= 3
+                && conversion
+                    .words
+                    .first()
+                    .is_some_and(|w| w.text.chars().count() == 1)
+                && items.iter().any(|c| {
+                    c.kind == CandidateKind::Chinese
+                        && c.syllables.len() >= 2
+                        && c.text.chars().count() >= 2
+                        && !conversion.text.starts_with(&c.text)
+                })
+            {
+                return None;
+            }
+        }
         // 词级候选里已经有同样的文本：读音也相同就是同一个候选，不重复插、词留在词级排序给它的位置
         //（先是 / 有的 这种整句恰好拼成一个词的，词级排序更可信）；读音不同的是按别的读音对上的词
         //（云端学来的错读音用户词 `我的 wo di` 靠敲错变体对上 `wode`），那条不是这个候选，去掉它，整句以正确读音顶上
