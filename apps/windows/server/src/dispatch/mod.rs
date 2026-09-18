@@ -177,6 +177,7 @@ impl Router {
             switch_mode: self.config.switch_mode,
             english_mode: self.config.english_mode,
             default_mode: self.config.default_mode,
+            zhuyin: self.config.zhuyin,
         }
     }
 

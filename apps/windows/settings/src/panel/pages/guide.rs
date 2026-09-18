@@ -320,7 +320,8 @@ pub(crate) fn view(settings: &Settings, _context: &mut ViewContext<Settings>) ->
             vec![
                 key_row(
                     "「中 / 英」",
-                    "点一下切换中英模式；Caps Lock 亮着时前面多一个「A」（如 A 中）。",
+                    "点一下切换中英模式；开着大千注音时这一格显示「注」（任务栏那个图标一起变），\
+                     Caps Lock 亮着时前面多一个「A」（如 A 中）。",
                 ),
                 key_row("「，。」", "点一下切换全角 / 半角标点。"),
                 key_row(

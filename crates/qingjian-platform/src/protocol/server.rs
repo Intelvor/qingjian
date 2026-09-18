@@ -23,6 +23,11 @@ pub struct InputSettings {
     /// **加字段向后兼容**：老 DLL 忽略它，新 DLL 对老 Server 拿到的缺省也是「不动」。
     #[serde(default)]
     pub default_mode: DefaultMode,
+
+    /// 注音模式（`[general] zhuyin`）：任务栏模式图标据此出「注」（悬浮状态条那格也看它）。
+    /// **加字段向后兼容**：老 DLL 忽略它，新 DLL 对老 Server 拿到的缺省是关。
+    #[serde(default)]
+    pub zhuyin: bool,
 }
 
 impl Default for InputSettings {
@@ -31,6 +36,7 @@ impl Default for InputSettings {
             switch_mode: SwitchKey::default(),
             english_mode: true,
             default_mode: DefaultMode::default(),
+            zhuyin: false,
         }
     }
 }
@@ -115,4 +121,38 @@ pub enum ServerMessage {
         /// 请求标识，回时带上。
         request: u64,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 线上格式是 JSON（[`super::codec`]），所以缺字段能靠 `serde(default)` 兜住：
+    /// 老 Server 的 JSON 里没有 `zhuyin` / `default_mode`，新 DLL 读出来是缺省值而不是报错。
+    #[test]
+    fn missing_fields_fall_back_to_defaults() {
+        let old = r#"{"switch_mode":"shift","english_mode":true}"#;
+        let input: InputSettings = serde_json::from_str(old).expect("老 Server 的帧要能读");
+        assert_eq!(
+            input,
+            InputSettings {
+                switch_mode: SwitchKey::Shift,
+                ..InputSettings::default()
+            }
+        );
+        assert!(!input.zhuyin);
+    }
+
+    #[test]
+    fn round_trips_through_json() {
+        let input = InputSettings {
+            zhuyin: true,
+            ..InputSettings::default()
+        };
+        let text = serde_json::to_string(&input).expect("写得出来");
+        assert_eq!(
+            serde_json::from_str::<InputSettings>(&text).expect("读得回来"),
+            input
+        );
+    }
 }

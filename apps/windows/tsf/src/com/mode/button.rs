@@ -1,4 +1,4 @@
-//! 中 / 英输入模式指示器：Win11 托盘品牌图标左边的模式图标。按微软 IME 的做法经 `GUID_LBI_INPUTMODE`
+//! 中 / 英 / 注输入模式指示器：Win11 托盘品牌图标左边的模式图标。按微软 IME 的做法经 `GUID_LBI_INPUTMODE`
 //! 语言栏按钮把图标交给系统（转换模式 compartment 不走这条通道，光写它不显示）。Caps Lock 亮着显示「A」。
 
 use std::rc::Rc;
@@ -88,6 +88,7 @@ impl ITfLangBarItemButton_Impl for ModeButton_Impl {
         Ok(BSTR::from(match self.glyph() {
             Glyph::Chinese => "中",
             Glyph::English => "英",
+            Glyph::Zhuyin => "注",
             Glyph::CapsLock => "A",
         }))
     }
@@ -96,13 +97,21 @@ impl ITfLangBarItemButton_Impl for ModeButton_Impl {
 impl ModeButton_Impl {
     /// Caps 亮着无论中英模式都直接出大写英文，所以它优先。
     fn glyph(&self) -> Glyph {
-        if caps_lock_on() {
-            Glyph::CapsLock
-        } else if self.state.english() {
-            Glyph::English
-        } else {
-            Glyph::Chinese
-        }
+        glyph_for(caps_lock_on(), self.state.english(), self.state.zhuyin())
+    }
+}
+
+/// 图标选哪个：Caps > 英 > 注 > 中，与状态条模式格的文字同一套优先级
+/// （状态条把 Caps 并进文字写成「A 中」，任务栏一格放不下两个字，Caps 亮着就只出「A」）。
+fn glyph_for(caps: bool, english: bool, zhuyin: bool) -> Glyph {
+    if caps {
+        Glyph::CapsLock
+    } else if english {
+        Glyph::English
+    } else if zhuyin {
+        Glyph::Zhuyin
+    } else {
+        Glyph::Chinese
     }
 }
 
@@ -119,5 +128,20 @@ impl ITfSource_Impl for ModeButton_Impl {
     fn UnadviseSink(&self, _dwcookie: u32) -> Result<()> {
         *self.state.sink.borrow_mut() = None;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 优先级：Caps 亮着出「A」，其次英文、注音、中文。
+    #[test]
+    fn glyph_priority_is_caps_then_english_then_zhuyin() {
+        assert_eq!(glyph_for(true, true, true), Glyph::CapsLock);
+        assert_eq!(glyph_for(true, false, true), Glyph::CapsLock);
+        assert_eq!(glyph_for(false, true, true), Glyph::English);
+        assert_eq!(glyph_for(false, false, true), Glyph::Zhuyin);
+        assert_eq!(glyph_for(false, false, false), Glyph::Chinese);
     }
 }

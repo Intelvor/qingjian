@@ -174,6 +174,7 @@ TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解
 状态条的「☁」「⚙」也自绘（`crates/qingjian-render/src/{cloud,gear}.rs`）：这两个码位会被 Segoe UI Emoji 接走画成彩色的，不认我们给的颜色。
 状态条格子的**宽度基准串**：文字会在几种固定写法之间来回切的格子（模式格 `中` / `注` / `英` ± Caps 的「A」、标点格 `，。` / `,.`）用 `StatusCell::text_with_width(text, emphasized, reference)`（GDI 那条是 `CellSpec::width_of`）给一个基准 —— **按基准量宽、按实际文字居中画**，于是同一配置下来回切（中英、全角半角、Caps 亮灭）**整条长度不变**，而改配置（开注释音之类）才变一次。渲染器那条在 `renderer/status/mod.rs::status_cell_width` 里取基准，GDI 那条在 `ui/status/mod.rs::render_gdi` 量宽、`paint_cells` 按实际文字居中。**别用「绝对定宽」**：模式格可能出现长文本（旧版会显示「中 · 小浪双拼」），定宽放不下。
 模式格**不显示双拼方案名**（2026-09-18 定）——它随配置变长、把整条撑宽，而只在换方案时才变；要看方案去设置页「通用」。**Caps Lock 亮着时模式格前面加「A」**（与任务栏图标一个意思），Caps 随 `ClientMessage::ModeChanged` 的 `caps` 字段（**每会话一份**，与 `english` 同层）报来；DLL 在切模式、激活、以及 Caps 键抬起时（`key_sink.rs::note_key_up`）各推一次。
+任务栏那个模式图标（语言栏按钮）与状态条模式格**同一套优先级**：Caps > 英 > 注 > 中（`com/mode/button.rs::glyph_for`；一格放不下「A 中」两个字，Caps 亮着就只出「A」）。注音开关（`[general] zhuyin`）经 `InputSettings.zhuyin` 下发，DLL 那边只在 `apply_mode_settings` 里比对「变没变」，变了就 `ModeState::notify()` 让系统重取图标（不 notify 就要等到下次切模式才刷新）。
 **主题色**（`[general] accent`，青简绿 / 经典蓝）由渲染器的 `theme::Accent` 给值，只换三处：**品牌色**（`Palette::accent`，状态条上「中 / 英」「，。」这类强调格与云朵）、**高亮底色**与**悬停底色**；语义色（生词的橙、译文与序号的灰）不跟着变。
 深浅各一套（浅底上品牌色要更深才压得住白，深底上要更亮才读得出来），所以是 `Palette::light_with(accent)` / `dark_with(accent)`。
 **两条画法都要给**：青简渲染器在 `ui/painter/`（`Painter` 存一份 `Accent`，`configure` 里主题色变了只换配色、**不重建字体库** —— 那是几十毫秒的重扫）；GDI 那条在 `ui/candidates/theme/`，没有 alpha，按各色的不透明度**预混**到背景上写成不透明值。
@@ -188,6 +189,7 @@ TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解
 所以由 **Server 读配置、经协议下发**（`InputSettings`：`OpenSession` 回包带一次，之后每拍 `SyncMode` 跟着走），
 DLL 不读文件、不查 mtime。`SessionOpened` 只回过协议版本对得上的 DLL——老的 `open` 是只写不读，
 多回一条会被它当成下一次 `Poll` 的应答而报错，那条连接就废了；老 DLL 从 `ModeSync` 那一拍也能拿到同一份（新字段直接忽略）。
+线上帧是 **JSON**（`protocol/codec.rs`，4 字节长度前缀 + `serde_json`），所以 `InputSettings` 加字段配 `#[serde(default)]` 就是向后兼容的：老 Server 发的 JSON 里没有 `zhuyin` / `default_mode`，新 DLL 读出来是缺省值而不是报错（`protocol/server.rs` 的 `missing_fields_fall_back_to_defaults` 钉着这条）。
 
 词库导入（设置「词库」页）走 `qingjian-dictionary::import` 转成 `.qj`（空词库拒绝），多选批量、成功的从 `[dictionaries] disabled` 摘掉、页面显示每个文件的结果；
 Server 每次轮询比对用户 `dicts\` 的路径 / mtime / 长度快照，配置没变也重载新增、同名更新与移除；配置解析失败时词库沿用上次有效的开关（#36）。
@@ -195,6 +197,10 @@ Server 每次轮询比对用户 `dicts\` 的路径 / mtime / 长度快照，配�
 ## assets
 
 - `assets/sample/`：手写样例词库与释义表，不是产品数据。
+- `assets/icon/windows/`：任务栏模式图标源文件（`mode-{zh,en,caps,zhuyin}.svg`，16×16 单色）。`render-mode-icons.sh` 用 rsvg-convert + magick 栅格化成四档 8 位 alpha 蒙版
+  （16/20/24/32px，按字号² 字节，`include_bytes!` 进 DLL），`render-mode-icons.ps1` 是 Windows 上那条等价路径（没有 rsvg / magick 时用）。中 / 英 / A 三张是设计稿手画的轮廓；
+  **「注」没有设计稿**，由 .ps1 取 `GraphicsPath.AddString` 的字形轮廓（缺省 Noto Sans SC Black，笔画重量与设计稿最接近）归一到 16×16（ink 高度 13.5，设计稿「中」14、「英」13）、同时写 `mode-zhuyin.svg` 与四档蒙版。
+  **Windows PowerShell 5.1 按 ANSI 解码没有 BOM 的 .ps1**：文件里的中文注释会被解成乱码，尾字节吃掉换行把下一行代码并进注释（踩过：`$prev = New-Object ...` 被吞，报「FromImage 参数为 null」）—— .ps1 必须带 UTF-8 BOM。
 - `assets/emoji/emoji-zh.tsv` / `emoji-en.tsv`：Unicode CLDR 中文 / 英文 annotations 转出的 emoji 表（Unicode License v3，可发布；中文词与英文词各配 emoji，两张表加载时合成一张），
   `cargo run --release -p qingjian-dict-convert -- --out-dir assets/emoji emoji --language zh data/cldr/annotations-zh.json data/cldr/annotationsDerived-zh.json`（en 同理）。
 - 英文词表词频：`uv run tools/corpus/english_frequency.py data/generated/english.tsv -o data/generated/english-frequency.tsv`，再 `... english <词表> --frequency <那个文件>`。

@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 use windows::Win32::UI::TextServices::ITfLangBarItemMgr;
 use windows::core::Interface;
 
-use qingjian_platform::SwitchKey;
 use qingjian_platform::protocol::InputSettings;
 
 use super::TextService_Impl;
@@ -19,13 +18,20 @@ use crate::com::mode::{self, ModeButton, conversion};
 const CONVERSION_RESTORE_WINDOW: Duration = Duration::from_millis(500);
 
 impl TextService_Impl {
-    /// 应用中英模式的两项设置：激活时与配置变更时都走这里。
-    pub(super) fn apply_mode_settings(&self, english_mode: bool, switch_key: SwitchKey) {
-        self.mode_state.set_settings(english_mode, switch_key);
+    /// 应用中英模式的三项设置：激活时与配置变更时都走这里。
+    ///
+    /// 注音（`[general] zhuyin`）只改任务栏那个图标（中 / 英 / 注）与状态条的模式格，不动模式本身；
+    /// 它变了要单独通知系统重取图标，否则要等到下次切模式才刷新。
+    pub(super) fn apply_mode_settings(&self, input: &InputSettings) {
+        let zhuyin_changed =
+            self.mode_state
+                .set_settings(input.english_mode, input.switch_mode, input.zhuyin);
         // 关掉内置英文模式时立刻回中文，别停在一个再也切不回去的英文状态。
-        if !english_mode && self.mode_state.english() {
+        if !input.english_mode && self.mode_state.english() {
             self.mode_state.set_english(false);
             self.refresh_mode_indicator();
+        } else if zhuyin_changed {
+            self.mode_state.notify();
         }
     }
 
@@ -37,12 +43,13 @@ impl TextService_Impl {
         }
         self.input_settings.set(Some(input));
         log(&format!(
-            "按键行为设置：中英切换键 {}，内置英文模式 {}，新窗口默认模式 {}",
+            "按键行为设置：中英切换键 {}，内置英文模式 {}，新窗口默认模式 {}，注音模式 {}",
             input.switch_mode.key(),
             input.english_mode,
-            input.default_mode.key()
+            input.default_mode.key(),
+            input.zhuyin
         ));
-        self.apply_mode_settings(input.english_mode, input.switch_mode);
+        self.apply_mode_settings(&input);
     }
 
     /// 激活时把模式定到配置要的那一种，并把接下来一小段时间里 **msctf 写回 profile** 的那次变化挡掉。
