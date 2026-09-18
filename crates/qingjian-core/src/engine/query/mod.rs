@@ -588,9 +588,8 @@ impl Engine {
                 {
                     let input_letters = keys.chars().filter(|c| *c != '\'').count();
                     let sent_letters: usize = plain.syllables.iter().map(|s| s.len()).sum();
-                    let longer_than_input = sent_letters > input_letters;
-                    // 模型在同音节切分里选了非 best 的那条，且拼音不长于输入 → 可排英文后最前；
-                    // 拼音还比输入长的（长句/长词）跟在词级后面，避免「敲几个音节就跳整句」
+                    // 拼音长度超出输入过多：整句排后面，避免压过词级候选
+                    let longer_than_input = sent_letters > input_letters * 2;
                     let position = if model_chose_alt && !longer_than_input {
                         leading_english(items)
                     } else {

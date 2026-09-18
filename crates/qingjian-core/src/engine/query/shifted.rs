@@ -288,6 +288,7 @@ impl Engine {
     }
 
     /// 对一段独立拼音跑整句转换，返回 (文字, 音节数)。
+    /// 音节数明显超出输入拼音长度的整句直接丢弃（模型脑补的长句）。
     fn sentence_for_pinyin(&self, pinyin: &str) -> Option<(String, Vec<String>)> {
         let (segmentations, _tail) = segment_longest_prefix(pinyin).ok()?;
         let best = segmentations.first()?;
@@ -301,6 +302,12 @@ impl Engine {
         }
         // 音节数要贴住切分，否则不算这段拼音的整句
         if conversion.syllables.len() != best.syllables.len() {
+            return None;
+        }
+        // 整句文本的拼音长度明显超出输入：模型脑补，丢弃
+        let input_letters = pinyin.chars().filter(|c| *c != '\'').count();
+        let sent_letters: usize = conversion.syllables.iter().map(|s| s.len()).sum();
+        if sent_letters > input_letters + 4 {
             return None;
         }
         Some((conversion.text, conversion.syllables))
