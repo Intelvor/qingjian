@@ -1,5 +1,7 @@
 //! 根组件的 Reactor 生命周期：建状态、按消息落盘、画左侧导航 + 当前页。
 
+use std::sync::OnceLock;
+
 use qingjian_platform::{
     AccentColor, CandidateRenderer, Config, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, LayoutMode,
     LogLevel, PreeditMode, ShiftLetter, ThemeMode,
@@ -10,6 +12,22 @@ use super::cloud_status::CloudStatus;
 use super::controls::{export_logs, log_dir, open_in_editor, open_with_explorer};
 use super::pages::{about, cloud, dictionaries, general, shortcut, typing};
 use super::{Message, Settings};
+
+/// 窗口标题栏左上角的图标路径：随包装在 exe 旁边的 `qingjian.ico`。
+///
+/// WinUI 的标题栏图标**不吃 exe 里的资源**，得用 `WindowVisuals::icon` 单独设一次（装机包已经把
+/// 那个文件放在 `{app}` 下，见 `qingjian.iss`）。`icon()` 收 `&'static str`，所以算出来的路径泄漏
+/// 一次、用 `OnceLock` 记住；开发态（`cargo run`，exe 旁边没有这个文件）返回 `None`：
+/// 不设图标也不报错。
+fn window_icon() -> Option<&'static str> {
+    static ICON: OnceLock<Option<&'static str>> = OnceLock::new();
+    *ICON.get_or_init(|| {
+        let path = std::env::current_exe().ok()?.parent()?.join("qingjian.ico");
+        path.is_file().then(|| {
+            Box::leak(path.to_string_lossy().into_owned().into_boxed_str()) as &'static str
+        })
+    })
+}
 
 /// 导航图标：`SymbolIcon`（WinUI `Symbol` 枚举）或 `FontIcon`（Segoe MDL2 Assets 的字面 glyph 编码）。
 ///
@@ -294,6 +312,9 @@ impl Component for Settings {
 
     fn view(&self, _input: &(), context: &mut ViewContext<Self>) -> View {
         context.window_title("青简设置");
+        if let Some(icon) = window_icon() {
+            context.window_visuals(WindowVisuals::new().icon(icon));
+        }
         // 「关于」的目标图标是「ⓘ 圆圈包 i」（Segoe MDL2 Assets **E946 Info**）。
         // `Symbol::Help` 是 E897「?」不是ⓘ，所以这里用 FontIcon 传 E946（默认字体 Segoe MDL2 Assets）。
         let item = |tag: &str, label: &str, icon: Icon| {
