@@ -18,4 +18,12 @@ pub(crate) struct SessionInfo {
     /// 该会话最近报来的中英模式（`true` 英文）；还没报过、或已切成别的输入法时为 `None`。
     /// 中英模式是**每会话一份**的：状态条显示前台会话那一份，后台应用报来的只记不显。
     pub(crate) english: Option<bool>,
+
+    /// 该会话最近一次报来的光标**前**文（`ClientMessage::Surrounding`）；读到空就是 `None`。
+    /// **按会话各记一份**：以前这是 `Router` 上的全局一份、谁最后报谁的 —— 别的窗口打字会把正在
+    /// 输入那个窗口的上下文顶掉（2026-09-18 诊断日志实证：A 应用复现期间，B 应用每敲一个字都在覆盖它）。
+    pub(crate) surrounding_before: Option<String>,
+
+    /// 该会话最近一次报来的光标**后**文；含义同上。
+    pub(crate) surrounding_after: Option<String>,
 }

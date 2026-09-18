@@ -1819,6 +1819,66 @@ fn continue_key_then_tab_asks_for_a_continuation_without_pinyin() {
     assert_eq!(commit.as_deref(), Some("中的元素"), "再按一次 Tab 采用");
 }
 
+/// 光标前后文**按会话各记一份**：别的会话（后台应用）后来报的那份不能顶掉当前会话的。
+/// 2026-09-18 的诊断日志实证过这个串味：A 应用里复现续写期间，B 应用每敲一个字都在覆盖它。
+#[test]
+fn surrounding_is_kept_per_session() {
+    const OTHER: SessionId = SessionId(2);
+    let (mut router, cloud) = router_with_cloud(true, false);
+    open_session(&mut router, OTHER, None);
+    router.handle(ClientMessage::Surrounding {
+        session: SESSION,
+        text: "把两个集合".to_owned(),
+        after: "按顺序两两配对。".to_owned(),
+    });
+    // 另一个会话后报、内容完全不同：旧实现（Router 上全局一份）会被它顶掉。
+    router.handle(ClientMessage::Surrounding {
+        session: OTHER,
+        text: "另一个窗口正在打的字".to_owned(),
+        after: String::new(),
+    });
+
+    type_letters(&mut router, "i");
+    let (outcome, _, frame) = press(&mut router, tab());
+    assert_eq!(outcome, KeyOutcome::Consumed, "Tab 被吃掉");
+    assert!(frame.sentence_pending, "候选窗摆出「☁ …」");
+    let cloud = cloud.lock().unwrap();
+    assert_eq!(
+        cloud.befores.last().map(String::as_str),
+        Some("把两个集合"),
+        "用的必须是当前会话那份前后文"
+    );
+    assert_eq!(
+        cloud.afters.last().map(String::as_str),
+        Some("按顺序两两配对。")
+    );
+}
+
+/// 读到空要**作废**上一次那份：不能拿旧文本接着续写（DLL 现在空报也会送一条过来）。
+#[test]
+fn empty_surrounding_clears_the_previous_one() {
+    let (mut router, cloud) = router_with_cloud(true, false);
+    router.handle(ClientMessage::Surrounding {
+        session: SESSION,
+        text: "特朗普在社交媒体上发文表示".to_owned(),
+        after: String::new(),
+    });
+    // 光标移到应用给不出上下文的位置：空报（以前这条会被丢掉，旧文本继续沿用）。
+    router.handle(ClientMessage::Surrounding {
+        session: SESSION,
+        text: String::new(),
+        after: String::new(),
+    });
+
+    type_letters(&mut router, "i");
+    let (_, _, frame) = press(&mut router, tab());
+    assert!(!frame.sentence_pending, "没有上下文就不该去请续写");
+    assert!(
+        cloud.lock().unwrap().befores.iter().all(String::is_empty),
+        "不能带上一次那份旧前后文"
+    );
+}
+
 /// 双拼下续写键换成 `Shift + I`：小写 `i` 是音节键，入口得按住 Shift 敲大写。
 /// `ModeKeys::shifted` 与 DLL 早就算上了这个键，Core 的入口判定漏了它，双拼下续写整个进不去。
 #[test]

@@ -115,9 +115,12 @@ impl Router {
     /// 组句已经结束 / 不是聚焦会话的丢掉。
     pub(super) fn set_surrounding(&mut self, session: SessionId, text: String, after: String) {
         // 云联想也用这份前后文（macOS 壳是每键从 IMK 取，Windows 只在组句起始时读一次）。
-        // 必须在「不是聚焦会话就返回」之前记：会话刚打开、还没组句时这一条同样要收下。
-        self.surrounding_before = (!text.is_empty()).then_some(text.clone());
-        self.surrounding_after = (!after.is_empty()).then_some(after);
+        // **按会话各记一份**，且**空报也要落下去**：读到空 = 这个位置没有上下文，不能拿上一次的旧文本
+        // 接着用（以前是 Router 上的全局一份、空报直接 return → 旧值被无限沿用、还会被别的窗口顶掉）。
+        if let Some(info) = self.sessions.get_mut(&session) {
+            info.surrounding_before = (!text.is_empty()).then(|| text.clone());
+            info.surrounding_after = (!after.is_empty()).then_some(after);
+        }
         if self.focused != Some(session) || self.engine.composition().is_empty() {
             return;
         }

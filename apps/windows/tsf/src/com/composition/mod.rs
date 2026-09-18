@@ -46,7 +46,8 @@ pub(crate) fn apply(
     }
     // 一段组句里只问一次输入框状态。行内模式看组句刚起；`preedit = window` 模式应用里根本没有组句，
     // 得另用一个标记，否则每敲一键都要重读一遍光标前文、重报一次私密状态。
-    let report_input = !shared.has_composition() && !shared.context_reported();
+    let (had_composition, already_reported) = (shared.has_composition(), shared.context_reported());
+    let report_input = should_read_input(preedit.is_empty(), had_composition, already_reported);
     if report_input {
         shared.set_context_reported(true);
     }
@@ -69,6 +70,21 @@ pub(crate) fn apply(
     Ok(())
 }
 
+/// 这一拍要不要去读输入框（读光标前后文 + 报私密状态）。
+///
+/// 只在**新起一段组句、且这一拍确实有组句内容**时读。段末那一拍（`preedit` 为空，空格 / Tab 提交）
+/// 也满足「没有组句、本段没报过」，但它读到的是「刚提交完」的位置，而且会把「本段已报过」置真 ——
+/// 于是**下一段组句的第一键（敲 `i` 请续写那一拍）就再也不读了**，Server 只能沿用上一段那次的
+/// 前后文。2026-09-18 的诊断日志实证：读到 5 次全落在段末那一拍，按 `i` 那拍记的是
+/// 「没读（有组句=false 本段已报过=true）」，续写因此接着旧位置写。
+fn should_read_input(
+    preedit_is_empty: bool,
+    had_composition: bool,
+    already_reported: bool,
+) -> bool {
+    !preedit_is_empty && !had_composition && !already_reported
+}
+
 /// 告诉 Server 输入框私密与否（客户端只在变了时真发）；引擎正被别处借着（罕见）就算了，下段组句再报。
 fn report_privacy(engine: &SharedClient, private: bool) {
     if let Ok(mut guard) = engine.try_borrow_mut()
@@ -79,13 +95,13 @@ fn report_privacy(engine: &SharedClient, private: bool) {
     }
 }
 
-/// 把光标前后文送给 Server；引擎正被别处借着（罕见）就算了，Server 退回会话历史。
+/// 把光标前后文送给 Server；引擎正被别处借着（罕见）就算了。
+///
+/// **空报也要送**：Server 按这条把上一次的前后文作废。以前两头都空就直接 return，Server 无从知道
+/// 「这一拍读到的是空」，只能继续用上次那份旧文本 —— 续写就会接着旧位置写。
 fn report_surrounding(engine: &SharedClient, before: Option<String>, after: Option<String>) {
     let before = before.unwrap_or_default();
     let after = after.unwrap_or_default();
-    if before.is_empty() && after.is_empty() {
-        return;
-    }
     let (before_chars, after_chars) = (before.chars().count(), after.chars().count());
     if let Ok(mut guard) = engine.try_borrow_mut()
         && let Some(client) = guard.as_mut()
@@ -190,4 +206,21 @@ fn move_selection_to_end(context: &ITfContext, ec: u32, range: &ITfRange) -> Res
     let result = unsafe { context.SetSelection(ec, std::slice::from_ref(&selection)) };
     drop(ManuallyDrop::into_inner(selection.range));
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_read_input;
+
+    #[test]
+    fn reads_only_when_a_segment_starts_with_content() {
+        // 新起一段、这一拍有内容：读（这正是敲 `i` 请续写那一拍）。
+        assert!(should_read_input(false, false, false));
+        // 段末提交那一拍（`preedit` 为空）：不读 —— 读了会把标记置真，下一段就永远不读。
+        assert!(!should_read_input(true, false, false));
+        // 段中（已有组句对象 / 本段已经报过）：不读，一段只读一次。
+        assert!(!should_read_input(false, true, false));
+        assert!(!should_read_input(false, false, true));
+        assert!(!should_read_input(true, true, true));
+    }
 }

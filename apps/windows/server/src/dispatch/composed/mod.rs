@@ -143,14 +143,18 @@ impl Router {
 
     /// 给云联想的周围文本。Windows 壳只在组句起始时读一次光标前后文
     /// （`ClientMessage::Surrounding`），Core 会按 `policy.before` / `policy.after` 裁到约定的字数。
-    /// 两头都没有就是 `None`（应用给不出上下文时），模型只能按拼音硬猜。
+    /// 取的是**前台会话**那一份（每会话各记一份）；两头都没有就是 `None`（应用给不出上下文时），
+    /// 模型只能按拼音硬猜 —— 续写那条路 Core 会因此干脆不发。
     fn surrounding_text(&self) -> Option<SurroundingText> {
-        if self.surrounding_before.is_none() && self.surrounding_after.is_none() {
+        let info = self
+            .focused
+            .and_then(|session| self.sessions.get(&session))?;
+        if info.surrounding_before.is_none() && info.surrounding_after.is_none() {
             return None;
         }
         Some(SurroundingText {
-            before: self.surrounding_before.clone().unwrap_or_default(),
-            after: self.surrounding_after.clone().unwrap_or_default(),
+            before: info.surrounding_before.clone().unwrap_or_default(),
+            after: info.surrounding_after.clone().unwrap_or_default(),
         })
     }
 

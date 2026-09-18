@@ -42,6 +42,9 @@ impl Router {
                         tid,
                         // 模式等 DLL 紧接着那条 ModeChanged 报来（激活时必发一次）。
                         english: None,
+                        // 光标前后文等新会话第一段组句起始时 DLL 报来。
+                        surrounding_before: None,
+                        surrounding_after: None,
                     },
                 );
                 // 按键行为设置回一次，让 DLL 不必自己读配置文件。**只回过协议版本对得上的**：
