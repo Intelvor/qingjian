@@ -570,7 +570,7 @@ impl Engine {
                 }
                 if tail.competes
                     && let Some(full) = first_segmentation(keys)
-                    && let Some(plain) =
+                    && let Some((plain, _)) =
                         self.plain_sentence(items, std::slice::from_ref(&full), typos)
                 {
                     let position = items.len().min(1);
@@ -578,108 +578,124 @@ impl Engine {
                 }
             }
             _ => {
-                if let Some(plain) = self.plain_sentence(items, segmentations, typos) {
-                    let position = Self::sentence_insert_position(&plain, items);
+                if let Some((plain, model_chose_alt)) =
+                    self.plain_sentence(items, segmentations, typos)
+                {
+                    // 模型在同音节切分里选了非 best 的那条（`henganrende`：hen'gan 胜过 heng'an）
+                    // → 整句直接跟在英文候选后，不再被词级前缀词（恒安）压到后面。
+                    let position = if model_chose_alt {
+                        leading_english(items)
+                    } else {
+                        Self::sentence_insert_position(&plain, items)
+                    };
                     items.insert(position, plain);
                 }
             }
         }
     }
 
-    /// 最优切分之外的切分试几条。太靠后的切分离最长切分太远（多是拆碎音节的读法），试了只是白花时间。
+    /// 最优切分之外再试几条整句。太靠后的切分离最长切分太远（多是拆碎音节的读法），试了只是白花时间。
     const ALTERNATIVE_SEGMENTATIONS: usize = 4;
 
-    /// 在最优切分之外找一条「不用敲错边、也没有占位音节」的整句读法，给 [`Self::plain_sentence`] 兜底。
+    /// 整段拼音的整句候选：返回 `(候选, 模型是否选了非 best 的切分)`。
     ///
-    /// **只收与最优切分音节数相同的读法**（`zhenandaobushi` 的 zhe'nan… 与 zhen'an… 都是 5 段）。
-    /// 简拼拆出来的一长串单字（`zonghu` 的 z…o…n…g…hu → 在哦那个和）音节数对不上，不是「同一句话的另一种切法」，
-    /// 拿它当整句会顶掉 总会 这类正常词候选。
-    fn plain_alternative(&self, segmentations: &[Segmentation], typos: bool) -> Option<Conversion> {
-        let best_len = segmentations.first()?.syllables.len();
-        segmentations
-            .iter()
-            .skip(1)
-            .take(Self::ALTERNATIVE_SEGMENTATIONS)
-            .find_map(|segmentation| {
-                if segmentation.syllables.len() != best_len {
-                    return None;
-                }
-                let patterns = segmentation.patterns();
-                let inner_abbreviated = patterns
-                    .iter()
-                    .take(patterns.len().saturating_sub(1))
-                    .any(|p| !p.complete);
-                if inner_abbreviated {
-                    return None;
-                }
-                let conversion = self.convert_sentence(&patterns, typos)?;
-                (!conversion.altered() && !conversion.has_placeholder()).then_some(conversion)
-            })
-    }
-
-    /// 整段拼音的整句候选：最优切分至少两个音节、且最优路径不止一个词时才有（空格上屏的就是它）。
-    /// 整段本身就是词库里的词时不重复；有音节没转成字的不算句子。
-    /// 词级候选里已有同文本同读音的候选时不出（那条留在词级排序给它的位置），同文本不同读音的从 `items` 里去掉。
+    /// **同音节数的切分各转一次整句，语言模型分高者胜**（2026-09-19）：切分排序偏爱「前面音节更长」
+    /// （`heng'an` 压过 `hen'gan`），但更长的前段不一定是用户要说的那句话（`henganrende` 应出
+    /// 「很感人的」而不是地名「恒安人的」）。模型要比过才知道，不能只信 best。
+    /// 非末尾有简拼的切分、音节数与 best 不一致的转换仍不参与。
     pub(super) fn plain_sentence(
         &self,
         items: &mut Vec<Candidate>,
         segmentations: &[Segmentation],
         typos: bool,
-    ) -> Option<Candidate> {
+    ) -> Option<(Candidate, bool)> {
         let best = segmentations.first()?;
-        if best.syllables.len() < 2 {
+        let best_len = best.syllables.len();
+        if best_len < 2 {
             return None;
         }
-        let mut conversion = self.convert_sentence(&best.patterns(), typos)?;
-        // 不按原样读的路径（敲错边 / 模糊音）不许压过「敲的拼音本身就是一个词」：`jineng` 按 `jin eng` 切时
-        // 词图里没有 技能，敲错边读出 近藤；`ceshi` 读出 的是。词级候选里有音节正好拼成整段输入的词时退回原样的路径
+        let mut winner: Option<(usize, Conversion)> = None;
+        for (index, segmentation) in segmentations
+            .iter()
+            .take(Self::ALTERNATIVE_SEGMENTATIONS + 1)
+            .enumerate()
+        {
+            if segmentation.syllables.len() != best_len {
+                continue;
+            }
+            let patterns = segmentation.patterns();
+            let inner_abbreviated = patterns
+                .iter()
+                .take(patterns.len().saturating_sub(1))
+                .any(|p| !p.complete);
+            if inner_abbreviated {
+                continue;
+            }
+            let Some(conversion) = self.convert_sentence(&patterns, typos) else {
+                continue;
+            };
+            if conversion.has_placeholder() || conversion.syllables.len() != best_len {
+                continue;
+            }
+            winner = Some(match winner.take() {
+                None => (index, conversion),
+                Some((prev_i, prev)) => {
+                    let pick_new = match prev.score.partial_cmp(&conversion.score) {
+                        Some(std::cmp::Ordering::Less) => true,
+                        Some(std::cmp::Ordering::Greater) => false,
+                        _ => prev.altered() && !conversion.altered(),
+                    };
+                    if pick_new {
+                        (index, conversion)
+                    } else {
+                        (prev_i, prev)
+                    }
+                }
+            });
+        }
+        let (win_index, mut conversion) = winner?;
+        let model_chose_alt = win_index > 0;
+        // 词级已有同输入的完整词时，敲错边整句退回原样读音
         if conversion.altered() {
             let letters = best.joined("");
             let spelled_exactly = items
                 .iter()
                 .any(|c| c.kind == CandidateKind::Chinese && c.syllables.concat() == letters);
-            if spelled_exactly {
-                conversion = self.convert_sentence(&best.patterns(), false)?;
-            } else if let Some(alternative) = self.plain_alternative(segmentations, typos) {
-                // 最优切分只能靠敲错边读出句子时，换别的切分试试：切分按最长音节优先，而最长的不一定对。
-                // `zhenandaobushi` 的最长切分是 `zhen an …`，它读成「真难道不是」全靠 an → nan 的敲错边；
-                // 而 `zhe nan …` 是原样的「这难道不是」。
-                conversion = alternative;
+            if spelled_exactly
+                && let Some(clean) = self.convert_sentence(&best.patterns(), false)
+                && !clean.has_placeholder()
+                && clean.syllables.len() == best_len
+            {
+                conversion = clean;
             }
         }
-        if conversion.has_placeholder() {
+        if conversion.has_placeholder() || conversion.syllables.len() != best_len {
             return None;
         }
-        // 整句读法的音节数要贴住引擎显示的那条切分；差一截的多半是简拼串成的一串单字
-        // （`zonghu` → 在哦那个和），空格上屏会很怪，不进候选首位。
-        if conversion.syllables.len() != best.syllables.len() {
-            return None;
-        }
-        // 整段本来就是一个词时不出整句；但路径靠敲错变体把整段读成的一个词（`meiganxi` → 没关系）是噪声信道的判断，
-        // 词级查询按原样查不到它，作为普通词候选插到最前。只读了一部分（末尾没打完的音节没算进去）的不插
+        // 整段本来就是一个词时不出整句；敲错边读成的一个词（`meiganxi` → 没关系）作普通中文候选
         let kind = if conversion.word_count() >= 2 {
             CandidateKind::Sentence
-        } else if conversion.altered() && conversion.syllables.len() == best.syllables.len() {
+        } else if conversion.altered() {
             CandidateKind::Chinese
         } else {
             return None;
         };
-        // 词级候选里已经有同样的文本：读音也相同就是同一个候选，不重复插、词留在词级排序给它的位置
-        //（先是 / 有的 这种整句恰好拼成一个词的，词级排序更可信）；读音不同的是按别的读音对上的词
-        //（云端学来的错读音用户词 `我的 wo di` 靠敲错变体对上 `wode`），那条不是这个候选，去掉它，整句以正确读音顶上
         if let Some(index) = items.iter().position(|c| c.text == conversion.text) {
             if items[index].syllables == conversion.syllables {
                 return None;
             }
             items.remove(index);
         }
-        Some(Candidate {
-            text: conversion.text,
-            kind,
-            syllables: conversion.syllables,
-            reading: None,
-            translation: None,
-        })
+        Some((
+            Candidate {
+                text: conversion.text,
+                kind,
+                syllables: conversion.syllables,
+                reading: None,
+                translation: None,
+            },
+            model_chose_alt,
+        ))
     }
 
     /// 跑一次整句转换：主词库 + 用户词（含模糊音与敲错写法，命中的按代价扣分），静态语言模型与个人 n-gram 插值，用户选择次数加分。
