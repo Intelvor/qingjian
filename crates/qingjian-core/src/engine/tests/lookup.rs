@@ -248,8 +248,6 @@ fn shortcuts_follow_the_first_local_candidate() {
 
 #[test]
 fn shift_letters_join_the_buffer_only_when_configured() {
-    let dictionary = Dictionary::parse("C盘\tc pan\t8000\n磁盘\tci pan\t249\n").unwrap();
-    let mut engine = Engine::new(dictionary);
     let type_cpan = |engine: &mut Engine| {
         // 中文模式下按住 Shift 敲 C，再打 pan
         engine.push('C');
@@ -260,18 +258,71 @@ fn shift_letters_join_the_buffer_only_when_configured() {
 
     // 缺省 `shift_letter = "passthrough"`：壳直接把大写字母交给应用，这一路本来就不会走到；
     // 万一走到也不该被当成拼音去匹配（所以「C盘」出不来）
+    let mut engine = Engine::new(
+        Dictionary::parse("C盘\tc pan\t8000\n磁盘\tci pan\t249\n盘\tpan\t9000\n").unwrap(),
+    );
     type_cpan(&mut engine);
     assert_ne!(engine.query().unwrap().candidates.items[0].text, "C盘");
     engine.clear();
 
-    // 开了 compose：按小写参与匹配，拼音行按敲的样子显示，回车原样上屏时保留大写
+    // 开了 compose：大写**不再**当小写进拼音（不出 C盘），而是孤立字母 + 大写前小写段的拼音
     engine.set_shift_letter_compose(true);
     type_cpan(&mut engine);
     let query = engine.query().unwrap();
-    assert_eq!(query.candidates.items[0].text, "C盘");
-    assert_eq!(query.marked_text(), "C'pan");
+    let texts: Vec<&str> = query
+        .candidates
+        .items
+        .iter()
+        .map(|c| c.text.as_str())
+        .collect();
+    assert!(
+        !texts.contains(&"C盘"),
+        "大写不转小写参与拼音匹配，不该出 C盘，实际 {texts:?}"
+    );
+    assert!(
+        texts.contains(&"C"),
+        "拼不出英文时孤立大写字母，实际 {texts:?}"
+    );
+    assert!(
+        !texts.contains(&"盘"),
+        "大写在开头时本拍没有拼音前缀，不该直接出「盘」，实际 {texts:?}"
+    );
     assert_eq!(engine.take_raw(), "Cpan");
     assert!(engine.composition().is_empty());
+
+    // 大写在中间：前面的纯小写仍走拼音，大写起的英文留给孤立/下一轮
+    let dictionary = Dictionary::parse("你好\tni hao\t90000\n").unwrap();
+    let words = WordList::parse("Java\tjava\t4000\n").unwrap();
+    let mut engine = Engine::new(dictionary).with_english(words);
+    engine.set_shift_letter_compose(true);
+    for c in "nihao".chars() {
+        engine.push(c);
+    }
+    engine.push('J');
+    for c in "ava".chars() {
+        engine.push(c);
+    }
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t == "你好"),
+        "大写前的拼音照常出候选，实际 {texts:?}"
+    );
+
+    // 整段能拼成常见英文词时可领衔；GitHub Zipf 3.18 不常见 → 不领衔，但仍进候选
+    let dictionary = Dictionary::parse("开发\tkai fa\t9000\n").unwrap();
+    let words =
+        WordList::parse("GitHub\tgithub\t3180\nHub\thub\t2000\nhello\thello\t4720\n").unwrap();
+    let mut engine = Engine::new(dictionary).with_english(words);
+    engine.set_shift_letter_compose(true);
+    engine.push('G');
+    for c in "itHub".chars() {
+        engine.push(c);
+    }
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t == "GitHub"),
+        "GitHub 仍在候选里，实际 {texts:?}"
+    );
 }
 
 #[test]

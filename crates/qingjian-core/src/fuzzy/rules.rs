@@ -126,23 +126,32 @@ impl FuzzyRules {
 
     /// 一个音节的全部写法，第一个是敲的原文；没开模糊音就只有它自己。
     /// 同一位置的写法互不覆盖（词库多写法查询的契约）：前缀 `zh` 换成 `z` 后只留 `z`。
+    ///
+    /// **规则之间不叠加**（2026-09-18 收紧）：每条规则只作用在敲的原文上，`zhen` 开 z/zh + en/eng
+    /// 时出 `zen`、`zheng`，不出叠出来的 `zeng`——叠出来的读法更生僻，会在不合适的地方切进候选。
+    /// 单字母简拼也不再套模糊音：本来就歧义，再扩只会挤进更不常见的词。
     fn alternatives(&self, pattern: SyllablePattern<'_>) -> Vec<String> {
         let mut forms = vec![pattern.text.to_owned()];
         if !self.any() {
             return forms;
         }
-        // 规则之间可以叠加（zhen → zeng），跑到不再增长为止；规则集很小，两轮就收敛
-        let mut index = 0;
-        while index < forms.len() {
-            let current = forms[index].clone();
-            for candidate in self.apply_once(&current, pattern.complete) {
+        // 完整的单字母简拼不再套模糊音：本来就歧义，再扩只会挤进更不常见的词。
+        // 未敲完的单字母前缀（`l` → 还要接 an/ang）仍要套声母规则。
+        if pattern.complete && pattern.text.len() == 1 {
+            return forms;
+        }
+        for candidate in self.apply_initials(pattern.text) {
+            if !forms.contains(&candidate) {
+                forms.push(candidate);
+            }
+        }
+        if pattern.complete {
+            for candidate in self.apply_finals(pattern.text) {
                 if !forms.contains(&candidate) {
                     forms.push(candidate);
                 }
             }
-            index += 1;
-        }
-        if !pattern.complete {
+        } else {
             // 前缀之间去覆盖：被别的更短前缀包含的去掉
             let snapshot = forms.clone();
             forms.retain(|f| !snapshot.iter().any(|o| o != f && f.starts_with(o.as_str())));
@@ -158,10 +167,10 @@ impl FuzzyRules {
         forms
     }
 
-    /// 对一种写法各套一次规则得到的新写法（可能不合法，这里过滤掉）。
-    fn apply_once(&self, form: &str, complete: bool) -> Vec<String> {
+    /// 声母规则各换一次（都作用在原文上，互不叠加）。
+    fn apply_initials(&self, form: &str) -> Vec<String> {
         let mut out = Vec::new();
-        let mut swap_initial = |a: &str, b: &str| {
+        let mut swap = |a: &str, b: &str| {
             if let Some(rest) = form.strip_prefix(a) {
                 out.push(format!("{b}{rest}"));
             } else if let Some(rest) = form.strip_prefix(b) {
@@ -170,51 +179,50 @@ impl FuzzyRules {
         };
         // 先比双字母声母，`sh` 不能被当成 `s` 处理
         if self.z_zh {
-            swap_initial("zh", "z");
+            swap("zh", "z");
         }
         if self.c_ch {
-            swap_initial("ch", "c");
+            swap("ch", "c");
         }
         if self.s_sh {
-            swap_initial("sh", "s");
+            swap("sh", "s");
         }
         if self.n_l {
-            swap_initial("n", "l");
+            swap("n", "l");
         }
         if self.f_h {
-            swap_initial("f", "h");
+            swap("f", "h");
         }
         if self.l_r {
-            swap_initial("l", "r");
-        }
-        if complete {
-            let mut swap_final = |a: &str, b: &str| {
-                if let Some(head) = form.strip_suffix(a) {
-                    out.push(format!("{head}{b}"));
-                } else if let Some(head) = form.strip_suffix(b) {
-                    out.push(format!("{head}{a}"));
-                }
-            };
-            // 先比长的：`ang` 结尾的不能再被当成 `an`
-            if self.an_ang {
-                swap_final("ang", "an");
-            }
-            if self.en_eng {
-                swap_final("eng", "en");
-            }
-            if self.in_ing {
-                swap_final("ing", "in");
-            }
+            swap("l", "r");
         }
         out.retain(|f| {
-            !f.is_empty()
-                && f != form
-                && if complete {
-                    parser::is_syllable(f)
-                } else {
-                    parser::is_syllable(f) || parser::is_syllable_prefix(f)
-                }
+            !f.is_empty() && f != form && (parser::is_syllable(f) || parser::is_syllable_prefix(f))
         });
+        out
+    }
+
+    /// 韵母规则各换一次（只对完整音节，且不与声母规则叠加）。
+    fn apply_finals(&self, form: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut swap = |a: &str, b: &str| {
+            if let Some(head) = form.strip_suffix(a) {
+                out.push(format!("{head}{b}"));
+            } else if let Some(head) = form.strip_suffix(b) {
+                out.push(format!("{head}{a}"));
+            }
+        };
+        // 先比长的：`ang` 结尾的不能再被当成 `an`
+        if self.an_ang {
+            swap("ang", "an");
+        }
+        if self.en_eng {
+            swap("eng", "en");
+        }
+        if self.in_ing {
+            swap("ing", "in");
+        }
+        out.retain(|f| !f.is_empty() && f != form && parser::is_syllable(f));
         out
     }
 }
@@ -228,17 +236,29 @@ mod tests {
     }
 
     #[test]
-    fn initial_rules_apply_both_ways_and_combine_with_finals() {
+    fn initial_rules_apply_both_ways_without_stacking_finals() {
         let rules = FuzzyRules::ALL;
         let mut zhen = forms(&rules, SyllablePattern::complete("zhen"));
         zhen.sort();
-        assert_eq!(zhen, ["zen", "zeng", "zhen", "zheng"]);
+        // 声母换一次 + 韵母换一次，不叠成 zeng
+        assert_eq!(zhen, ["zen", "zhen", "zheng"]);
         assert_eq!(forms(&rules, SyllablePattern::complete("lan"))[0], "lan");
         let mut lan = forms(&rules, SyllablePattern::complete("lan"));
         lan.sort();
-        assert_eq!(lan, ["lan", "lang", "nan", "nang", "ran", "rang"]);
+        assert_eq!(lan, ["lan", "lang", "nan", "ran"]);
         // 不合法的写法不出：hua 没有 fua
         assert_eq!(forms(&rules, SyllablePattern::complete("hua")), ["hua"]);
+    }
+
+    #[test]
+    fn single_letter_abbreviations_skip_fuzzy() {
+        let rules = FuzzyRules::ALL;
+        assert_eq!(forms(&rules, SyllablePattern::complete("n")), ["n"]);
+        assert_eq!(forms(&rules, SyllablePattern::complete("z")), ["z"]);
+        // 未敲完的前缀仍扩声母
+        let mut l = forms(&rules, SyllablePattern::prefix("l"));
+        l.sort();
+        assert_eq!(l, ["l", "n", "r"]);
     }
 
     #[test]

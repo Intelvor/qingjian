@@ -5,6 +5,7 @@ use super::*;
 mod code;
 mod english_tail;
 mod result;
+mod shifted;
 mod snapshot;
 
 pub(crate) use english_tail::EnglishTail;
@@ -115,6 +116,10 @@ impl Engine {
     ) -> Result<Query, ParseError> {
         // 双拼先解成全拼（音节间已用 `'` 连好，切分没有歧义），之后与全拼同路；解不动的键当尾巴
         let decoded = self.decode(keys);
+        // Shift 大写进组句：不当拼音小写去匹配，先拼英文 / 孤立字母，拼音只吃大写前的纯小写前缀
+        if decoded.is_none() && self.composition.has_shifted() {
+            return self.query_shifted(&self.composition.typed_scope(), rest, start);
+        }
         let scope: &str = decoded.as_ref().map_or(keys, |d| d.pinyin());
         // 末尾是英文词（`woxiangxuehaorust`）：拼音候选与整句只按头段算，尾段整个跟在整句后面。
         // 整段也能读成拼音时（`database`、`…rust` 当简拼）两种读法比分，英文赢了才按头段算，
@@ -183,21 +188,68 @@ impl Engine {
         let mut scored = Vec::new();
         // 不同切分共享很多前缀（`zh g d o…` 的各种切法前几段一样），同一次查询里同一个模式只查一遍
         let mut memo: HashMap<String, Vec<Match<'_>>> = HashMap::new();
-        for segmentation in &segmentations {
-            let mut patterns = segmentation.patterns();
+        for (seg_index, segmentation) in segmentations.iter().enumerate() {
+            let patterns = segmentation.patterns();
             let count = patterns.len();
-            let last = &segmentation.syllables[count - 1];
-            // 最后一个音节即使打完了也可能还没打完（`xia` 可能是 `xiang` 的前缀），按前缀查；双拼两键就是定局
-            if last.complete && decoded.is_none() && parser::is_syllable_prefix(&last.text) {
-                patterns[count - 1].complete = false;
+            if count == 0 {
+                continue;
             }
-            // 词级候选只按敲的原样与模糊音查，敲错变体只进整句词图（它的候选从那边插进来）：
-            // 词级排序把音节数对得上的排最前，敲错命中的词（`kaif` → 咖啡）会把更长的原样词挤到后面
-            let expanded = self.fuzzy.expand(&patterns);
+            let last = &segmentation.syllables[count - 1];
+            // 模糊音：按切分原样扩；非末尾残缺/简拼的切分不套（`zh'en` 叠起来会切进生僻词）。
+            // 末尾是完整音节但还能往下敲时（`ha`/`zhen`）：
+            // - 敲的原文 + 声母类模糊写法按**前缀**查（f/h 下 `kaiha` 要能出 开放）
+            // - 模糊前缀**不收**「更长的单音节词」（`zhen` 开 z/zh 时 `zen` 前缀不该吃进 增/zeng）
+            let inner_incomplete = patterns
+                .iter()
+                .take(count.saturating_sub(1))
+                .any(|p| !p.complete);
+            let expanded = if inner_incomplete {
+                Expanded::exact(&patterns)
+            } else {
+                self.fuzzy.expand(&patterns)
+            };
             let positions = expanded.positions();
             let abbreviated = abbreviated_count(&patterns);
-            // 没有替代写法时每条命中都是敲的原音节，`penalty` 直接给 0（单字母简拼能命中几万条）
-            let hits = self.lookup_all(&positions);
+            let mut hits = self.lookup_all(&positions);
+            if !inner_incomplete
+                && last.complete
+                && decoded.is_none()
+                && parser::is_syllable_prefix(&last.text)
+            {
+                let typed_last = patterns[count - 1].text;
+                // 前缀写法：敲的原文 + 同长度同韵母的换声母写法（`ha`→`fa`；`zhen`→`zen` 长度不同，不加）
+                let mut prefix_forms = vec![typed_last.to_owned()];
+                for form in &positions[count - 1] {
+                    let t = typed_last.as_bytes();
+                    let f = form.text.as_bytes();
+                    if form.text != typed_last
+                        && t.len() == f.len()
+                        && t.len() >= 2
+                        && t[0] != f[0]
+                        && t[1..] == f[1..]
+                    {
+                        prefix_forms.push(form.text.to_owned());
+                    }
+                }
+                for (form_index, form) in prefix_forms.iter().enumerate() {
+                    let mut prefix_patterns = segmentation.patterns();
+                    prefix_patterns[count - 1].text = form.as_str();
+                    prefix_patterns[count - 1].complete = false;
+                    let prefix_hits =
+                        self.lookup_all(&Expanded::exact(&prefix_patterns).positions());
+                    for hit in prefix_hits {
+                        let single = hit.syllables().count() == 1;
+                        let exact_form = hit.syllables().next() == Some(form.as_str());
+                        // 模糊前缀不收更长的单音节词（避免 zen 前缀吃进 zeng）
+                        if form_index > 0 && single && !exact_form {
+                            continue;
+                        }
+                        if !hits.iter().any(|h| h.text == hit.text) {
+                            hits.push(hit);
+                        }
+                    }
+                }
+            }
             scored.reserve(hits.len());
             for hit in hits {
                 let full_last = last.complete
@@ -213,27 +265,30 @@ impl Engine {
             }
             // 输入的前缀也出候选（`kaifazhe` → 开发、开），否则长句没法逐词上屏。
             // 只收音节数正好等于前缀长度的词，更长的词会与输入后面的音节冲突。
-            // 前缀不含最后一个位置，因此可复用上面的扩展结果。
-            for prefix_len in (1..count).rev() {
-                let prefix = &patterns[..prefix_len];
-                let prefix_letters: usize = prefix.iter().map(|p| p.text.len()).sum();
-                let hits = memo
-                    .entry(pattern_key(prefix))
-                    .or_insert_with(|| self.lookup_exact_all(&positions[..prefix_len]));
-                let abbreviated = abbreviated_count(prefix);
-                for hit in hits.iter().copied() {
-                    scored.push(Scored {
-                        // 对整个输入来说它不是精确命中，只是覆盖了前面一部分
-                        hit: Match {
-                            exact: false,
-                            ..hit
-                        },
-                        full_last: true,
-                        coverage: prefix_letters,
-                        abbreviated,
-                        weight: self.learner.weight(hit.text),
-                        penalty: expanded.penalty(hit.syllables()),
-                    });
+            // **只在最优切分上做**：备选切分里的简拼前缀（`zhen` 的 `z'hen` → 拿 `z` 查）
+            // 会把所有 z* 单音节词塞进候选，那是不合适的地方切出来的生僻读法。
+            if seg_index == 0 {
+                for prefix_len in (1..count).rev() {
+                    let prefix = &patterns[..prefix_len];
+                    let prefix_letters: usize = prefix.iter().map(|p| p.text.len()).sum();
+                    let hits = memo
+                        .entry(pattern_key(prefix))
+                        .or_insert_with(|| self.lookup_exact_all(&positions[..prefix_len]));
+                    let abbreviated = abbreviated_count(prefix);
+                    for hit in hits.iter().copied() {
+                        scored.push(Scored {
+                            // 对整个输入来说它不是精确命中，只是覆盖了前面一部分
+                            hit: Match {
+                                exact: false,
+                                ..hit
+                            },
+                            full_last: true,
+                            coverage: prefix_letters,
+                            abbreviated,
+                            weight: self.learner.weight(hit.text),
+                            penalty: expanded.penalty(hit.syllables()),
+                        });
+                    }
                 }
             }
         }

@@ -6,11 +6,12 @@ use super::*;
 fn english_word_ranks_first_when_input_is_unlikely_pinyin() {
     // 词频是 Zipf×1000，与产品 english.tsv 同一尺度
     let words = WordList::parse(
-        "hello\thello\t4720\nchina\tchina\t5100\nGitHub\tgithub\t3180\nkey\tkey\t5120\n",
+        "hello\thello\t4720\nchina\tchina\t5100\nGitHub\tgithub\t3180\nkey\tkey\t5120\nHub\thub\t2000\n",
     )
     .unwrap();
     let mut engine = engine().with_english(words);
 
+    // hello 逐字母命中且常见（Zipf 4.72）→ 第一
     engine.set_input("hello"); // he l… l… o：中间有声母缩写
     let all: Vec<String> = engine
         .query()
@@ -22,17 +23,60 @@ fn english_word_ranks_first_when_input_is_unlikely_pinyin() {
         .collect();
     assert_eq!(all[0], "hello");
 
-    engine.set_input("github"); // gi 不是音节 → 切不动
+    // GitHub 逐字母命中但不常见（Zipf 3.18）→ 这条输入没有中文候选时仍可在第一，但有中文时让位
+    engine.set_input("github");
     let query = engine.query().unwrap();
-    assert_eq!(query.candidates.items[0].text, "GitHub");
-    assert_eq!(query.candidates.items[0].kind, CandidateKind::English);
-    let word = query.candidates.items[0].clone();
-    assert_eq!(engine.commit(&word), "GitHub");
-    assert!(engine.composition().is_empty());
+    assert!(
+        query
+            .candidates
+            .items
+            .iter()
+            .any(|c| c.text == "GitHub" && c.kind == CandidateKind::English),
+        "不常见的精确英文仍进候选"
+    );
 
-    // china 是干净的 chi na，中文候选（词库里没有就只有英文）排前；这里词库没有 chi na，英文仍在第一位
+    // 有中文候选时不常见的英文不抢第一：hub（Zipf 2.0）对 hu+b，词库有 虎
+    let dictionary = Dictionary::parse("虎\thu\t9000\n湖\thu\t5000\n不\tbu\t8000\n").unwrap();
+    let words = WordList::parse(
+        "hello\thello\t4720\nchina\tchina\t5100\nGitHub\tgithub\t3180\nkey\tkey\t5120\nHub\thub\t2000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary).with_english(words);
+    engine.set_input("hub");
+    let all = texts_of(&engine);
+    assert!(
+        all.iter().any(|t| t == "Hub"),
+        "Hub 仍在候选里，实际 {all:?}"
+    );
+    assert_ne!(all[0], "Hub", "不常见的英文不放第一位，实际 {all:?}");
+    assert!(
+        all.iter().take(3).any(|t| t != "Hub" && !t.is_empty()),
+        "前面是中文/整句，实际 {all:?}"
+    );
+
+    // china 是干净的 chi na，常见精确命中 → 英文可在第一
     engine.set_input("china");
     assert_eq!(engine.query().unwrap().candidates.items[0].text, "china");
+
+    // 选过之后不常见的英文也能排第一（学习记录）
+    let dictionary = Dictionary::parse("虎\thu\t9000\n湖\thu\t5000\n不\tbu\t8000\n").unwrap();
+    let words = WordList::parse("Hub\thub\t2000\n").unwrap();
+    let mut engine = Engine::new(dictionary)
+        .with_english(words)
+        .with_learner(Box::new(CountingLearner(HashMap::new())));
+    engine.set_input("hub");
+    let hub = engine
+        .query()
+        .unwrap()
+        .candidates
+        .items
+        .iter()
+        .find(|c| c.text == "Hub")
+        .cloned()
+        .unwrap();
+    engine.commit(&hub);
+    engine.set_input("hub");
+    assert_eq!(engine.query().unwrap().candidates.items[0].text, "Hub");
 }
 
 #[test]

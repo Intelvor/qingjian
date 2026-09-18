@@ -801,6 +801,35 @@ fn bare_question_restores_punctuation_once_in_each_mode() {
     }
 }
 
+/// letters 区分大小写：`shift_letter = "compose"` 时 Shift 敲的大写按原样发给模型，
+/// 让它能据此判 `GitHub` 这类专有名词；小写输入与双拼解码后的全拼不受影响。
+#[test]
+fn prediction_letters_keep_the_typed_case() {
+    let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut engine = engine().with_predictor(Box::new(EchoPredictor {
+        submitted: submitted.clone(),
+        sentence: true,
+        replies: Vec::new(),
+    }));
+    engine.set_shift_letter_compose(true);
+    // 用户按住 Shift 敲 G 与 H，中间与其余小写（模拟 GitHub + 后续拼音）
+    engine.push('G');
+    for c in "itHubshuru".chars() {
+        engine.push(c);
+    }
+    engine.request_prediction(None, &[]);
+    let request = submitted.borrow().last().cloned().expect("发得出去");
+    assert_eq!(
+        request.letters, "GitHubshuru",
+        "compose 下 Shift 大写要还原进 letters"
+    );
+
+    // 小写输入：letters 仍是小写，不额外改写
+    engine.set_input("kaifa");
+    engine.request_prediction(None, &[]);
+    assert_eq!(submitted.borrow().last().unwrap().letters, "kaifa");
+}
+
 #[test]
 fn restoring_question_preserves_other_compositions() {
     for input in ["", "nihao", "?nihao"] {

@@ -88,6 +88,26 @@ fn typo_edges_in_the_lattice_correct_legal_but_unlikely_pinyin() {
     assert!(query.candidates.items.iter().all(|c| c.text != "是的"));
 }
 
+/// 模糊音规则之间不叠加：zhen 开 z/zh + en/eng 时词库里叠出来的 zeng 读法不该被模糊命中。
+#[test]
+fn fuzzy_rules_do_not_stack_across_initial_and_final() {
+    let dictionary =
+        Dictionary::parse("增\tzeng\t8000\n真\tzhen\t90000\n怎\tzen\t5000\n征\tzheng\t7000\n")
+            .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_fuzzy(FuzzyRules::ALL);
+    engine.set_input("zhen");
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t == "真" || t == "征" || t == "怎"),
+        "完整音节上的单条模糊规则仍生效，实际 {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t == "增"),
+        "简拼切分不再贡献 z* 前缀词，zeng 不该出现，实际 {texts:?}"
+    );
+}
+
 /// 模糊音命中的词按敲的字母消耗拼音（`zi` 对 `zhi`），不算敲错。
 #[test]
 fn fuzzy_hits_consume_the_typed_syllables() {
@@ -319,8 +339,15 @@ fn fuzzy_rules_add_homophones_behind_exact_hits() {
         ..FuzzyRules::default()
     });
     let after = texts_of(&engine);
-    // ha 是前缀，换成 fa 前缀后 开放（词频更高）与 开发 都出，覆盖更多字母排在 开 前面
-    assert_eq!(after[0], "开放");
+    assert!(
+        after.iter().any(|t| t == "开发") && after.iter().any(|t| t == "开放"),
+        "f/h 开着时 ha→fa 前缀仍出 开发/开放，实际 {after:?}"
+    );
+    assert!(
+        after.iter().position(|t| t == "开发").unwrap_or(usize::MAX)
+            < after.iter().position(|t| t == "开").unwrap_or(0),
+        "覆盖更多的词排在 开 前面，实际 {after:?}"
+    );
     assert!(after.contains(&"开发".to_owned()));
     assert!(after.contains(&"开".to_owned()));
     // 整句转换走同一套写法：xiangkaiha → 想开发

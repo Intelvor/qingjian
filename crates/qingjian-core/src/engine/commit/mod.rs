@@ -146,13 +146,18 @@ impl Engine {
                 self.learner.record_choice(&input, &candidate.text);
                 (consumed, input)
             }
-            // 英文词与快捷候选对应整段作用域；选中的英文词记次数并进个人英文词表，下次同样的前缀它靠前
+            // 英文词与快捷候选对应整段作用域；选中的英文词记次数并进个人英文词表，下次同样的前缀它靠前。
+            // 带音节的英文（Shift 大写路径上的前缀命中 / 孤立字母）按音节消耗，只吃它盖住的那截。
             CandidateKind::English | CandidateKind::Shortcut | CandidateKind::Custom(_) => {
                 if candidate.kind == CandidateKind::English {
                     self.learner.record(candidate);
                     self.learner.learn_english(&candidate.text);
                 }
-                self.whole_scope()
+                if candidate.kind == CandidateKind::English && !candidate.syllables.is_empty() {
+                    self.consumed_by(candidate)
+                } else {
+                    self.whole_scope()
+                }
             }
         };
         self.apply_retraction(&input, &candidate.text);

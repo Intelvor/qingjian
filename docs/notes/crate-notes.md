@@ -77,15 +77,20 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
   请求里只有「**用户敲的原始按键** + **候选窗第一页**（最多 9 格，`PREDICTION_CANDIDATE_HINTS`）+ 光标前后文 +
   `scheme`（输入方式：全拼 / 小鹤双拼 / 大千注音 / 五笔（86 版）/ 五笔 + 全拼（混输））+ `traditional`（简繁）+
   `max_items` / `want_sentence`」——不再发本地切分（`pinyin` / `syllables`）、本地整句（`local_sentence`），
-  也不要求模型回 `sentence_pinyin`。提示词（`qingjian-predict/src/prompt.rs::SYSTEM_PROMPT`）用一段说明 + 六个示例
+  也不要求模型回 `sentence_pinyin`。**`letters` 区分大小写**（2026-09-18）：全拼 / 五笔走 `Composition::typed_scope()`
+  （`shift_letter = "compose"` 时 Shift 大写还原进请求，模型据此判专有名词）；双拼 / 注音仍发 `decode` 后的全拼。
+  提示词（`qingjian-predict/src/prompt.rs::SYSTEM_PROMPT`）用一段说明 + 六个示例
   把行为框住：忽略简单拼写错误、中英混排照写、**不与候选窗第一页重复**、有 after 时只填中间那段、数字按中文习惯写、
-  `letters` 为空是续写。**五笔 / 混输**时提示词会点明 `letters` 是字根编码不是拼音（`scheme` 字段就是为这个）。
+  `letters` 为空是续写、**letters 带大小写时英文专名照抄**。**五笔 / 混输**时提示词会点明 `letters` 是字根编码不是拼音（`scheme` 字段就是为这个）。
   解析（`parse_reply`）只做组装层面的两件清理：剥掉模型重复写进来的 before / after、**不与候选窗第一页重复**；
   云端词与整句都**不再拿拼音校验**（Core 侧的 `validate_cloud_words` 与 `prediction/fuzzy.rs` 已删）。
   不要云端词的情形：`[predict] slots = 0`、简拼（`mostly_abbreviated`），以及**敲到 20 个字母**（`WORD_PREDICTION_MAX_LETTERS`，
   这么长的输入本来就是一整句，只要整句预测；问字模式不受这条限制）。
   双拼 / 注音与拼音同一套：请求前先 `Engine::decode` 把敲的键换成全拼再发（模型看不懂双拼击键），
   `letters` 因此是全拼；简拼判定照旧（cloud.rs 覆盖）。
+- **Shift 大写进组句（`shift_letter = "compose"`）不当拼音小写匹配**（`engine/query/shifted.rs`，2026-09-18）：
+  先按整段 / 从作用域开头起的前缀拼英文词表（`GitHub`），拼不出就孤立大写字母（`C`）；拼音只吃大写之前的纯小写前缀。
+  中途大写留给下一轮（先上屏前面的拼音）。英文候选带音节时按音节消耗上屏。
 - `CloudGlossFiller`：释义兜底（Core `GlossFiller` trait，与 Predictor 分开的线程与通道，攒 1.5 秒 / 8 个词发一次，问过不再问）：
   随包释义表没有的词库词 / 云端词上屏后入队，结果壳每秒 `Engine::poll_glosses` 经 `Translator::learn` 写进 `qingjian-translate::PersonalGlossary`
   （`user-glossary-<语言>.tsv`，`LayeredTranslator` 个人表优先）；随云联想开关一起开。

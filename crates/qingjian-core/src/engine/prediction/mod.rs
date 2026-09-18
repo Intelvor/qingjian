@@ -108,8 +108,8 @@ impl Engine {
         // 双拼：问云端用的是解出来的全拼，不是敲的键
         let decoded = self.decode(pinyin_source);
         let pinyin_source: &str = decoded.as_ref().map_or(pinyin_source, |d| d.pinyin());
-        let letters = pinyin_source.chars().filter(|c| *c != '\'').count();
-        if !continuing && letters < MIN_PREDICTION_LETTERS {
+        let letter_count = pinyin_source.chars().filter(|c| *c != '\'').count();
+        if !continuing && letter_count < MIN_PREDICTION_LETTERS {
             return None;
         }
         let (pinyin, syllables, guess, abbreviated) = match segment_longest_prefix(pinyin_source) {
@@ -127,13 +127,27 @@ impl Engine {
         if question {
             self.last_question_guess = guess.clone();
         }
+        // letters 发「用户敲的原样」：全拼/五笔走缓冲区原样（Shift 大写还原，模型可据此判专有名词）；
+        // 双拼/注音仍是解出来的全拼（键位本身不携带内容大小写）。
+        let typed_scope = self.composition.typed_scope();
+        let letters = if continuing {
+            String::new()
+        } else if let Some(decoded) = decoded.as_ref() {
+            decoded.pinyin().replace('\'', "")
+        } else if question {
+            self.modes()
+                .question_body(&typed_scope, self.zhuyin)
+                .replace('\'', "")
+        } else {
+            typed_scope.replace('\'', "")
+        };
         let request = PredictionRequest {
             sequence: self.prediction_sequence,
             kind,
             before,
             after,
             pinyin,
-            letters: pinyin_source.replace('\'', ""),
+            letters,
             scheme: self.scheme_label(),
             traditional: self.traditional,
             syllables,
@@ -148,7 +162,7 @@ impl Engine {
             // 不要词的情况：① 简拼（半数以上音节是缩写）——模型按声母凑出来的大多是生造词；
             // ② 敲得够长（`WORD_PREDICTION_MAX_LETTERS`）——这么长的输入本来就是整句，只要整句预测。
             // 问字模式的答案不受这两条限制（答案本来就对不上问题的拼音）。
-            max_items: if question || (!abbreviated && letters < WORD_PREDICTION_MAX_LETTERS) {
+            max_items: if question || (!abbreviated && letter_count < WORD_PREDICTION_MAX_LETTERS) {
                 policy.max_items
             } else {
                 0

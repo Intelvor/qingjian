@@ -21,6 +21,15 @@ impl Expanded {
         }
     }
 
+    /// 只保留敲的原样，不套模糊音 / 敲错变体（非末尾简拼的切分用）。
+    pub fn exact(patterns: &[SyllablePattern<'_>]) -> Self {
+        Self::new(
+            patterns
+                .iter()
+                .map(|p| (vec![(p.text.to_owned(), 0.0)], p.complete)),
+        )
+    }
+
     /// 给 `index` 位置加一种写法；已有同样写法时只留代价低的那个。不完整的位置（简拼、前缀）不加。
     pub fn push_alternative(&mut self, index: usize, text: &str, cost: f64) {
         let Some((forms, complete)) = self.positions.get_mut(index) else {

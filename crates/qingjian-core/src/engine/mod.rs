@@ -291,6 +291,10 @@ const ENGLISH_SWITCH_PENALTY: f64 = 3.0;
 /// 英文词频的下限（Zipf）：没有词频的词按百万分之一算。
 const ENGLISH_ZIPF_FLOOR: f64 = 3.0;
 
+/// 英文词抢第一的词频门槛（词表里存 Zipf×1000）：**逐字母命中且够常见**才排第一。
+/// 常见词约 Zipf ≥ 4（每十亿词里上万次）；GitHub 这类专名（约 3.2）不抢第一。
+const ENGLISH_FIRST_MIN_ZIPF: u32 = 4000;
+
 /// emoji 只配给前几个候选，每个词最多几个、一次最多几个。
 const EMOJI_SCAN: usize = 5;
 const EMOJI_PER_WORD: usize = 2;

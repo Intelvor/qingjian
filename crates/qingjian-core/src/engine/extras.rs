@@ -54,11 +54,12 @@ impl Engine {
     }
 
     /// 中英混输：整段输入是英文词就把它加进候选。
-    /// 缺省作为拼音「不像话」（切不动、或除末尾外还有声母缩写 / 残缺音节）时排第一，否则排第二；
-    /// 开了中文优先（`chinese_first`）整句 / 首个中文候选已经在前，英文词排第二。没有中文候选时总在第一。
-    /// 两字母的全大写缩写（`mp` → MP、`bm` → BM）是个例外：整段太短、几乎总是在打中文（门票 / 编码），
-    /// 这种让中文先；超过两个字母的正文英文（cargo / rust）照旧——按词频一刀切会把它们一起挤掉。
-    /// 例外只管**没选过**的英文词：用户选过的照旧排第一（选过 OK，下次敲 `ok` 还是 OK 在前）。
+    ///
+    /// **排第一的条件（2026-09-18 收紧）**：整段与词表**逐字母相同**且**够常见**
+    /// （Zipf ≥ [`ENGLISH_FIRST_MIN_ZIPF`]，见 `hello` / `china`），或用户**选过**这个英文词；
+    /// 否则英文不抢第一（中文 / 整句在前，英文跟在后面）。前缀补全永远不抢第一。
+    /// 开了中文优先（`chinese_first`）时英文一律不抢第一。没有中文候选时英文仍可在第一。
+    /// 两字母全大写缩写（`mp` → MP）且没选过时让中文先。
     pub(super) fn insert_english(&self, items: &mut Vec<Candidate>, unlikely_pinyin: bool) {
         let lists = self.english_lists();
         if lists.is_empty() {
@@ -84,14 +85,19 @@ impl Engine {
             .map_or(0, |c| self.learner.choice_weight(text, &c.text));
         let english_weight = word.map_or(0, |w| self.learner.weight(w));
         // 两字母全大写缩写（mp → MP、bm → BM）让中文先：整段太短，几乎总是在打中文。
-        // 但**不压过学习记录**：`ok` / `pc` / `ll` 同样满足「两个字母的全大写缩写」，一刀切会把它们一起
-        // 翻成中文；而且选过 OK 的用户下次敲 `ok` 本该还是它排第一。所以这条只对用户**没选过**的英文词生效
-        //（`record` 对英文候选也记次数，所以 `english_weight` 就是「选过没有」）。
+        // 但**不压过学习记录**：选过 OK 的用户下次敲 `ok` 本该还是它排第一。
         let short_acronym = english_weight == 0
             && text.len() <= 2
             && word.is_some_and(|word| word.chars().all(|c| c.is_ascii_uppercase()));
-        let english_first =
-            !self.chinese_first && unlikely_pinyin && chosen <= english_weight && !short_acronym;
+        // 逐字母命中 + 常见，或用户选过这个英文词；前缀补全不在 word 里，永远到不了 english_first
+        let frequency = word.and_then(|_| lists.iter().find_map(|w| w.frequency(text)));
+        let exact_common = word.is_some() && frequency.is_some_and(|f| f >= ENGLISH_FIRST_MIN_ZIPF);
+        let selected_english = english_weight > 0;
+        let english_first = !self.chinese_first
+            && unlikely_pinyin
+            && chosen <= english_weight
+            && !short_acronym
+            && (exact_common || selected_english);
         let mut position = if items.is_empty() || english_first {
             0
         } else {
