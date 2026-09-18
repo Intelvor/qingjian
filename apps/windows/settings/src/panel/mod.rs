@@ -48,6 +48,9 @@ pub(crate) struct Settings {
 
     /// 「个人词」列表上面那个筛选框里的文字；`None` / 空串 = 不过滤。
     word_query: Option<String>,
+
+    /// 「个人词」列表当前第几页（0 起）；换筛选串回第 0 页，删词后由组件夹回有效范围。
+    word_page: usize,
 }
 
 impl Settings {

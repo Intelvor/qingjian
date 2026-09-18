@@ -208,6 +208,15 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
     page("词库", body)
 }
 
+/// 「个人词」一页画多少行。词多起来（几千条）时整页构建会卡，分页之后每页只建这么多控件；
+/// 一页的行数也决定翻页控件出现与否（只有一页就不显示）。
+pub(crate) const WORDS_PER_PAGE: usize = 50;
+
+/// 个人词分多少页：空列表也算一页（显示成「第 1 / 1 页」不显示），避免除零与空页。
+pub(crate) fn page_count(total: usize) -> usize {
+    total.div_ceil(WORDS_PER_PAGE).max(1)
+}
+
 /// 学到的个人词：`user-words.tsv`（`词\t拼音\t词频`，按词排序）。读不出来（还没学过）就是空。
 fn learned_words(settings: &Settings) -> Vec<(String, String)> {
     let path = settings.data_dir().join(USER_WORDS_FILE);
@@ -220,37 +229,48 @@ fn learned_words(settings: &Settings) -> Vec<(String, String)> {
         .collect()
 }
 
-/// 一页最多画多少行：词多起来（几千条）时整页构建会卡，给个上限 + 提示，筛选框能缩小范围。
-const LEARNED_ROWS: usize = 200;
+/// 词或拼音里含筛选串（大小写不敏感）；`query` 为空 / 只有空白 = 不过滤（光是多敲了个空格就把列表清空太扎眼）。
+fn filter_words(words: &[(String, String)], query: Option<&str>) -> Vec<(String, String)> {
+    let query = query.unwrap_or_default().trim().to_lowercase();
+    if query.is_empty() {
+        return words.to_vec();
+    }
+    words
+        .iter()
+        .filter(|(word, pinyin)| {
+            word.to_lowercase().contains(&query) || pinyin.to_lowercase().contains(&query)
+        })
+        .cloned()
+        .collect()
+}
 
-/// 「个人词」：不在词库里、由你选过 / 云端接过来的词。可以逐个删掉。
+/// 当前筛选条件下的个人词。翻页要按**筛选后**的总数算页数，所以 `update` 也调这里。
+pub(crate) fn matched_words(settings: &Settings) -> Vec<(String, String)> {
+    filter_words(&learned_words(settings), settings.word_query.as_deref())
+}
+
+/// 「个人词」：不在词库里、由你选过 / 云端接过来的词。分页显示，可以逐个删掉。
 ///
 /// 删除**不直接改文件**：学习数据在 Server 内存里是权威、每 60 秒才落盘一次，直接改会被覆盖回去；
 /// 这里只往 `forget-requests.txt` 里写一行，Server 每秒看一次、`forget` 完立刻落盘
 /// （见 `qingjian_platform::dirs::forget_requests_path`）。
 fn learned_list(settings: &Settings, context: &mut ViewContext<Settings>) -> View {
-    let words = learned_words(settings);
-    if words.is_empty() {
+    let all = learned_words(settings);
+    if all.is_empty() {
         return note(
             "还没有个人词。选中词库里没有的词（造词、接受云端词）之后会记在这里；\
              列表里可以逐个删掉。",
         );
     }
-    let query = settings
-        .word_query
-        .clone()
-        .unwrap_or_default()
-        .to_lowercase();
-    let matched: Vec<&(String, String)> = words
-        .iter()
-        .filter(|(word, pinyin)| {
-            query.is_empty()
-                || word.to_lowercase().contains(&query)
-                || pinyin.to_lowercase().contains(&query)
-        })
-        .collect();
-    let mut rows: Vec<View> = Vec::new();
-    rows.push(
+    let matched = filter_words(&all, settings.word_query.as_deref());
+    let pages = page_count(matched.len());
+    // 删词 / 改筛选都会让条数变少，页码可能已经越界，画的时候先夹回最后一页。
+    let page = settings.word_page.min(pages - 1);
+    let start = page * WORDS_PER_PAGE;
+    let end = (start + WORDS_PER_PAGE).min(matched.len());
+    let mut rows: Vec<KeyedView> = Vec::new();
+    rows.push(KeyedView::new(
+        "filter",
         StackPanel::new()
             .orientation(Orientation::Horizontal)
             .spacing(12.0)
@@ -258,20 +278,49 @@ fn learned_list(settings: &Settings, context: &mut ViewContext<Settings>) -> Vie
                 TextBox::new()
                     .width(220.0)
                     .placeholder_text("筛选：词或拼音")
-                    .text(query.clone())
+                    .text(settings.word_query.clone().unwrap_or_default())
                     .on_text_changed(context.callback(Message::WordQuery)),
                 note(&format!(
                     "共 {} 条{}，删掉之后青简立刻忘掉它（含它的个人 n-gram 痕迹）。",
-                    words.len(),
-                    if matched.len() == words.len() {
+                    all.len(),
+                    if matched.len() == all.len() {
                         String::new()
                     } else {
                         format!("，当前筛出 {} 条", matched.len())
                     }
                 )),
             )),
-    );
-    for (word, pinyin) in matched.iter().take(LEARNED_ROWS) {
+    ));
+    if pages > 1 {
+        rows.push(KeyedView::new(
+            "paging",
+            StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(12.0)
+                .children((
+                    Button::new()
+                        .is_enabled(page > 0)
+                        .on_click(context.message(Message::WordPage(-1)))
+                        .content("上一页"),
+                    note(&format!(
+                        "第 {} / {} 页（每页 {WORDS_PER_PAGE} 条）",
+                        page + 1,
+                        pages
+                    )),
+                    Button::new()
+                        .is_enabled(page + 1 < pages)
+                        .on_click(context.message(Message::WordPage(1)))
+                        .content("下一页"),
+                )),
+        ));
+    }
+    if matched.is_empty() {
+        rows.push(KeyedView::new(
+            "empty",
+            note("没有匹配的个人词，换个筛选串试试。"),
+        ));
+    }
+    for (word, pinyin) in &matched[start..end] {
         let label: View = TextBlock::new()
             .text(format!("{word} · {pinyin}"))
             .text_wrapping(TextWrapping::Wrap)
@@ -285,19 +334,10 @@ fn learned_list(settings: &Settings, context: &mut ViewContext<Settings>) -> Vie
                     .on_click(context.message(Message::ForgetWord(word.clone())))
                     .content("删除"),
             ));
-        rows.push(row);
+        // 按词本身做 key：翻页 / 删词之后同一个位置的词变了就是另一行，新行不会被复用成旧的点击回调。
+        rows.push(KeyedView::new(word.clone(), row));
     }
-    if matched.len() > LEARNED_ROWS {
-        rows.push(note(&format!(
-            "只列出前 {LEARNED_ROWS} 条（共 {} 条），用上面的筛选框缩小范围。",
-            matched.len()
-        )));
-    }
-    StackPanel::new().spacing(6.0).keyed_children(
-        rows.into_iter()
-            .enumerate()
-            .map(|(index, view)| KeyedView::new(index.to_string(), view)),
-    )
+    StackPanel::new().spacing(6.0).keyed_children(rows)
 }
 
 /// 把「删掉这个词」写进请求文件（一行一个，去重），等 Server 来处理。
@@ -392,4 +432,49 @@ pub(crate) fn import(settings: &mut Settings) {
         summary.push_str("输入法将自动加载。");
     }
     settings.dictionary_status = format!("{summary}\n{}", results.join("\n"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn words() -> Vec<(String, String)> {
+        vec![
+            ("青简".to_owned(), "qingjian".to_owned()),
+            ("Minecraft".to_owned(), "minecraft".to_owned()),
+            ("特朗普".to_owned(), "telangpu".to_owned()),
+        ]
+    }
+
+    /// 页数：空列表也算一页（界面上「第 x / y 页」不能出现第 0 页），整除时不多出一页空页。
+    #[test]
+    fn pages_cover_every_word_and_never_go_below_one() {
+        assert_eq!(page_count(0), 1);
+        assert_eq!(page_count(1), 1);
+        assert_eq!(page_count(WORDS_PER_PAGE), 1);
+        assert_eq!(page_count(WORDS_PER_PAGE + 1), 2);
+        assert_eq!(page_count(WORDS_PER_PAGE * 3), 3);
+        assert_eq!(page_count(WORDS_PER_PAGE * 3 + 1), 4);
+    }
+
+    /// 筛选：词与拼音都能匹配、不看大小写、两头空白忽略；不匹配就是空（界面上给「没有匹配」的提示）。
+    #[test]
+    fn filter_matches_word_and_pinyin() {
+        assert_eq!(filter_words(&words(), None).len(), 3);
+        assert_eq!(filter_words(&words(), Some("  ")).len(), 3);
+        assert_eq!(filter_words(&words(), Some("QINGJIAN")).len(), 1);
+        assert_eq!(filter_words(&words(), Some(" 青 ")).len(), 1);
+        assert_eq!(filter_words(&words(), Some("mine")).len(), 1);
+        assert!(filter_words(&words(), Some("没有这个词")).is_empty());
+    }
+
+    /// 分页切片别越界：最后一页不足一整页时只取剩下的。
+    #[test]
+    fn last_page_takes_the_remainder() {
+        let total = WORDS_PER_PAGE + 7;
+        let last = page_count(total) - 1;
+        let start = last * WORDS_PER_PAGE;
+        let end = (start + WORDS_PER_PAGE).min(total);
+        assert_eq!(end - start, 7);
+    }
 }

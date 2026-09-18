@@ -82,6 +82,8 @@ pub(crate) enum Message {
     ImportDictionary,
     /// 「个人词」列表上面那个框里的筛选文字。
     WordQuery(String),
+    /// 个人词翻页：`-1` 上一页、`1` 下一页（按筛选后的条数夹在有效范围内）。
+    WordPage(isize),
     /// 请青简删掉一个学到的词（写请求文件，Server 那边 forget 后立刻落盘）。
     ForgetWord(String),
 

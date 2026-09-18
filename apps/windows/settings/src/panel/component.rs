@@ -76,6 +76,7 @@ impl Component for Settings {
             families: qingjian_render::system_fonts::families(),
             font_query: None,
             word_query: None,
+            word_page: 0,
         }
     }
 
@@ -275,6 +276,14 @@ impl Component for Settings {
             }
             Message::WordQuery(text) => {
                 self.word_query = (!text.is_empty()).then_some(text);
+                // 换了筛选串就回第一页：不回去的话可能停在一个筛完已经不存在的页码上。
+                self.word_page = 0;
+            }
+            Message::WordPage(delta) => {
+                // 页数按**筛选后**的条数算（与画的时候同一套），越界夹回有效范围。
+                let pages = dictionaries::page_count(dictionaries::matched_words(self).len());
+                let target = self.word_page as isize + delta;
+                self.word_page = target.clamp(0, pages as isize - 1) as usize;
             }
             Message::ForgetWord(word) => dictionaries::request_forget(self, &word),
 
