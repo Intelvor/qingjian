@@ -131,6 +131,45 @@ fn short_all_caps_acronym_yields_to_chinese() {
 }
 
 #[test]
+fn learned_english_word_keeps_first_place_over_the_two_letter_acronym_rule() {
+    // `ok` / `pc` / `ll` 同样满足「两个字母的全大写缩写」，一刀切会把它们一起翻成中文；
+    // 而用户**选过**的英文词要照旧排第一 —— 选过 OK，下次敲 `ok` 就该还是 OK 在前。
+    let dictionary = Dictionary::parse("哦\to\t5000\n门票\tmen piao\t5000\n").unwrap();
+    let words = WordList::parse("OK\tok\t5140\nMP\tmp\t4290\n").unwrap();
+    let mut engine = Engine::new(dictionary)
+        .with_english(words)
+        .with_learner(Box::new(CountingLearner(HashMap::new())));
+    let pick = |engine: &mut Engine, input: &str, text: &str| {
+        engine.set_input(input);
+        let candidate = engine
+            .query()
+            .unwrap()
+            .candidates
+            .items
+            .into_iter()
+            .find(|c| c.text == text)
+            .unwrap();
+        engine.commit(&candidate);
+    };
+
+    // 没选过时规则照旧生效：两个字母的全大写缩写让中文先。
+    engine.set_input("mp");
+    assert_eq!(texts_of(&engine)[0], "门票");
+    engine.set_input("ok");
+    assert_eq!(texts_of(&engine)[0], "哦");
+
+    // 选过一次 OK：规则不再压过学习记录，`ok` 回到英文第一。
+    pick(&mut engine, "ok", "OK");
+    engine.set_input("ok");
+    assert_eq!(texts_of(&engine)[0], "OK");
+
+    // `mp` 同理：选过 MP 之后它也从中文切回英文第一。
+    pick(&mut engine, "mp", "MP");
+    engine.set_input("mp");
+    assert_eq!(texts_of(&engine)[0], "MP");
+}
+
+#[test]
 fn hyphen_turns_the_buffer_into_a_raw_english_segment() {
     let mut engine = engine();
     engine.set_input("no");
