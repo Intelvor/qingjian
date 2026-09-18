@@ -383,20 +383,16 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     }
     let texts = texts_of(&engine);
     assert!(
-        texts.iter().any(|t| t == "编程"
-            || t == "我和"
-            || t == "爱"
-            || t == "程"
-            || t == "我和编程"),
-        "AI 之后的 biancheng 仍应参与切分，实际 {texts:?}"
+        texts.iter().any(|t| t.contains("编程") && t.contains("AI")),
+        "AI 之后的 biancheng 仍应参与切分（混排候选「我和AI编程」），实际 {texts:?}"
     );
 
     // 用户实测串：CyuyanheAIbiancheng（注意有 y，不是 Cyuanhe…）
-    // 词典含 语言/和/编程，验证中英混排候选 C语言和AI编程
+    // 词典含 从/边城 干扰词：大写 C/AI 不参与拼音，这些都不该出现
     let dictionary = Dictionary::parse(
         "语言\tyu yan\t50000\n和\the\t80000\n编程\tbian cheng\t30000\n\
-         于\tyu\t30000\n呀\tya\t20000\n很\then\t70000\n\
-         爱\tai\t20000\n远\tyuan\t20000\n",
+         从\tcong\t90000\n边城\tbian cheng\t20000\n变成\tbian cheng\t15000\n\
+         于\tyu\t30000\n呀\tya\t20000\n很\then\t70000\n爱\tai\t70000\n远\tyuan\t20000\n",
     )
     .unwrap();
     let words = WordList::parse("AI\tai\t5000\n").unwrap();
@@ -407,23 +403,24 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     }
     let q = engine.query().unwrap();
     let texts: Vec<&str> = q.candidates.items.iter().map(|c| c.text.as_str()).collect();
-    eprintln!(
-        "CyuyanheAIbiancheng items={texts:?} marked={:?} segs={:?}",
-        q.marked_text(),
-        q.segmentations
-            .iter()
-            .map(|s| s.joined("'"))
-            .collect::<Vec<_>>()
-    );
+    eprintln!("CyuyanheAIbiancheng items={texts:?}");
     assert!(
         !texts.is_empty(),
         "CyuyanheAIbiancheng 不得空候选，marked={:?}",
         q.marked_text()
     );
-    // 中英混排候选应出现（C…AI…）
     assert!(
-        texts.iter().any(|t| t.starts_with('C') && t.contains("AI")),
-        "应有中英混排候选（C…AI…），实际 {texts:?}"
+        texts
+            .first()
+            .is_some_and(|t| t.starts_with('C') && t.contains("AI")),
+        "首选应是中英混排 C…AI…，实际 {texts:?}"
+    );
+    // 大写字母不参与拼音：不得出现「从语言」「边城」这类把 C/AI 读成拼音的结果
+    assert!(
+        !texts
+            .iter()
+            .any(|t| t.contains('从') || t.contains("边城") || t.contains('爱')),
+        "大写字母不得参与拼音，实际 {texts:?}"
     );
 }
 

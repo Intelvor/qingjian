@@ -19,6 +19,7 @@ pub(crate) fn join_marked(segmentations: &[Segmentation], tail: &str) -> String 
 
 /// 与 [`join_marked`] 相同的分段，但用原样大小写的输入（`Cpan`）：切分是按小写算的，
 /// 大小写只影响显示，逐段按同样的字节长度取回原样文本。
+#[allow(dead_code)]
 pub(crate) fn join_marked_typed(typed: &str, segmentations: &[Segmentation], tail: &str) -> String {
     let mut text = String::new();
     let mut offset = 0;

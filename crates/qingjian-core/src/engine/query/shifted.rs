@@ -148,14 +148,22 @@ impl Engine {
     }
 
     /// 普通拼音查询跑完后，合并 Shift 大写带来的英文与大写字面。
+    ///
+    /// **多段大写（`CyuyanheAIbiancheng`）**：大写字母是英文，不参与拼音 ——
+    /// 普通路径查出来的中文 / 整句全部丢掉（否则 `c` 会读成「从」、整句还会脑补长句），
+    /// 只留英文与中英混排候选。
     pub(super) fn merge_shifted_extras(&self, items: &mut Vec<Candidate>, typed: &str) {
         let split = self.shifted_split(typed);
+        let mixed = self.build_mixed_candidate(typed);
+        if mixed.is_some() {
+            items.retain(|c| !matches!(c.kind, CandidateKind::Chinese | CandidateKind::Sentence));
+        }
         if let Some(leading) = split.leading
             && !items.iter().any(|c| c.text == leading.text)
         {
             items.insert(0, leading);
         }
-        // 开头大写且剩余可拼音：先丢掉整段小写查出来、吃不掉前面字母的裸词（Cpan 的「盘」）
+        // 开头大写且剩余可拼音：丢掉吃不掉前面大写字母的裸词（Cpan 的「盘」）
         if !split.leading_upper.is_empty() {
             let head = split.leading_upper.to_ascii_lowercase();
             items.retain(|c| {
@@ -175,24 +183,26 @@ impl Engine {
             .collect::<String>()
             .to_ascii_lowercase();
         let mut extra = Vec::new();
-        if !split.leading_upper.is_empty() && !after_upper.is_empty() {
-            self.lookup_pinyin_words(&after_upper, &mut extra);
-            let head = split.leading_upper.to_ascii_lowercase();
-            for item in extra.iter_mut() {
-                if item.kind != CandidateKind::Chinese {
-                    continue;
+        // 单段大写才补查 after_upper/stripped；多段大写的中文由混排候选负责，别再引入把大写读成拼音的结果
+        if mixed.is_none() {
+            if !split.leading_upper.is_empty() && !after_upper.is_empty() {
+                self.lookup_pinyin_words(&after_upper, &mut extra);
+                let head = split.leading_upper.to_ascii_lowercase();
+                for item in extra.iter_mut() {
+                    if item.kind != CandidateKind::Chinese {
+                        continue;
+                    }
+                    item.text = format!("{}{}", split.leading_upper, item.text);
+                    let mut syllables = vec![head.clone()];
+                    syllables.extend(item.syllables.iter().cloned());
+                    item.syllables = syllables;
                 }
-                item.text = format!("{}{}", split.leading_upper, item.text);
-                let mut syllables = vec![head.clone()];
-                syllables.extend(item.syllables.iter().cloned());
-                item.syllables = syllables;
+            }
+            if stripped != lower && !stripped.is_empty() && stripped != after_upper {
+                self.lookup_pinyin_words(&stripped, &mut extra);
             }
         }
-        if stripped != lower && !stripped.is_empty() && stripped != after_upper {
-            self.lookup_pinyin_words(&stripped, &mut extra);
-        }
-        // 多段大写：中英混排候选（C语言和AI编程）
-        if let Some(mixed) = self.build_mixed_candidate(typed) {
+        if let Some(mixed) = mixed {
             extra.push(mixed);
         }
         for cand in extra {
@@ -236,46 +246,52 @@ impl Engine {
             if seg.is_upper {
                 text.push_str(&seg.text);
                 syllables.push(seg.text.to_ascii_lowercase());
-            } else {
-                let lower = seg.text.to_ascii_lowercase();
-                if lower.is_empty() {
-                    continue;
+                continue;
+            }
+            let lower = seg.text.to_ascii_lowercase();
+            if lower.is_empty() {
+                continue;
+            }
+            // 段内音节数（最优切分）：只有覆盖整段的读法才能进混排，否则整段上屏会对不齐
+            let seg_syllables = segment_longest_prefix(&lower)
+                .ok()
+                .and_then(|(segs, _)| segs.first().map(|s| s.syllables.len()))
+                .unwrap_or(0);
+            let mut words = Vec::new();
+            self.lookup_pinyin_words(&lower, &mut words);
+            let full_word = words.into_iter().find(|c| {
+                c.kind == CandidateKind::Chinese
+                    && seg_syllables > 0
+                    && c.syllables.len() == seg_syllables
+            });
+            // 覆盖整段的词优先（编程）；没有就整句（yuyanhe → 语言和）
+            let chosen = match full_word {
+                Some(word) => Some((word.text, word.syllables)),
+                None => self.sentence_for_pinyin(&lower),
+            };
+            match chosen {
+                Some((hit_text, hit_syllables)) => {
+                    text.push_str(&hit_text);
+                    syllables.extend(hit_syllables);
+                    has_chinese = true;
                 }
-                let mut words = Vec::new();
-                self.lookup_pinyin_words(&lower, &mut words);
-                let word_best = words
-                    .into_iter()
-                    .filter(|c| c.kind == CandidateKind::Chinese)
-                    .max_by_key(|c| c.syllables.len());
-                // 整句转换：小写段可能需要多词拼接（yuyanhe → 语言和）
-                let sentence_best = self.sentence_for_pinyin(&lower);
-                // 优先覆盖音节更多的；词级与整句同音节数时优先词级（更稳）
-                let best = match (word_best, sentence_best) {
-                    (Some(w), Some(s)) => {
-                        if s.1.len() > w.syllables.len() {
-                            Some(s)
-                        } else {
-                            Some((w.text, w.syllables))
-                        }
-                    }
-                    (Some(w), None) => Some((w.text, w.syllables)),
-                    (None, Some(s)) => Some(s),
-                    (None, None) => None,
-                };
-                match best {
-                    Some((hit_text, hit_syllables)) => {
-                        text.push_str(&hit_text);
-                        syllables.extend(hit_syllables.iter().cloned());
-                        has_chinese = true;
-                    }
-                    None => {
-                        text.push_str(&seg.text);
-                        syllables.push(lower);
-                    }
+                None => {
+                    // 查不出覆盖整段的读法：原样保留这一段，保证上屏能吃完整段
+                    text.push_str(&seg.text);
+                    syllables.push(lower);
                 }
             }
         }
         if !has_chinese || text.is_empty() {
+            return None;
+        }
+        // 音节必须覆盖整段字母，否则上屏吃不完全、会留下残段
+        let target: String = typed
+            .chars()
+            .filter(char::is_ascii_alphabetic)
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if syllables.concat() != target {
             return None;
         }
         Some(Candidate {
@@ -287,12 +303,12 @@ impl Engine {
         })
     }
 
-    /// 对一段独立拼音跑整句转换，返回 (文字, 音节数)。
-    /// 音节数明显超出输入拼音长度的整句直接丢弃（模型脑补的长句）。
+    /// 对一段独立拼音跑整句转换，返回 (文字, 音节)。
+    /// 只收**音节数与切分一致**、且不脑补超长文本的整句。
     fn sentence_for_pinyin(&self, pinyin: &str) -> Option<(String, Vec<String>)> {
         let (segmentations, _tail) = segment_longest_prefix(pinyin).ok()?;
         let best = segmentations.first()?;
-        if best.syllables.len() < 2 {
+        if best.syllables.is_empty() {
             return None;
         }
         let patterns = best.patterns();
@@ -308,6 +324,10 @@ impl Engine {
         let input_letters = pinyin.chars().filter(|c| *c != '\'').count();
         let sent_letters: usize = conversion.syllables.iter().map(|s| s.len()).sum();
         if sent_letters > input_letters + 4 {
+            return None;
+        }
+        // 音节必须与这段字母逐字对上，否则上屏对不齐
+        if conversion.syllables.concat() != best.joined("") {
             return None;
         }
         Some((conversion.text, conversion.syllables))
