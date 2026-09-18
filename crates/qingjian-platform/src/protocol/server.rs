@@ -28,6 +28,11 @@ pub struct InputSettings {
     /// **加字段向后兼容**：老 DLL 忽略它，新 DLL 对老 Server 拿到的缺省是关。
     #[serde(default)]
     pub zhuyin: bool,
+
+    /// 中文模式下 Shift+字母进组句（`[general] shift_letter = "compose"`）。DLL 据此决定没在组句时
+    /// 按住 Shift 敲的字母吃不吃：缺省交给应用，开着时送 Server 起一段组句（`⇧C` 接 `pan` 出「C盘」）。
+    #[serde(default)]
+    pub shift_letter_compose: bool,
 }
 
 impl Default for InputSettings {
@@ -37,6 +42,7 @@ impl Default for InputSettings {
             english_mode: true,
             default_mode: DefaultMode::default(),
             zhuyin: false,
+            shift_letter_compose: false,
         }
     }
 }

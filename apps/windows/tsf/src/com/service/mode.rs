@@ -18,11 +18,15 @@ use crate::com::mode::{self, ModeButton, conversion};
 const CONVERSION_RESTORE_WINDOW: Duration = Duration::from_millis(500);
 
 impl TextService_Impl {
-    /// 应用中英模式的三项设置：激活时与配置变更时都走这里。
+    /// 应用中英模式的设置：激活时与配置变更时都走这里。
     ///
     /// 注音（`[general] zhuyin`）只改任务栏那个图标（中 / 英 / 注）与状态条的模式格，不动模式本身；
     /// 它变了要单独通知系统重取图标，否则要等到下次切模式才刷新。
+    ///
+    /// 内置英文模式开关**在运行中翻转**时，语言栏的中 / 英按钮与转换模式回调跟着登记 / 撤掉
+    /// （激活时由 `Activate` 自己按开关登记，这里只管激活之后的变化），设置窗口改完不用切走再切回输入法。
     pub(super) fn apply_mode_settings(&self, input: &InputSettings) {
+        let was_enabled = self.mode_state.enabled();
         let zhuyin_changed =
             self.mode_state
                 .set_settings(input.english_mode, input.switch_mode, input.zhuyin);
@@ -33,6 +37,22 @@ impl TextService_Impl {
         } else if zhuyin_changed {
             self.mode_state.notify();
         }
+        if was_enabled != input.english_mode && self.is_active() {
+            if input.english_mode {
+                log("打开了内置英文模式：登记中 / 英按钮");
+                self.add_lang_bar_item();
+                self.advise_conversion_sink();
+            } else {
+                log("关掉了内置英文模式：撤掉中 / 英按钮");
+                self.unadvise_conversion_sink();
+                self.remove_lang_bar_item();
+            }
+        }
+    }
+
+    /// `Activate` 是否已经走完（[`super::ACTIVE`] 在它末尾才设）。
+    fn is_active(&self) -> bool {
+        super::ACTIVE.with(|active| active.borrow().is_some())
     }
 
     /// 应用 Server 下发的按键行为设置：`OpenSession` 的回包给一次，之后每一拍 `SyncMode` 也都带着。
@@ -43,11 +63,12 @@ impl TextService_Impl {
         }
         self.input_settings.set(Some(input));
         log(&format!(
-            "按键行为设置：中英切换键 {}，内置英文模式 {}，新窗口默认模式 {}，注音模式 {}",
+            "按键行为设置：中英切换键 {}，内置英文模式 {}，新窗口默认模式 {}，注音模式 {}，Shift 字母进组句 {}",
             input.switch_mode.key(),
             input.english_mode,
             input.default_mode.key(),
-            input.zhuyin
+            input.zhuyin,
+            input.shift_letter_compose
         ));
         self.apply_mode_settings(&input);
     }
