@@ -85,6 +85,7 @@ pub struct GeneralConfig {
 
     /// 拼音侧方案：`pinyin`（全拼，缺省）/ `xiaohe` / `ziranma` / `microsoft` / `sogou` / `xiaolang` / `zhuyin`
     /// / `none`（关，只用形码），见 [`Scheme`]。用不认识的写法时按全拼并警告。
+    /// 缺省是空串：文件里没写这一项时要去看旧键，见 [`Self::scheme`]。
     pub scheme: String,
 
     /// 形码侧方案：空串为关，`wubi86` 为五笔（86 版）。**与拼音同时开着就是混输**，见 [`Self::mixed`]。
@@ -132,7 +133,7 @@ impl Default for GeneralConfig {
             default_mode: DefaultMode::default(),
             full_width_punctuation: true,
             english_full_width_punctuation: false,
-            scheme: Scheme::default().key().to_owned(),
+            scheme: String::new(),
             wubi: String::new(),
             shuangpin: None,
             zhuyin: None,
@@ -340,6 +341,23 @@ mod tests {
         assert_eq!(general.scheme(), Scheme::Off);
         assert!(general.wubi());
         assert!(!general.mixed());
+    }
+
+    #[test]
+    fn files_written_before_the_scheme_key_keep_their_scheme() {
+        let parse = |text: &str| toml::from_str::<GeneralConfig>(text).unwrap().scheme();
+        assert_eq!(
+            parse("shuangpin = \"xiaohe\"\n"),
+            Scheme::Shuangpin(ShuangpinScheme::Xiaohe)
+        );
+        assert_eq!(parse("zhuyin = true\n"), Scheme::Zhuyin);
+        assert_eq!(parse("shuangpin = \"\"\nzhuyin = false\n"), Scheme::Pinyin);
+        assert_eq!(parse(""), Scheme::Pinyin);
+        // 新键写了就以它为准
+        assert_eq!(
+            parse("scheme = \"pinyin\"\nshuangpin = \"xiaohe\"\n"),
+            Scheme::Pinyin
+        );
     }
 
     #[test]
