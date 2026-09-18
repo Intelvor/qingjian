@@ -265,7 +265,7 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     assert_ne!(engine.query().unwrap().candidates.items[0].text, "C盘");
     engine.clear();
 
-    // 开了 compose：大写**不再**当小写进拼音（不出 C盘）；开头大写且剩余能当拼音时出「盘」
+    // compose：C + pan → 候选「C盘」，commit 后上屏 C盘 且缓冲清空
     engine.set_shift_letter_compose(true);
     type_cpan(&mut engine);
     let query = engine.query().unwrap();
@@ -276,17 +276,61 @@ fn shift_letters_join_the_buffer_only_when_configured() {
         .map(|c| c.text.as_str())
         .collect();
     assert!(
-        !texts.contains(&"C盘"),
-        "大写不转小写参与拼音匹配，不该出 C盘，实际 {texts:?}"
+        texts.contains(&"C盘"),
+        "应出 C盘（大写原样 + 拼音候选），实际 {texts:?}"
     );
     assert!(
-        texts.contains(&"盘"),
-        "剩余 pan 应出拼音候选「盘」，实际 {texts:?}"
+        !texts.contains(&"盘"),
+        "不应只出裸「盘」导致上屏吃不掉前面的 C，实际 {texts:?}"
     );
+    let cpan = query
+        .candidates
+        .items
+        .iter()
+        .find(|c| c.text == "C盘")
+        .expect("C盘")
+        .clone();
+    assert_eq!(engine.commit(&cpan), "C盘");
+    assert!(
+        engine.composition().is_empty(),
+        "上屏后缓冲必须清空，剩余={:?}",
+        engine.composition().text()
+    );
+    // 回车原样上屏路径不受影响
+    type_cpan(&mut engine);
     assert_eq!(engine.take_raw(), "Cpan");
     assert!(engine.composition().is_empty());
 
-    // 大写在中间：前面的纯小写仍走拼音，大写起的英文留给孤立/下一轮
+    // 误触 Caps：Nihao → 你好（不拼成 N你好），commit 清空
+    let dictionary = Dictionary::parse("你好\tni hao\t90000\n盘\tpan\t9000\n").unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_shift_letter_compose(true);
+    engine.push('N');
+    for c in "ihao".chars() {
+        engine.push(c);
+    }
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t == "你好"),
+        "Nihao 应出你好，实际 {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t == "N你好"),
+        "整段当拼音时不加大写头，实际 {texts:?}"
+    );
+    let nihao = engine
+        .query()
+        .unwrap()
+        .candidates
+        .items
+        .iter()
+        .find(|c| c.text == "你好")
+        .expect("你好")
+        .clone();
+    assert_eq!(engine.commit(&nihao), "你好");
+    assert!(engine.composition().is_empty());
+
+    // 大写在中间：前面拼音照常
     let dictionary = Dictionary::parse("你好\tni hao\t90000\n").unwrap();
     let words = WordList::parse("Java\tjava\t4000\n").unwrap();
     let mut engine = Engine::new(dictionary).with_english(words);
@@ -304,7 +348,7 @@ fn shift_letters_join_the_buffer_only_when_configured() {
         "大写前的拼音照常出候选，实际 {texts:?}"
     );
 
-    // 整段能拼成常见英文词时可领衔；GitHub Zipf 3.18 不常见 → 不领衔，但仍进候选
+    // 常见英文整段仍可领衔
     let dictionary =
         Dictionary::parse("开发\tkai fa\t9000\n你好\tni hao\t90000\n盘\tpan\t9000\n").unwrap();
     let words =
@@ -319,30 +363,6 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     assert!(
         texts.iter().any(|t| t == "GitHub"),
         "GitHub 仍在候选里，实际 {texts:?}"
-    );
-
-    // 首字母大写 + 后续拼音：候选要跟着更新（不能冻在孤立字母上）
-    engine.clear();
-    engine.push('N');
-    for c in "ihao".chars() {
-        engine.push(c);
-    }
-    let texts = texts_of(&engine);
-    assert!(
-        texts.iter().any(|t| t == "你好"),
-        "Nihao 应出你好，实际 {texts:?}"
-    );
-
-    // 开头大写但剩余能当拼音：Cpan 仍不拼成 C盘
-    engine.clear();
-    engine.push('C');
-    for c in "pan".chars() {
-        engine.push(c);
-    }
-    let texts = texts_of(&engine);
-    assert!(
-        !texts.iter().any(|t| t == "C盘"),
-        "Cpan 不该出 C盘，实际 {texts:?}"
     );
 }
 

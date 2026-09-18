@@ -19,6 +19,9 @@ pub(super) struct ShiftedSplit {
     pub items: Vec<Candidate>,
     /// 用来走拼音词级查询的前缀；空串表示本拍没有拼音候选。
     pub pinyin_prefix: String,
+    /// 开头连续大写（原样，如 `C`）；**仅当**拼音前缀是「去掉这些大写之后的剩余」时非空。
+    /// 上屏时要和拼音候选拼在一起（`C`+`盘`→`C盘`），否则只上「盘」会留下 `c` 清不掉。
+    pub leading_upper: String,
 }
 
 fn english_candidate(text: &str, syllables: Vec<String>) -> Candidate {
@@ -41,29 +44,38 @@ fn chinese_candidate(hit: &Match<'_>) -> Candidate {
     }
 }
 
-/// 大写进组句时，拼音侧该用哪一段字母。
-fn shifted_pinyin_prefix(typed: &str, lower: &str) -> String {
+/// 返回 `(拼音前缀, 开头连续大写)`。
+///
+/// - 无大写：整段小写，大写头为空；
+/// - 大写在中间：前缀 = 大写之前，大写头为空（中途大写留给下一轮）；
+/// - 大写在开头、剩余能切拼音：前缀 = 剩余小写，大写头 = 开头大写（上屏要拼上）；
+/// - 大写在开头、剩余切不开：前缀 = 整段小写（误触 Caps），大写头为空。
+fn shifted_pinyin_prefix(typed: &str, lower: &str) -> (String, String) {
     let Some(first_upper) = typed
         .char_indices()
         .find(|(_, c)| c.is_ascii_uppercase())
         .map(|(i, _)| i)
     else {
-        return lower.to_owned();
+        return (lower.to_owned(), String::new());
     };
     if first_upper > 0 {
-        return typed[..first_upper].to_owned();
+        return (typed[..first_upper].to_owned(), String::new());
     }
+    let leading_upper: String = typed
+        .chars()
+        .take_while(|c| c.is_ascii_uppercase())
+        .collect();
     let after: String = typed
         .chars()
         .skip_while(|c| c.is_ascii_uppercase())
         .collect();
     let after_lower = after.to_ascii_lowercase();
     if after_lower.is_empty() {
-        String::new()
+        (String::new(), leading_upper)
     } else if parser::segment(&after_lower).is_ok() {
-        after_lower
+        (after_lower, leading_upper)
     } else {
-        lower.to_owned()
+        (lower.to_owned(), String::new())
     }
 }
 
@@ -86,7 +98,7 @@ impl Engine {
             .char_indices()
             .find(|(_, c)| c.is_ascii_uppercase())
             .map(|(i, _)| i);
-        let pinyin_prefix = shifted_pinyin_prefix(typed, &lower);
+        let (pinyin_prefix, leading_upper) = shifted_pinyin_prefix(typed, &lower);
 
         // ① 整段按小写查词表：逐字母相同且常见才领衔，否则英文跟在中文后面
         let mut leading = None;
@@ -149,6 +161,7 @@ impl Engine {
             leading,
             items,
             pinyin_prefix,
+            leading_upper,
         }
     }
 
@@ -223,6 +236,23 @@ impl Engine {
         }
         if !split.pinyin_prefix.is_empty() {
             self.lookup_pinyin_words(&split.pinyin_prefix, &mut items);
+            // 开头大写 + 剩余拼音：中文候选要带上大写字面，上屏一次吃完整段
+            //（`Cpan` 选「盘」→ 上屏 `C盘` 并清空，而不是只上「盘」留下 `c`）
+            if !split.leading_upper.is_empty() {
+                let head_lower = split.leading_upper.to_ascii_lowercase();
+                for item in items.iter_mut() {
+                    if item.kind != CandidateKind::Chinese {
+                        continue;
+                    }
+                    if item.syllables.first().map(String::as_str) == Some(head_lower.as_str()) {
+                        continue;
+                    }
+                    item.text = format!("{}{}", split.leading_upper, item.text);
+                    let mut syllables = vec![head_lower.clone()];
+                    syllables.extend(item.syllables.iter().cloned());
+                    item.syllables = syllables;
+                }
+            }
         }
         items.extend(split.items);
         let segmentations = if split.pinyin_prefix.is_empty() {
