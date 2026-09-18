@@ -417,11 +417,32 @@ fn shift_letters_join_the_buffer_only_when_configured() {
         "首选应是中英混排 C…AI…，实际 {texts:?}"
     );
     // 大写字母不参与拼音：不得出现「从语言」「边城」这类把 C/AI 读成拼音的结果
+    // 单段开头大写 + 长拼音：整句也要拼上大写字面（Cyuyanhaoxuema → C语言好学吗）
+    let dictionary = Dictionary::parse(
+        "语言\tyu yan\t90000\n好学\thao xue\t50000\n吗\tma\t80000\n好\thao\t90000\n学\txue\t70000\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary);
+    engine.set_shift_letter_compose(true);
+    for c in "Cyuyanhaoxuema".chars() {
+        engine.push(c);
+    }
+    let q = engine.query().unwrap();
+    let texts: Vec<&str> = q.candidates.items.iter().map(|c| c.text.as_str()).collect();
+    eprintln!("Cyuyanhaoxuema items={texts:?}");
     assert!(
-        !texts
+        texts.iter().any(|t| t.contains("语言")),
+        "至少应出「C语言…」，实际 {texts:?}"
+    );
+    assert!(
+        texts
             .iter()
-            .any(|t| t.contains('从') || t.contains("边城") || t.contains('爱')),
-        "大写字母不得参与拼音，实际 {texts:?}"
+            .any(|t| t.starts_with('C') && t.contains("好学")),
+        "整句应拼上大写字面「C语言好学吗」，实际 {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t.contains('从')),
+        "大写 C 不参与拼音，不该出「从」，实际 {texts:?}"
     );
 }
 

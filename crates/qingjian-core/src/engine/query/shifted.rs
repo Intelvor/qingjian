@@ -197,7 +197,7 @@ impl Engine {
             });
         }
         let mut extra = Vec::new();
-        // 单段开头大写 + 剩余拼音：拼上大写字面（Cpan → C盘）。
+        // 单段开头大写 + 剩余拼音：拼上大写字面（Cpan → C盘；Cyuyanhaoxuema → C语言好学吗）。
         // 多段大写交给混排候选；剩余切不开（Nihao）则不出中文 —— 大写不参与拼音。
         if mixed.is_none() && !split.leading_upper.is_empty() {
             let after_lower: String = typed
@@ -206,6 +206,16 @@ impl Engine {
                 .collect::<String>()
                 .to_ascii_lowercase();
             if !after_lower.is_empty() {
+                // 整句读法（覆盖整段剩余拼音）排在前：`Cyuyanhaoxuema` → `C语言好学吗`
+                if let Some((text, syllables)) = self.sentence_for_pinyin(&after_lower) {
+                    extra.push(Candidate {
+                        text,
+                        kind: CandidateKind::Chinese,
+                        syllables,
+                        reading: None,
+                        translation: None,
+                    });
+                }
                 self.lookup_pinyin_words(&after_lower, &mut extra);
                 let head = split.leading_upper.to_ascii_lowercase();
                 for item in extra.iter_mut() {
