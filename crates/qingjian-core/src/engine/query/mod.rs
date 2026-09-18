@@ -11,7 +11,6 @@ mod snapshot;
 pub(crate) use english_tail::EnglishTail;
 pub use result::Query;
 pub(super) use result::join_marked;
-pub(super) use result::join_marked_typed;
 pub(super) use snapshot::QuerySnapshot;
 
 impl Engine {
@@ -115,11 +114,9 @@ impl Engine {
         start: Instant,
     ) -> Result<Query, ParseError> {
         // 双拼先解成全拼（音节间已用 `'` 连好，切分没有歧义），之后与全拼同路；解不动的键当尾巴
+        // Shift 大写进组句：拼音仍按**整段小写**走普通查词/整句（中途 `AI` 后面不能断），
+        // 候选生成后再合并英文与「开头大写+剩余拼音」的大写字面（见 `merge_shifted_extras`）。
         let decoded = self.decode(keys);
-        // Shift 大写进组句：不当拼音小写去匹配，先拼英文 / 孤立字母，拼音只吃大写前的纯小写前缀
-        if decoded.is_none() && self.composition.has_shifted() {
-            return self.query_shifted(&self.composition.typed_scope(), rest, start);
-        }
         let scope: &str = decoded.as_ref().map_or(keys, |d| d.pinyin());
         // 末尾是英文词（`woxiangxuehaorust`）：拼音候选与整句只按头段算，尾段整个跟在整句后面。
         // 整段也能读成拼音时（`database`、`…rust` 当简拼）两种读法比分，英文赢了才按头段算，
@@ -355,6 +352,9 @@ impl Engine {
         // 快捷候选按敲的键认（`rq` 日期），双拼下也是
         self.insert_shortcuts(&mut items, keys);
         self.insert_emoji(&mut items);
+        if decoded.is_none() && self.composition.has_shifted() {
+            self.merge_shifted_extras(&mut items, &self.composition.typed_scope());
+        }
         let rank = start.elapsed();
 
         // 按头段算时英文尾段不参与拼音候选，显示上跟在切分后面：`wo'xiang'xue'hao'rust`
@@ -363,9 +363,10 @@ impl Engine {
             .filter(|_| head_wins)
             .map_or(tail, |t| &keys[t.head_len..]);
         let typed_display = decoded.as_ref().map(|d| d.marked()).or_else(|| {
-            // 中文模式下 Shift 敲的大写：匹配按小写算，拼音行仍按敲的样子显示（`Cpan`）
-            (correction.is_none() && self.composition.has_shifted())
-                .then(|| join_marked_typed(&self.composition.typed_scope(), &segmentations, tail))
+            // Shift 大写：preedit 按敲的原样显示，避免 join_marked 在中途大写上拼出乱切分
+            self.composition
+                .has_shifted()
+                .then(|| self.composition.typed_scope())
         });
         Ok(Query {
             segmentations,

@@ -390,6 +390,34 @@ fn shift_letters_join_the_buffer_only_when_configured() {
             || t == "我和编程"),
         "AI 之后的 biancheng 仍应参与切分，实际 {texts:?}"
     );
+
+    // 用户实测串：CyuyanheAIbiancheng（注意有 y，不是 Cyuanhe…）
+    let dictionary = Dictionary::parse(
+        "很大\then da\t40000\n编程\tbian cheng\t30000\n很\then\t70000\n大\tda\t60000\n\
+         爱\tai\t20000\n于\tyu\t30000\n呀\tya\t20000\n那\tna\t50000\n远\tyuan\t20000\n",
+    )
+    .unwrap();
+    let words = WordList::parse("AI\tai\t5000\n").unwrap();
+    let mut engine = Engine::new(dictionary).with_english(words);
+    engine.set_shift_letter_compose(true);
+    for c in "CyuyanheAIbiancheng".chars() {
+        engine.push(c);
+    }
+    let q = engine.query().unwrap();
+    let texts: Vec<&str> = q.candidates.items.iter().map(|c| c.text.as_str()).collect();
+    eprintln!(
+        "CyuyanheAIbiancheng items={texts:?} marked={:?} segs={:?}",
+        q.marked_text(),
+        q.segmentations
+            .iter()
+            .map(|s| s.joined("'"))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !texts.is_empty(),
+        "CyuyanheAIbiancheng 不得空候选，marked={:?}",
+        q.marked_text()
+    );
 }
 
 #[test]
