@@ -78,12 +78,20 @@ pub(super) fn export_logs() {
 }
 
 /// 一行设置：固定宽标签 + 控件。
+///
+/// 标签**必须能换行**：列宽固定 `LABEL_WIDTH`，比它长的标签（「中文模式下的 Shift + 字母」这类）
+/// 在不换行时会溢出自己的格子、被右边的控件盖住 —— 下拉框有不透明底色，看着就是「字被框压掉一半」
+/// （2026-09-18 用户反馈）。
 pub(super) fn labeled(label: &str, control: impl Into<View>) -> View {
     StackPanel::new()
         .orientation(Orientation::Horizontal)
         .spacing(12.0)
         .children([
-            TextBlock::new().text(label).width(LABEL_WIDTH).into(),
+            TextBlock::new()
+                .text(label)
+                .width(LABEL_WIDTH)
+                .text_wrapping(TextWrapping::Wrap)
+                .into(),
             control.into(),
         ])
 }
