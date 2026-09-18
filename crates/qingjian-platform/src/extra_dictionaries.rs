@@ -8,7 +8,10 @@ use crate::DictionariesConfig;
 use qingjian_dictionary::Dictionary;
 
 /// 目录里能加载的扩展名，靠前的优先：同名的 `.qj` 与 `.tsv` 只取 `.qj`（开发目录里两者并存）。
-const EXTENSIONS: [&str; 2] = ["qj", "tsv"];
+///
+/// **与「导入词库」认的格式保持一致** —— 放进去和导入进来必须是同一批格式。2026-09-18 的 bug
+/// 就是这里只写 `qj`/`tsv`，而导入对话框列了 `.dict.yaml`，用户把 YAML 放进目录被静默忽略。
+const EXTENSIONS: [&str; 5] = ["qj", "tsv", "yaml", "yml", "txt"];
 
 /// 可加载文件的快照：用于发现新增、移除与同名更新，不读取词库正文。
 pub fn snapshot(dir: &Path) -> Vec<(PathBuf, Option<SystemTime>, u64)> {
@@ -30,10 +33,12 @@ pub fn list(dir: &Path) -> Vec<(String, PathBuf)> {
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter_map(|p| {
+            let name = p.file_name()?.to_str()?;
             let extension = p.extension()?.to_str()?;
             let rank = EXTENSIONS.iter().position(|e| *e == extension)?;
-            let stem = p.file_stem()?.to_str()?.to_owned();
-            Some((stem, rank, p))
+            // 用导入那边同一套去后缀：`law.dict.yaml` 与 `law.qj` 要算同一本词库。
+            let stem = qingjian_dictionary::import::stem(name);
+            (!stem.is_empty()).then_some((stem, rank, p))
         })
         .collect();
     files.sort();
@@ -73,19 +78,20 @@ pub fn load(
 }
 
 fn open(stem: &str, path: &Path) -> Option<Dictionary> {
-    match Dictionary::from_path(path) {
-        Ok(dictionary) => {
+    // 走导入那条同一套读取：`.qj` 容器 / TSV / Rime `.dict.yaml` / `.txt` 都认。
+    match qingjian_dictionary::import::read(path) {
+        Ok((dictionary, metadata)) => {
             tracing::info!(
-                name = %dictionary.metadata().map_or(stem, |m| m.name.as_str()),
+                name = %metadata.name,
                 file = %path.display(),
                 entries = dictionary.len(),
-                license = %dictionary.metadata().map_or("", |m| m.license.as_str()),
+                license = %metadata.license,
                 "附加词库已加载"
             );
             Some(dictionary)
         }
         Err(error) => {
-            tracing::warn!(file = %path.display(), %error, "附加词库加载失败，跳过");
+            tracing::warn!(file = %path.display(), stem = %stem, %error, "附加词库加载失败，跳过");
             None
         }
     }
@@ -95,21 +101,68 @@ fn open(stem: &str, path: &Path) -> Option<Dictionary> {
 mod tests {
     use super::*;
 
+    /// 目录认的后缀与「导入词库」必须是同一批：`.qj` / `.tsv` / Rime `.dict.yaml` / `.txt` 都算，
+    /// 不认识的（`.md`）不进列表；`.dict.yaml` 与 `.qj` 算同一个名字（同名取 `.qj`）。
     #[test]
-    fn list_prefers_packed_over_tsv_with_same_stem() {
+    fn list_takes_the_same_formats_as_import() {
         let dir = std::env::temp_dir().join(format!("qingjian-extra-dicts-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        for name in ["idioms.qj", "idioms.tsv", "food.tsv", "notes.txt"] {
+        for name in [
+            "idioms.qj",
+            "idioms.tsv",
+            "food.tsv",
+            "notes.txt",
+            "vibe.dict.yaml",
+            "readme.md",
+        ] {
             std::fs::write(dir.join(name), b"").unwrap();
         }
+        // 目录（`removed/` 这种）不该被当成词库文件列出来。
+        std::fs::create_dir_all(dir.join("removed")).unwrap();
 
         let listed = list(&dir);
         let names: Vec<(&str, &str)> = listed
             .iter()
             .map(|(stem, path)| (stem.as_str(), path.file_name().unwrap().to_str().unwrap()))
             .collect();
-        assert_eq!(names, [("food", "food.tsv"), ("idioms", "idioms.qj")]);
+        assert_eq!(
+            names,
+            [
+                ("food", "food.tsv"),
+                ("idioms", "idioms.qj"),
+                ("notes", "notes.txt"),
+                ("vibe", "vibe.dict.yaml"),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 用户把 Rime `.dict.yaml` 直接放进词库目录时要真的加载进来（2026-09-18 的 bug：
+    /// 目录扫描只认 `qj`/`tsv`，放进去等于没放，而且静默无提示）。
+    #[test]
+    fn loads_a_rime_yaml_dropped_into_the_user_dir() {
+        let dir = std::env::temp_dir().join(format!("qingjian-rime-dict-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("law.dict.yaml"),
+            "---\nname: law\nversion: \"1\"\nsort: by_weight\n...\n合同法\the tong fa\t120\n",
+        )
+        .unwrap();
+
+        let config = DictionariesConfig {
+            disabled: Vec::new(),
+            ..Default::default()
+        };
+        let loaded = load(None, Some(&dir), &config);
+        assert_eq!(loaded.len(), 1, "放进去的 YAML 要被加载");
+        // 文本格式（TSV / Rime）是现读现解析的，元数据由调用方另拿（只有 `.qj` 自带一份），
+        // 所以这里只断言词条真的进来了、查得到。
+        assert_eq!(
+            loaded[0].lookup(&["he", "tong", "fa"], false)[0].text,
+            "合同法"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

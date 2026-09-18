@@ -3,7 +3,6 @@
 
 use std::path::{Path, PathBuf};
 
-use qingjian_core::dictionary::Dictionary;
 use qingjian_platform::extra_dictionaries;
 use windows_reactor::*;
 
@@ -15,33 +14,35 @@ fn user_dir(settings: &Settings) -> PathBuf {
     settings.data_dir().join("dicts")
 }
 
-/// 打开词库读显示信息：(显示名, 词条数, 许可证, 是否坏文件)。
-fn read_info(path: &Path, stem: &str) -> (String, usize, String, bool) {
-    match Dictionary::from_path(path) {
-        Ok(dict) => (
-            dict.metadata()
-                .map_or_else(|| stem.to_owned(), |m| m.name.clone()),
-            dict.len(),
-            dict.metadata()
-                .map_or_else(String::new, |m| m.license.clone()),
-            false,
+/// 一行词库的显示文字 + 是不是读不了（读不了的复选框要禁用）。
+///
+/// 走的是**导入那边同一条读取**（`.qj` / TSV / Rime `.dict.yaml` / `.txt`），所以这里认的
+/// 和「放进目录能被加载的」永远是同一批格式；读不出来也**说清原因**，不再一律「文件损坏」。
+fn row_label(path: &Path, stem: &str, builtin: bool) -> (String, bool) {
+    match qingjian_core::dictionary::import::read(path) {
+        Ok((dictionary, metadata)) => {
+            let mut text = format!("{} · {} 条", metadata.name, dictionary.len());
+            if builtin {
+                text.push_str(" · 随包");
+            } else if !metadata.license.is_empty() {
+                text.push_str(&format!(" · {}", metadata.license));
+            }
+            (text, false)
+        }
+        // 后缀不在支持列表里：多半是把别的格式直接拷进来了 —— 指路，别让人猜。
+        Err(_) if !supported(path) => (
+            format!("{stem}（后缀不认识，点下面「导入词库…」转换）"),
+            true,
         ),
-        Err(_) => (stem.to_owned(), 0, String::new(), true),
+        Err(_) => (format!("{stem}（读不了：文件损坏或格式不对）"), true),
     }
 }
 
-/// 「名称 · N 条 · 随包 / 许可证」，坏文件标出来。
-fn title(name: &str, entries: usize, license: &str, builtin: bool, broken: bool) -> String {
-    if broken {
-        return format!("{name}（文件损坏）");
-    }
-    let mut text = format!("{name} · {entries} 条");
-    if builtin {
-        text.push_str(" · 随包");
-    } else if !license.is_empty() {
-        text.push_str(&format!(" · {license}"));
-    }
-    text
+/// 后缀在不在「能直接放进目录」的那张表里（与 `extra_dictionaries` 的扫描表一致）。
+fn supported(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| matches!(e, "qj" | "tsv" | "yaml" | "yml" | "txt"))
 }
 
 /// 一本词库一行：复选框 + 可选的「移除」。
@@ -84,9 +85,8 @@ fn bundled_list(settings: &Settings, context: &mut ViewContext<Settings>) -> Vie
     }
     let mut rows: Vec<KeyedView> = Vec::with_capacity(dicts.len());
     for (stem, path) in dicts {
-        let (name, entries, license, broken) = read_info(&path, &stem);
+        let (label, broken) = row_label(&path, &stem, true);
         let enabled = settings.config.dictionaries.is_domain_enabled(&stem);
-        let label = title(&name, entries, &license, true, broken);
         let for_msg = stem.clone();
         rows.push(dict_row(
             &stem,
@@ -105,14 +105,14 @@ fn user_list(settings: &Settings, context: &mut ViewContext<Settings>) -> View {
     let dicts = extra_dictionaries::list(&user_dir(settings));
     if dicts.is_empty() {
         return note(
-            "还没有导入词库。点下面「导入词库」加一本，或把文件放进 %APPDATA%\\Qingjian\\dicts。",
+            "这里还没有词库。点下面「导入词库」加一本，或把文件直接放进 \
+             %APPDATA%\\Qingjian\\dicts（认 .qj / .tsv / Rime .dict.yaml / .txt，放进去就生效）。",
         );
     }
     let mut rows: Vec<KeyedView> = Vec::with_capacity(dicts.len());
     for (stem, path) in dicts {
-        let (name, entries, license, broken) = read_info(&path, &stem);
+        let (label, broken) = row_label(&path, &stem, false);
         let enabled = settings.config.dictionaries.is_enabled(&stem);
-        let label = title(&name, entries, &license, false, broken);
         let for_msg = stem.clone();
         let remove = Message::RemoveUserDict(stem.clone());
         rows.push(dict_row(
@@ -128,9 +128,42 @@ fn user_list(settings: &Settings, context: &mut ViewContext<Settings>) -> View {
     StackPanel::new().spacing(6.0).keyed_children(rows)
 }
 
+/// 目录里**没被认出来**的文件（后缀不在支持列表里）：列出来并指路，别静默忽略 ——
+/// 2026-09-18 的 bug 就是 `.dict.yaml` 放进去了、界面里一个字都不显示。
+/// 没有这类文件时返回 `None`（这一节就不出现）。
+fn ignored_list(settings: &Settings) -> Option<View> {
+    let dir = user_dir(settings);
+    let known: Vec<PathBuf> = extra_dictionaries::list(&dir)
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect();
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && !known.contains(path))
+        .filter_map(|path| path.file_name()?.to_str().map(str::to_owned))
+        .collect();
+    if names.is_empty() {
+        return None;
+    }
+    names.sort();
+    let rows: Vec<KeyedView> = names
+        .into_iter()
+        .map(|name| {
+            let text = format!("{name} —— 这个后缀不认识，点「导入词库…」转换一下");
+            KeyedView::new(name, note(&text))
+        })
+        .collect();
+    Some(StackPanel::new().spacing(6.0).keyed_children(rows))
+}
+
 pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> View {
-    let body = StackPanel::new().spacing(12.0).children([
-        note("随包的基础词库始终启用，不在这里。这里管随包领域词库的开关与导入词库的开关 / 移除。改完自动生效。"),
+    let mut rows: Vec<View> = vec![
+        note(
+            "随包的基础词库始终启用，不在这里。这里管随包领域词库的开关与导入词库的开关 / 移除。改完自动生效。",
+        ),
         TextBlock::new()
             .text("随包领域词库")
             .font_weight(FontWeight::SEMI_BOLD)
@@ -141,6 +174,11 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
             .font_weight(FontWeight::SEMI_BOLD)
             .into(),
         user_list(settings, context),
+    ];
+    if let Some(ignored) = ignored_list(settings) {
+        rows.push(ignored);
+    }
+    rows.push(
         StackPanel::new()
             .orientation(Orientation::Horizontal)
             .spacing(12.0)
@@ -148,10 +186,15 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
                 Button::new()
                     .on_click(context.message(Message::ImportDictionary))
                     .content("导入词库…"),
-                note("接受青简 TSV、Rime .dict.yaml、.qj；导入即复制进上面的目录。"),
+                note("接受青简 TSV、Rime .dict.yaml、.qj、.txt；导入会转成 <名字>.qj 放进上面的目录。"),
             )),
-        note(&settings.dictionary_status),
-    ]);
+    );
+    rows.push(note(&settings.dictionary_status));
+    let body = StackPanel::new().spacing(12.0).keyed_children(
+        rows.into_iter()
+            .enumerate()
+            .map(|(index, view)| KeyedView::new(index.to_string(), view)),
+    );
     page("词库", body)
 }
 
@@ -180,7 +223,7 @@ pub(crate) fn remove_user_dict(settings: &mut Settings, stem: &str) {
 /// 多选词库，逐个转换并汇总结果；成功项的开关一次写回。
 pub(crate) fn import(settings: &mut Settings) {
     let Some(sources) = rfd::FileDialog::new()
-        .add_filter("词库文件", &["tsv", "yaml", "yml", "qj"])
+        .add_filter("词库文件", &["tsv", "yaml", "yml", "txt", "qj"])
         .add_filter("所有文件", &["*"])
         .set_title("导入词库")
         .pick_files()

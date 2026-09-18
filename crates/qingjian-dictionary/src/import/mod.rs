@@ -16,34 +16,10 @@ use crate::error::DictionaryError;
 
 /// 把 `source` 导入到 `dest_dir`，返回写出的文件与元数据。
 pub fn import(source: &Path, dest_dir: &Path) -> Result<Imported, DictionaryError> {
-    let stem = source
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(strip_extensions)
-        .filter(|s| !s.is_empty())
-        .ok_or(DictionaryError::Corrupt("source has no usable file name"))?;
+    let stem = stem_of(source)?;
     std::fs::create_dir_all(dest_dir)?;
     let target = dest_dir.join(format!("{stem}.qj"));
-    let (dictionary, metadata) = if Container::is_qj(source) {
-        let dictionary = Dictionary::open_qj(source)?;
-        let metadata = dictionary.metadata().cloned().unwrap_or_default();
-        (dictionary, metadata)
-    } else {
-        let text = std::fs::read_to_string(source)?;
-        let (tsv, name) = if rime::looks_like_rime(&text) {
-            let parsed = rime::to_tsv(&text);
-            (parsed.tsv, parsed.name)
-        } else {
-            (text, None)
-        };
-        let dictionary = Dictionary::parse(&tsv)?;
-        let metadata = Metadata {
-            name: name.unwrap_or_else(|| stem.clone()),
-            source: source.display().to_string(),
-            ..Metadata::default()
-        };
-        (dictionary, metadata)
-    };
+    let (dictionary, metadata) = read(source)?;
     if dictionary.is_empty() {
         return Err(DictionaryError::Corrupt(
             "no usable entries; expected word and explicit pinyin columns",
@@ -55,6 +31,49 @@ pub fn import(source: &Path, dest_dir: &Path) -> Result<Imported, DictionaryErro
         name: metadata.name,
         entries: dictionary.len(),
     })
+}
+
+/// 从任意支持的文件读成一份词库：`.qj` 走容器，其余按文本解析（Rime YAML 头先转 TSV）。
+///
+/// **导入与「直接把文件放进词库目录」两条路共用它** —— 否则两边认的格式迟早分叉：2026-09-18
+/// 就是导入对话框列了 `.dict.yaml`、而目录扫描只认 `.qj`/`.tsv`，用户把 YAML 放进目录等于没放。
+pub fn read(source: &Path) -> Result<(Dictionary, Metadata), DictionaryError> {
+    let stem = stem_of(source)?;
+    if Container::is_qj(source) {
+        let dictionary = Dictionary::open_qj(source)?;
+        let metadata = dictionary.metadata().cloned().unwrap_or_default();
+        return Ok((dictionary, metadata));
+    }
+    let text = std::fs::read_to_string(source)?;
+    let (tsv, name) = if rime::looks_like_rime(&text) {
+        let parsed = rime::to_tsv(&text);
+        (parsed.tsv, parsed.name)
+    } else {
+        (text, None)
+    };
+    let dictionary = Dictionary::parse(&tsv)?;
+    let metadata = Metadata {
+        name: name.unwrap_or_else(|| stem.clone()),
+        source: source.display().to_string(),
+        ..Metadata::default()
+    };
+    Ok((dictionary, metadata))
+}
+
+/// 词库名（去掉已知后缀）：`law.dict.yaml` → `law`、`dict.tsv` → `dict`。
+/// 目录扫描（`qingjian_platform::extra_dictionaries`）也用它，两边对同名的判断才一致。
+pub fn stem(file_name: &str) -> String {
+    strip_extensions(file_name)
+}
+
+/// 从路径取词库名；取不出（没有文件名 / 去完后缀为空）就报错。
+fn stem_of(source: &Path) -> Result<String, DictionaryError> {
+    source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(strip_extensions)
+        .filter(|s| !s.is_empty())
+        .ok_or(DictionaryError::Corrupt("source has no usable file name"))
 }
 
 /// `law.dict.yaml` → `law`，`dict.tsv` → `dict`。
