@@ -263,6 +263,9 @@ pub struct Engine {
     traditional_map: std::cell::RefCell<HashMap<String, String>>,
 }
 
+/// 形码编码最长几位（五笔四码）：混输下超过它的输入只可能是拼音。
+const MAX_CODE_LENGTH: usize = 4;
+
 /// 英文补全最多几条（`compa` → company / compare / …）。
 const ENGLISH_COMPLETIONS: usize = 3;
 

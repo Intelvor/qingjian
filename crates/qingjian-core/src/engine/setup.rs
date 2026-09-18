@@ -112,22 +112,33 @@ impl Engine {
             .is_some_and(|scheme| scheme.decode(body).pending_initial())
     }
 
-    /// 有效的模式键：双拼下换成大写字母；形码下所有字母都是字根键，连大写也让位，只剩 `?` 开头的问字。
+    /// 只用形码：码表挂着、拼音侧关着。
+    pub(super) fn code_only(&self) -> bool {
+        self.code.is_some() && !self.phonetic
+    }
+
+    /// 混输：码表挂着、拼音侧也开着。
+    pub(super) fn mixed(&self) -> bool {
+        self.code.is_some() && self.phonetic
+    }
+
+    /// 有效的模式键：只用形码时所有字母都是字根键，只剩 `?` 开头的问字；
+    /// 双拼与混输下小写字母各有用处，换成大写字母。
     pub(super) fn modes(&self) -> ModeKeys {
-        if self.code.is_some() {
+        if self.code_only() {
             self.modes.letterless()
-        } else if self.shuangpin.is_some() {
+        } else if self.shuangpin.is_some() || self.mixed() {
             self.modes.shifted()
         } else {
             self.modes
         }
     }
 
-    /// 缓冲区为空时敲的大写字母该不该进前缀模式（表达式 / 问字 / 续写）：只在双拼下、且是模式键的大写时。
+    /// 缓冲区为空时敲的大写字母该不该进前缀模式（表达式 / 问字 / 续写）：只在双拼或混输下、且是模式键的大写时。
     /// 壳只在中文模式、Caps 灭时问。
     pub fn takes_mode_letter(&self, c: char) -> bool {
         let modes = self.modes();
-        self.shuangpin.is_some()
+        (self.shuangpin.is_some() || self.mixed())
             && !self.zhuyin
             && (c == modes.expression || c == modes.question || c == modes.continue_key)
     }
@@ -148,9 +159,9 @@ impl Engine {
     }
 
     /// 光标后剩余拼音的显示形式：双拼先解码；能切就按音节用 `'` 连上，切不动就原样。
-    /// 形码的剩余段是编码，原样显示。
+    /// 只用形码时剩余段是编码，原样显示。
     pub(super) fn marked_rest(&self, rest: &str) -> String {
-        if self.code.is_some() {
+        if self.code_only() {
             return rest.to_owned();
         }
         match self.decode(rest) {

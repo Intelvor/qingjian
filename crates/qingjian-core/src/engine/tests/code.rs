@@ -3,8 +3,8 @@
 use super::*;
 
 /// 五笔 86 的一小段：一级简码 V 是 发，`ggll` 是 一。
-/// `甲` 的编码故意取成 `kai`——与拼音的 开 同形，用来验混输时的排序。
-const CODES: &str = "一\tggll\t90000\n发\tv\t30000\n到\tgc\t20000\n来\tgo\t15000\n开\tga\t5000\n开发\tgant\t900\n甲\tkai\t1000\n";
+/// `甲` 的编码故意取成 `kai`、`乙丙` 取成 `kaik`——与拼音的 开 同形，用来验混输时的排序。
+const CODES: &str = "一\tggll\t90000\n发\tv\t30000\n到\tgc\t20000\n来\tgo\t15000\n开\tga\t5000\n开发\tgant\t900\n甲\tkai\t1000\n乙丙\tkaik\t800\n";
 
 /// 只用形码：拼音侧关掉，候选只从码表来。
 fn wubi() -> Engine {
@@ -143,19 +143,38 @@ fn code_commits_still_feed_translations_vocabulary_and_usage() {
 }
 
 #[test]
-fn mixed_input_puts_code_candidates_before_pinyin_ones() {
+fn mixed_input_orders_finished_codes_then_pinyin_then_code_prefixes() {
     let mut engine = mixed();
-    // `kai`：码表里有 甲，拼音那边有 开 一族——两边都命中。
-    // 只断言「形码在前、拼音也在」，不写死拼音侧的名次（那是它自己那些测试的事）
+    // `kai`：编码打全的 甲 在最前，拼音的 开 一族居中，只命中前缀的 乙丙（`kaik`）垫后
     let texts = code_texts(&mut engine, "kai");
     assert_eq!(texts.first().map(String::as_str), Some("甲"));
-    assert!(texts.contains(&"开".to_owned()));
+    let position = |text: &str| texts.iter().position(|t| t == text).unwrap();
+    assert!(position("开") < position("乙丙"));
+    // `ka`：没有打全的编码，拼音的首选不被前缀命中的形码词顶掉
+    let texts = code_texts(&mut engine, "ka");
+    assert_ne!(texts.first().map(String::as_str), Some("甲"));
+    assert!(texts.contains(&"甲".to_owned()));
+}
+
+#[test]
+fn mixed_input_keeps_the_shifted_mode_letters() {
+    // 混输下小写 v / u 是字根键，表达式与问字同双拼一样改用大写进
+    let mut engine = mixed();
+    assert!(engine.takes_mode_letter('V') && engine.takes_mode_letter('U'));
+    engine.set_input("V1+2");
+    assert!(engine.expression_mode());
+    engine.set_input("v");
+    assert!(!engine.expression_mode());
+    assert_eq!(
+        code_texts(&mut engine, "v").first().map(String::as_str),
+        Some("发")
+    );
 }
 
 #[test]
 fn turning_the_pinyin_side_off_leaves_only_the_code_table() {
     let mut engine = wubi();
-    assert_eq!(code_texts(&mut engine, "kai"), ["甲"]);
+    assert_eq!(code_texts(&mut engine, "kai"), ["甲", "乙丙"]);
 }
 
 #[test]

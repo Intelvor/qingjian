@@ -11,10 +11,15 @@ impl Engine {
     /// 整句转换、中英混输与神经重排也没有可以展开的东西。反过来，译词标注、生词记录、输入日志、
     /// 用户选择学习与个人 n-gram 都按上屏的词工作，与拼音方案共用同一条路。
     pub(super) fn query_code(&self, keys: &str, rest: String, start: Instant) -> Query {
+        self.query_code_counted(keys, rest, start).0
+    }
+
+    /// 同 [`Self::query_code`]，另带回排在最前面的「编码打全」的候选有几条（混输按它分两段）。
+    fn query_code_counted(&self, keys: &str, rest: String, start: Instant) -> (Query, usize) {
         let table = self.code.as_ref().expect("只在形码方案下调用");
         // 编码以外的字符（`no-way` 的 `-`）不是编码，交给原样上屏那条路
         if !keys.chars().all(|c| c.is_ascii_lowercase()) {
-            return self.query_raw(keys, rest, start);
+            return (self.query_raw(keys, rest, start), 0);
         }
         let parse = start.elapsed();
 
@@ -52,6 +57,8 @@ impl Engine {
             (choice, log_prob)
         });
         let rank = start.elapsed();
+        // `exact` 是排序的最高位，打全的都在最前面
+        let exact = scored.iter().take_while(|s| s.hit.exact).count();
         let items: Vec<Candidate> = scored
             .into_iter()
             .map(|s| Candidate {
@@ -63,7 +70,7 @@ impl Engine {
                 translation: None,
             })
             .collect();
-        Query {
+        let query = Query {
             // 形码没有切分：preedit 的显示串靠 `tail` 原样带出去（见 `Query::marked_text`）
             segmentations: Vec::new(),
             candidates: CandidateList { items },
@@ -79,22 +86,22 @@ impl Engine {
                 lookup,
                 rank,
             },
-        }
+        };
+        (query, exact)
     }
 
-    /// 混输：形码与拼音两边都出候选，**形码在前**。
+    /// 混输：形码与拼音两边都出候选。**编码打全的形码词在最前，其次拼音，只命中前缀的形码词垫后。**
     ///
-    /// 编码是精确的（四码定字），而混输的典型用法就是「主要用五笔，打不出的字才打拼音」，
-    /// 所以形码命中的排前面。拼音那条路给不出解析时（`ggll` 切不成音节）不算失败——
-    /// 整个查询就按形码的结果走，这也是「第 5 个字母起自动只剩拼音」的另一半：
-    /// 五笔码最长 4 位，再往下敲形码本来就查不到东西。
+    /// 打全的编码是精确的（`ga` 就是 开）；只敲了前缀的形码词一律放前面的话，`kai` 的首选会变成
+    /// 编码 `kaik` 的 中共党员，拼音就没法用了。拼音那条路给不出解析时（`ggll` 切不成音节）不算失败，
+    /// 整个查询按形码的结果走；五笔码最长 4 位，第 5 个字母起形码查不到东西，自然只剩拼音。
     pub(super) fn query_mixed(
         &self,
         keys: &str,
         rest: String,
         start: Instant,
     ) -> Result<Query, ParseError> {
-        let code = self.query_code(keys, rest.clone(), start);
+        let (code, exact) = self.query_code_counted(keys, rest.clone(), start);
         let mut query = match self.query_phonetic(keys, rest, start) {
             Ok(query) => query,
             Err(error) => {
@@ -105,22 +112,18 @@ impl Engine {
                 return Ok(code);
             }
         };
-        // 同一个词可能两边都命中（`gant` 既是编码又拼得出什么），按文本去重，形码那条留着
-        let mut seen: HashSet<String> = query
-            .candidates
-            .items
-            .iter()
-            .map(|c| c.text.clone())
+        let mut prefixed = code.candidates.items;
+        let exact = exact.min(prefixed.len());
+        let tail = prefixed.split_off(exact);
+        // 同一个词可能两边都命中，按文本去重，靠前的那条留着
+        let mut seen: HashSet<String> = HashSet::new();
+        let combined: Vec<Candidate> = prefixed
+            .into_iter()
+            .chain(std::mem::take(&mut query.candidates.items))
+            .chain(tail)
+            .filter(|candidate| seen.insert(candidate.text.clone()))
+            .take(MAX_CANDIDATES)
             .collect();
-        let mut combined: Vec<Candidate> =
-            Vec::with_capacity(code.candidates.items.len() + query.candidates.items.len());
-        for candidate in code.candidates.items {
-            if seen.insert(candidate.text.clone()) {
-                combined.push(candidate);
-            }
-        }
-        combined.extend(query.candidates.items);
-        combined.truncate(MAX_CANDIDATES);
         query.candidates.items = combined;
         Ok(query)
     }
