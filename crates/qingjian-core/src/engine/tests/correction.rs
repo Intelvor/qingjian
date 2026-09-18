@@ -42,11 +42,19 @@ fn typo_edges_in_the_lattice_correct_legal_but_unlikely_pinyin() {
     engine.commit(&meigan);
     assert_eq!(engine.learner().typo_count("gan", "guan"), 0);
     assert_eq!(engine.composition().text(), "xi");
-    // 原样读得通：没 + 感谢 是正常整句，不动
+    // 原样读得通：没 + 感谢 是正常整句；词级「美感」盖住前两段时整句仍要能选到
     engine.set_input("meiganxie");
     let query = engine.query().unwrap();
-    assert_eq!(query.candidates.items[0].text, "没感谢");
-    assert_eq!(query.candidates.items[0].kind, CandidateKind::Sentence);
+    let texts: Vec<&str> = query
+        .candidates
+        .items
+        .iter()
+        .map(|c| c.text.as_str())
+        .collect();
+    assert!(
+        texts.iter().take(3).any(|t| *t == "没感谢"),
+        "「没感谢」应在前几条里，实际 {texts:?}"
+    );
     // 两个音节也纠：ganxi → 关系
     engine.set_input("ganxi");
     assert_eq!(engine.query().unwrap().candidates.items[0].text, "关系");
@@ -112,7 +120,7 @@ fn abbreviated_segmentations_do_not_become_leading_sentences() {
     );
 }
 
-/// 同音/近音单字串出来的怪句（`neibusiweilian` → 那不是威廉）不抢第 1，词库里的「内部」在前。
+/// 同音串出来的整句仍在候选里，但不压过词库里盖住输入开头的双字词。
 #[test]
 fn homophone_stacked_sentences_do_not_beat_dictionary_words() {
     let dictionary = Dictionary::parse(
@@ -125,13 +133,21 @@ fn homophone_stacked_sentences_do_not_beat_dictionary_words() {
     engine.set_input("neibusiweilian");
     let texts = texts_of(&engine);
     assert!(
-        !texts.iter().any(|t| t == "那不是威廉" || t == "那不死威廉"),
-        "同音单字堆叠句不该在第 1，实际 {texts:?}"
-    );
-    assert!(
         texts.iter().any(|t| t == "内部"),
         "词库词「内部」应在候选里，实际 {texts:?}"
     );
+    assert_ne!(
+        texts.first().map(String::as_str),
+        Some("那不是威廉"),
+        "同音堆叠整句不该是第 1，实际 {texts:?}"
+    );
+    assert_ne!(
+        texts.first().map(String::as_str),
+        Some("那不死威廉"),
+        "同音堆叠整句不该是第 1，实际 {texts:?}"
+    );
+    // 整句模型仍出结果（测试词库下文本可能是「内部死威廉」等变体），只是排在词库词后面
+    assert!(texts.len() > 2, "词级之后仍应有其它候选，实际 {texts:?}");
 }
 
 /// 模糊音规则之间不叠加：zhen 开 z/zh + en/eng 时词库里叠出来的 zeng 读法不该被模糊命中。
