@@ -1,7 +1,13 @@
 //! 中文模式下 Shift 敲的大写字母：不当拼音小写去匹配。
 //!
 //! 大写是「这是英文 / 专有名词」的信号：先在整段与从作用域开头起的大写前缀上拼英文词表，
-//! 拼不出就孤立该字母；拼音只吃**大写之前的纯小写前缀**，大写本身不进切分。
+//! 拼不出就孤立该字母。
+//!
+//! **拼音前缀**（2026-09-19 修冻结）：
+//! - 大写在中间：只吃大写之前的纯小写；
+//! - 大写在**开头**：先看去掉开头大写后的剩余能不能当拼音（`Cpan`→`pan`，避免又拼回 C盘）；
+//!   剩余切不开时退回**整段小写**（`Nihao`→`nihao`）——首字母大写多半是误触或英文起头，
+//!   否则 pinyin_prefix 恒为空，后面的字母和候选再也不更新，看起来像输入框冻住。
 
 use super::*;
 
@@ -11,7 +17,7 @@ pub(super) struct ShiftedSplit {
     pub leading: Option<Candidate>,
     /// 其余英文候选（不常见的精确词、前缀命中、孤立大写字母）。
     pub items: Vec<Candidate>,
-    /// 大写之前的纯小写前缀；空串表示没有可拼的拼音。
+    /// 用来走拼音词级查询的前缀；空串表示本拍没有拼音候选。
     pub pinyin_prefix: String,
 }
 
@@ -35,6 +41,32 @@ fn chinese_candidate(hit: &Match<'_>) -> Candidate {
     }
 }
 
+/// 大写进组句时，拼音侧该用哪一段字母。
+fn shifted_pinyin_prefix(typed: &str, lower: &str) -> String {
+    let Some(first_upper) = typed
+        .char_indices()
+        .find(|(_, c)| c.is_ascii_uppercase())
+        .map(|(i, _)| i)
+    else {
+        return lower.to_owned();
+    };
+    if first_upper > 0 {
+        return typed[..first_upper].to_owned();
+    }
+    let after: String = typed
+        .chars()
+        .skip_while(|c| c.is_ascii_uppercase())
+        .collect();
+    let after_lower = after.to_ascii_lowercase();
+    if after_lower.is_empty() {
+        String::new()
+    } else if parser::segment(&after_lower).is_ok() {
+        after_lower
+    } else {
+        lower.to_owned()
+    }
+}
+
 impl Engine {
     /// 按 Shift 原样拆一段组句：`typed` 是 [`Composition::typed_scope`]。
     pub(super) fn shifted_split(&self, typed: &str) -> ShiftedSplit {
@@ -54,10 +86,7 @@ impl Engine {
             .char_indices()
             .find(|(_, c)| c.is_ascii_uppercase())
             .map(|(i, _)| i);
-        let pinyin_prefix = match first_upper {
-            Some(index) => typed[..index].to_owned(),
-            None => typed.to_owned(),
-        };
+        let pinyin_prefix = shifted_pinyin_prefix(typed, &lower);
 
         // ① 整段按小写查词表：逐字母相同且常见才领衔，否则英文跟在中文后面
         let mut leading = None;
@@ -71,8 +100,7 @@ impl Engine {
             }
         }
 
-        // ② 从作用域开头起拼最长英文前缀（大写在开头时就是从大写起）；
-        //    只收从 0 起的命中，上屏按音节消耗对得上。中途大写留给下一轮。
+        // ② 从作用域开头起拼最长英文前缀；只收从 0 起的命中
         if leading.is_none()
             && items.is_empty()
             && (first_upper == Some(0) || first_upper.is_none())
@@ -98,9 +126,10 @@ impl Engine {
             }
         }
 
-        // ③ 拼不出英文就孤立大写字母（词表里有单字母写法的用词表，如 I）
+        // ③ 拼不出英文、拼音前缀也空时才孤立大写字母
         if leading.is_none()
             && items.is_empty()
+            && pinyin_prefix.is_empty()
             && let Some(index) = first_upper
         {
             let letter = typed[index..].chars().next().expect("uppercase char");
@@ -123,7 +152,7 @@ impl Engine {
         }
     }
 
-    /// 大写前纯小写前缀的词级候选：正常查词 + 排序，不套纠错（大写已标出边界）。
+    /// 拼音前缀的词级候选：正常查词 + 排序。
     fn lookup_pinyin_words(&self, prefix: &str, out: &mut Vec<Candidate>) {
         let Ok(segmentations) = segment_longest_prefix(prefix) else {
             return;
@@ -180,7 +209,7 @@ impl Engine {
         out.extend(scored.iter().map(|s| chinese_candidate(&s.hit)));
     }
 
-    /// 大写进组句的查询：英文在前，大写前的纯小写前缀再走正常拼音。
+    /// 大写进组句的查询：英文领衔（若有），拼音前缀出中文，其余英文在后。
     pub(super) fn query_shifted(
         &self,
         typed: &str,

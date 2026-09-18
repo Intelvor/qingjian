@@ -265,7 +265,7 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     assert_ne!(engine.query().unwrap().candidates.items[0].text, "C盘");
     engine.clear();
 
-    // 开了 compose：大写**不再**当小写进拼音（不出 C盘），而是孤立字母 + 大写前小写段的拼音
+    // 开了 compose：大写**不再**当小写进拼音（不出 C盘）；开头大写且剩余能当拼音时出「盘」
     engine.set_shift_letter_compose(true);
     type_cpan(&mut engine);
     let query = engine.query().unwrap();
@@ -280,12 +280,8 @@ fn shift_letters_join_the_buffer_only_when_configured() {
         "大写不转小写参与拼音匹配，不该出 C盘，实际 {texts:?}"
     );
     assert!(
-        texts.contains(&"C"),
-        "拼不出英文时孤立大写字母，实际 {texts:?}"
-    );
-    assert!(
-        !texts.contains(&"盘"),
-        "大写在开头时本拍没有拼音前缀，不该直接出「盘」，实际 {texts:?}"
+        texts.contains(&"盘"),
+        "剩余 pan 应出拼音候选「盘」，实际 {texts:?}"
     );
     assert_eq!(engine.take_raw(), "Cpan");
     assert!(engine.composition().is_empty());
@@ -309,7 +305,8 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     );
 
     // 整段能拼成常见英文词时可领衔；GitHub Zipf 3.18 不常见 → 不领衔，但仍进候选
-    let dictionary = Dictionary::parse("开发\tkai fa\t9000\n").unwrap();
+    let dictionary =
+        Dictionary::parse("开发\tkai fa\t9000\n你好\tni hao\t90000\n盘\tpan\t9000\n").unwrap();
     let words =
         WordList::parse("GitHub\tgithub\t3180\nHub\thub\t2000\nhello\thello\t4720\n").unwrap();
     let mut engine = Engine::new(dictionary).with_english(words);
@@ -322,6 +319,30 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     assert!(
         texts.iter().any(|t| t == "GitHub"),
         "GitHub 仍在候选里，实际 {texts:?}"
+    );
+
+    // 首字母大写 + 后续拼音：候选要跟着更新（不能冻在孤立字母上）
+    engine.clear();
+    engine.push('N');
+    for c in "ihao".chars() {
+        engine.push(c);
+    }
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t == "你好"),
+        "Nihao 应出你好，实际 {texts:?}"
+    );
+
+    // 开头大写但剩余能当拼音：Cpan 仍不拼成 C盘
+    engine.clear();
+    engine.push('C');
+    for c in "pan".chars() {
+        engine.push(c);
+    }
+    let texts = texts_of(&engine);
+    assert!(
+        !texts.iter().any(|t| t == "C盘"),
+        "Cpan 不该出 C盘，实际 {texts:?}"
     );
 }
 
