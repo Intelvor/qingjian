@@ -1,8 +1,8 @@
 use qingjian_core::ShuangpinScheme;
 use qingjian_platform::protocol::KeyModifiers;
 use qingjian_platform::{
-    AccentColor, AppsConfig, CandidateRenderer, Config, KeyCombo, LayoutMode, PreeditMode,
-    SwitchKey, ThemeMode,
+    AccentColor, AppsConfig, CandidateRenderer, Config, DefaultMode, KeyCombo, LayoutMode,
+    PreeditMode, SwitchKey, ThemeMode,
 };
 
 use super::RenderSettings;
@@ -54,6 +54,10 @@ pub struct RouterConfig {
     /// 内置英文模式总开关（`[general] english_mode`）：关掉后状态条上的「中 / 英」不再切模式
     /// （切换键与语言栏按钮由 DLL 按同一项拦住，见 `com::service::mode`）。
     pub english_mode: bool,
+
+    /// 新窗口（新线程第一次激活）要设成的模式（`[general] default_mode`）：经协议下发给 DLL，
+    /// 由它在首次激活时设一次。`last` = 不动。
+    pub default_mode: DefaultMode,
 
     /// 中英切换键（`[shortcut] switch_mode`）：由 Server 经协议下发给 DLL，由它认键。
     pub switch_mode: SwitchKey,
@@ -123,6 +127,7 @@ impl From<&Config> for RouterConfig {
             page_keys: config.general.page_keys(),
             english_candidates: config.general.english_candidates,
             english_mode: config.general.english_mode,
+            default_mode: config.general.default_mode,
             switch_mode: config.shortcut.switch_mode,
             full_width: config.general.full_width_punctuation,
             english_full_width: config.general.english_full_width_punctuation,

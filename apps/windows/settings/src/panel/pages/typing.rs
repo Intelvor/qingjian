@@ -1,6 +1,6 @@
 //! 「输入行为」页：中英怎么切、字母标点怎么收，以及中文 / 英文候选谁排前面。
 
-use qingjian_platform::{ShiftLetter, SwitchKey};
+use qingjian_platform::{DefaultMode, ShiftLetter, SwitchKey};
 use windows_reactor::*;
 
 use crate::panel::controls::{field, index_of, page};
@@ -21,6 +21,14 @@ fn string_combo(
     ComboBox::new()
         .items_source(options.iter().map(|(label, _)| *label))
         .selected_index(index_of(options, current))
+        .on_selection_changed(callback)
+}
+
+/// 按 [`DefaultMode::ALL`] 列项的「新窗口默认模式」下拉；顺序与它一致（有测试钉住）。
+fn default_mode_combo(current: DefaultMode, callback: Callback<Option<usize>>) -> ComboBox {
+    ComboBox::new()
+        .items_source(DefaultMode::ALL.iter().map(|mode| mode.label()))
+        .selected_index(DefaultMode::ALL.iter().position(|mode| *mode == current))
         .on_selection_changed(callback)
 }
 
@@ -51,6 +59,13 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
             ToggleSwitch::new()
                 .is_on(g.english_mode)
                 .on_toggled(context.callback(Message::EnglishMode)),
+        ),
+        field(
+            "新窗口的输入模式",
+            "新窗口（新的一条输入线程）第一次激活时用哪种模式：\
+             「记住上次」（缺省）不动，沿用系统记住的那份；选中文 / 英文就在首次激活时设一次。\
+             只在首次激活设一次，之后窗口内单击切换键照常生效，切走再切回也不会被打回默认。",
+            default_mode_combo(g.default_mode, context.callback(Message::DefaultMode)),
         ),
         field(
             "中文模式下的 Shift + 字母",

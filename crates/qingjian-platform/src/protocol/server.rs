@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::frame::Frame;
 use super::key::KeyOutcome;
 use super::session::SessionId;
-use crate::config::SwitchKey;
+use crate::config::{DefaultMode, SwitchKey};
 
 /// Server 下发给 DLL 的「按键行为」设置。
 ///
@@ -18,6 +18,11 @@ pub struct InputSettings {
 
     /// 内置英文模式总开关（`[general] english_mode`）。
     pub english_mode: bool,
+
+    /// 新窗口（新线程第一次激活）要设成的模式（`[general] default_mode`）；`last` = 不动。
+    /// **加字段向后兼容**：老 DLL 忽略它，新 DLL 对老 Server 拿到的缺省也是「不动」。
+    #[serde(default)]
+    pub default_mode: DefaultMode,
 }
 
 impl Default for InputSettings {
@@ -25,6 +30,7 @@ impl Default for InputSettings {
         Self {
             switch_mode: SwitchKey::default(),
             english_mode: true,
+            default_mode: DefaultMode::default(),
         }
     }
 }

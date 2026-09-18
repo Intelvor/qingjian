@@ -1,6 +1,7 @@
 mod accent;
 mod apps;
 mod candidate_renderer;
+mod default_mode;
 mod dictionaries;
 mod general;
 mod key_combo;
@@ -30,6 +31,7 @@ pub use apps::{
     DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS,
 };
 pub use candidate_renderer::CandidateRenderer;
+pub use default_mode::DefaultMode;
 pub use dictionaries::{DEFAULT_DOMAINS, DictionariesConfig};
 pub use general::{
     DEFAULT_PAGE_KEYS, GeneralConfig, LEARNING_LANGUAGE_OFF, MAX_PAGE_SIZE, PAGE_KEY_OPTIONS,
@@ -203,6 +205,9 @@ shift_letter = "passthrough"
 # 内置英文模式：开着时单击切换键（[shortcut] switch_mode）或 Caps Lock 亮着进英文模式
 # 关掉后青简保持中文模式，切换键与语言栏按钮都不再切过去；要打英文请用系统快捷键（Windows 的 Win+Space / macOS 的输入法菜单）切到别的输入法
 english_mode = true
+# 新窗口（新线程第一次激活）用哪种模式：last 记住上次（缺省，与以前一致）/ chinese 中文 / english 英文。
+# 只在首次激活那一次设，之后窗口内怎么切就怎么切（切应用不会把人打回默认）
+default_mode = "last"
 # 中文模式下（没在组句时）敲的标点转全角：, . ? ! : ; ( ) 等，数字后面的 . 保持半角。Windows 上悬浮状态条的「，。」格可以点着切；macOS 在偏好设置中选择默认中文标点模式
 full_width_punctuation = true
 # 英文模式下的同一件事，中英各记一份，状态条切的是当前模式那份；只有 Windows 用

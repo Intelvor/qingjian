@@ -2,7 +2,8 @@ use qingjian_core::ShuangpinScheme;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AccentColor, CandidateRenderer, LayoutMode, LogLevel, PreeditMode, ShiftLetter, ThemeMode,
+    AccentColor, CandidateRenderer, DefaultMode, LayoutMode, LogLevel, PreeditMode, ShiftLetter,
+    ThemeMode,
 };
 
 /// 每页最多几个候选：数字键只有 1–9。
@@ -70,6 +71,10 @@ pub struct GeneralConfig {
     /// 关掉后青简保持中文模式，切换键与语言栏按钮都不再切过去；要打英文请用系统快捷键切到别的输入法。
     pub english_mode: bool,
 
+    /// 新窗口（新线程第一次激活）用哪种模式：记住上次（缺省，不动）、中文、英文。
+    /// 只在首次激活那一次设，之后窗口内怎么切就怎么切。
+    pub default_mode: DefaultMode,
+
     /// 中文模式下不在组句时敲的标点转成全角（`，。？！` 等，数字后的 `.` 保持半角）。
     /// Windows 悬浮状态条上可点切换；macOS 在偏好设置中选择默认模式。
     pub full_width_punctuation: bool,
@@ -115,6 +120,7 @@ impl Default for GeneralConfig {
             chinese_first: false,
             shift_letter: ShiftLetter::default(),
             english_mode: true,
+            default_mode: DefaultMode::default(),
             full_width_punctuation: true,
             english_full_width_punctuation: false,
             shuangpin: String::new(),

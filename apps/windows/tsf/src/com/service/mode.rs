@@ -33,11 +33,21 @@ impl TextService_Impl {
         }
         self.input_settings.set(Some(input));
         log(&format!(
-            "按键行为设置：中英切换键 {}，内置英文模式 {}",
+            "按键行为设置：中英切换键 {}，内置英文模式 {}，新窗口默认模式 {}",
             input.switch_mode.key(),
-            input.english_mode
+            input.english_mode,
+            input.default_mode.key()
         ));
         self.apply_mode_settings(input.english_mode, input.switch_mode);
+        // 新窗口（这条线程第一次激活）：按配置设一次默认模式。只设一次 —— 之后窗口内用户怎么切
+        // 就怎么切，切走再切回也不打回默认（那会在切应用时把正在打的中文顶掉）。
+        if !self.default_mode_applied.get() {
+            self.default_mode_applied.set(true);
+            if let Some(english) = input.default_mode.apply() {
+                log(&format!("新窗口默认模式：{}", input.default_mode.label()));
+                self.set_english_mode(english);
+            }
+        }
     }
 
     /// 切模式：先把组着的内容原样落定，再刷指示器。

@@ -24,6 +24,8 @@ pub(crate) enum Message {
     SwitchMode(Option<usize>),
     /// 内置英文模式总开关。
     EnglishMode(bool),
+    /// 新窗口首次激活时的输入模式（[`qingjian_platform::DefaultMode`] 的下标）。
+    DefaultMode(Option<usize>),
 
     // 候选窗口页
     Theme(Option<usize>),

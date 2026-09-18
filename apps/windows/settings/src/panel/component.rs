@@ -3,8 +3,8 @@
 use std::sync::OnceLock;
 
 use qingjian_platform::{
-    AccentColor, CandidateRenderer, Config, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, LayoutMode,
-    LogLevel, PreeditMode, ShiftLetter, ThemeMode,
+    AccentColor, CandidateRenderer, Config, DEFAULT_ENGLISH_CANDIDATES_OFF_WINDOWS, DefaultMode,
+    LayoutMode, LogLevel, PreeditMode, ShiftLetter, ThemeMode,
 };
 use windows_reactor::*;
 
@@ -119,6 +119,9 @@ impl Component for Settings {
                 self.save("shortcut", "switch_mode", typing::SWITCH_KEYS[i].1);
             }
             Message::EnglishMode(on) => self.save("general", "english_mode", on),
+            Message::DefaultMode(Some(i)) if i < DefaultMode::ALL.len() => {
+                self.save("general", "default_mode", DefaultMode::ALL[i].key());
+            }
 
             // 候选窗口页
             Message::Theme(Some(i)) if i < ThemeMode::ALL.len() => {
