@@ -132,7 +132,14 @@ fn host_is_plain_desktop_app() -> bool {
     if !queried {
         return false;
     }
-    let label = unsafe { buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>().read() };
+    // `read_unaligned`：`buffer` 是 `GetTokenInformation` 填的字节数组，地址不保证按
+    // `TOKEN_MANDATORY_LABEL` 对齐，直接 `.read()` 是 UB（上游 0a12420 同改）。
+    let label = unsafe {
+        buffer
+            .as_ptr()
+            .cast::<TOKEN_MANDATORY_LABEL>()
+            .read_unaligned()
+    };
     let sid = label.Label.Sid;
     let count_ptr = unsafe { GetSidSubAuthorityCount(sid) };
     if count_ptr.is_null() {

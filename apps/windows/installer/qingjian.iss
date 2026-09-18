@@ -1,4 +1,4 @@
-; 青简 Windows 输入法安装脚本（Inno Setup）。
+﻿; 青简 Windows 输入法安装脚本（Inno Setup）。
 ;
 ; 装到 Program Files\Qingjian（64 位），把 TSF DLL（64 位与 32 位各一份，见 README「安装布局」）、Server、设置程序与随包数据装在一起，
 ; 然后：① 给安装目录加 ALL APPLICATION PACKAGES 读+执行权限（UWP/AppContainer 应用——任务栏搜索、
