@@ -78,6 +78,20 @@ pub struct InputSettings {
     /// 「英」，都不看这一项。**加字段向后兼容**：老 DLL 忽略它，新 DLL 对老 Server 拿到的缺省是全拼的「拼」。
     #[serde(default)]
     pub glyph: ModeGlyph,
+
+    /// 这次（这个应用）给不给英文候选（`[general] english_candidates` + `[apps] english_candidates_off`）。
+    ///
+    /// **关着时英文模式要「一个键都不吃」**：输入法在这种状态下没活可干，把字母吃掉再自己插一遍会把
+    /// 游戏、自绘控件要的原始按键吞掉（用户 2026-09-18 提）。切换键（[`Self::switch_mode`]）不受影响 ——
+    /// 单击判定走 `key_tap` 那条独立路径，不吃键照样切模式。
+    /// **加字段向后兼容**：老 DLL 忽略它；新 DLL 对老 Server 拿到的缺省是 `true`（＝旧行为，照旧吃字母）。
+    #[serde(default = "default_true")]
+    pub english_candidates: bool,
+}
+
+/// 布尔字段缺省为真的 serde 助手（见 [`InputSettings::english_candidates`]）。
+fn default_true() -> bool {
+    true
 }
 
 impl Default for InputSettings {
@@ -89,6 +103,7 @@ impl Default for InputSettings {
             zhuyin: false,
             shift_letter_compose: false,
             glyph: ModeGlyph::default(),
+            english_candidates: true,
         }
     }
 }

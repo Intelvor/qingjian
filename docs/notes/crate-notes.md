@@ -200,6 +200,11 @@ TSF 原有数字 / OEM 标点 / 空格键码按当前布局用 `ToUnicodeEx` 解
 拼音显示位置（`[general] preedit`）在 Windows 上分两处落地：Server 把它读进 `RouterConfig.preedit` 并随 `Frame.preedit_mode`
 下发给 DLL，DLL（`com/service/key_sink.rs`）按 `inline()` 决定要不要放行内拼音，Server（`ui/candidates/render_data.rs::window_preedit`）
 按 `in_window()` 决定候选窗口顶部画不画拼音行；`window` 模式没有组句范围，光标矩形改从 `com/edit/anchor.rs::caret_rect`（当前选区）量。
+**DLL 吃不吃键**由 `key_sink.rs::eats_key(event, composing, translating, english_candidates)` 判：
+**英文模式 + 这次不给英文候选**（`[general] english_candidates` 关着，或应用在 `[apps] english_candidates_off` 里；
+Server 按当前应用算好、随 `InputSettings.english_candidates` 下发）→ **一个键都不吃**，字母 / 数字 / 标点原样进应用
+（打游戏、自绘控件要的原始按键；用户 2026-09-18 提）。中英切换键不受影响：单击判定走 `key_tap` 那条独立路径，
+与吃不吃键无关。组句中、翻译评审中照旧吃（先把缓冲区收尾）。
 连不上 Server 时 DLL 自己拉起它（`tsf/src/com/service/launch.rs`）：`ShellExecuteW` 起与 DLL 同目录的 `qingjian-server.exe`
 （`uiAccess=true` 的 exe 用 `CreateProcess` 报 740），进程内 5 秒冷却 + 跨进程命名互斥体防止砸出一串 Server；
 起完清掉重连退避，下一键就试。Server 只在登录时由「启动」文件夹拉起，中途挂了以前只能等下次登录。

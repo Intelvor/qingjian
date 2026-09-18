@@ -96,6 +96,7 @@ pub const DEFAULT_ENGLISH_CANDIDATES_OFF: &[&str] = DEFAULT_ENGLISH_CANDIDATES_O
 pub struct AppsConfig {
     /// 英文模式（Caps Lock）下不给候选的应用。条目是 bundle identifier（`com.jetbrains.*`）或 exe 文件名（`Code.exe`），
     /// `*` 结尾按前缀匹配。全局开关 `[general] english_candidates` 关着时这里不起作用。
+    /// 名单里的应用拿不到英文候选，**英文模式下也就一个键都不吃**（字母 / 数字 / 标点原样进应用）。
     pub english_candidates_off: Vec<String>,
 }
 

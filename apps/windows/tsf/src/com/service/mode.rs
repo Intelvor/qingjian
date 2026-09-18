@@ -27,9 +27,12 @@ impl TextService_Impl {
     /// （激活时由 `Activate` 自己按开关登记，这里只管激活之后的变化），设置窗口改完不用切走再切回输入法。
     pub(super) fn apply_mode_settings(&self, input: &InputSettings) {
         let was_enabled = self.mode_state.enabled();
-        let glyph_changed =
-            self.mode_state
-                .set_settings(input.english_mode, input.switch_mode, input.glyph);
+        let glyph_changed = self.mode_state.set_settings(
+            input.english_mode,
+            input.switch_mode,
+            input.glyph,
+            input.english_candidates,
+        );
         // 关掉内置英文模式时立刻回中文，别停在一个再也切不回去的英文状态。
         if !input.english_mode && self.mode_state.english() {
             self.mode_state.set_english(false);
@@ -63,13 +66,14 @@ impl TextService_Impl {
         }
         self.input_settings.set(Some(input));
         log(&format!(
-            "按键行为设置：中英切换键 {}，内置英文模式 {}，新窗口默认模式 {}，注音模式 {}，Shift 字母进组句 {}，任务栏图标 {:?}",
+            "按键行为设置：中英切换键 {}，内置英文模式 {}，新窗口默认模式 {}，注音模式 {}，Shift 字母进组句 {}，任务栏图标 {:?}，英文候选 {}",
             input.switch_mode.key(),
             input.english_mode,
             input.default_mode.key(),
             input.zhuyin,
             input.shift_letter_compose,
-            input.glyph
+            input.glyph,
+            input.english_candidates
         ));
         self.apply_mode_settings(&input);
     }

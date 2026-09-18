@@ -55,7 +55,8 @@ pub struct GeneralConfig {
     /// 组句中的拼音显示在行内、候选窗口还是两处都显示。
     pub preedit: PreeditMode,
 
-    /// 英文模式（Caps Lock 亮着）是否给英文候选（补全与拼错纠正）。关掉就是纯直通。
+    /// 英文模式（Caps Lock 亮着）是否给英文候选（补全与拼错纠正）。**关掉就是纯直通**：
+    /// 英文模式下一个键都不吃（字母 / 数字 / 标点原样进应用，打游戏那种），中英切换键照常。
     pub english_candidates: bool,
 
     /// 繁体输出模式。

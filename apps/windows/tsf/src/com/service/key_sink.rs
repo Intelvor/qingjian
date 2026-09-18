@@ -114,7 +114,12 @@ impl TextService_Impl {
 
     /// 这个键吃不吃，与 Router 的分派对齐；`OnTestKeyDown` 用，无副作用。判定见 [`eats_key`]。
     fn would_eat(&self, event: &KeyEvent) -> bool {
-        eats_key(event, self.shared.composing(), self.shared.translating())
+        eats_key(
+            event,
+            self.shared.composing(),
+            self.shared.translating(),
+            self.mode_state.english_candidates(),
+        )
     }
 
     /// 不吃的键绝不碰组句（否则光标一移，组句会把拼音重插到别处）。
@@ -259,6 +264,11 @@ fn eats_without_server(event: &KeyEvent) -> bool {
 /// 这个键吃不吃（[`TextService_Impl::would_eat`] 的纯逻辑，便于单测）。
 ///
 /// - 翻译评审中一律吃，交给 Server 定接受 / 取消；
+/// - **英文模式 + 不给英文候选（`[general] english_candidates` 关着，或这个应用在
+///   `[apps] english_candidates_off` 里）：一个键都不吃**，字母 / 数字 / 标点原样进应用 ——
+///   这种状态下输入法没活可干，吃掉再自己插一遍会把游戏、自绘控件要的原始按键吞掉
+///   （用户 2026-09-18 提：「可以打游戏那种」）。**切换键不受影响**：单击判定走 `key_tap` 那条
+///   独立路径（`note_key_down` / `note_key_up`），不吃键照样切中 / 英；组句中仍然吃（先把缓冲区收尾）；
 /// - 带 Ctrl / Alt / Win：只有组句中的「修饰键 + 数字」吃（译词 / 删候选），其余归应用（翻译选中文字走保留键）；
 /// - **字母一律吃**：中文模式下进组句，Shift 敲的大写也进缓冲区参与匹配（Core 的 `Composition::push_shifted`、
 ///   Server 的 `apply_chinese`）；英文模式 / Caps 亮着时由我们插入。**Shift 大写不再是「归应用」**——
@@ -266,11 +276,19 @@ fn eats_without_server(event: &KeyEvent) -> bool {
 ///   所以只有第一个字母漏）；
 /// - 组句中功能键 / 方向键 / 可打印字符都吃；
 /// - 没在组句时数字 / 标点也先「测吃」送去转全角（中英各有一份开关），Server 不转的回 Passthrough 再放行；`?` 是问字前缀。
-fn eats_key(event: &KeyEvent, composing: bool, translating: bool) -> bool {
+fn eats_key(
+    event: &KeyEvent,
+    composing: bool,
+    translating: bool,
+    english_candidates: bool,
+) -> bool {
     if translating {
         return true;
     }
     let modifiers = event.modifiers;
+    if !composing && modifiers.english_mode && !english_candidates {
+        return false;
+    }
     if modifiers.has_command_key() {
         return composing && digit_key(event.virtual_key);
     }
@@ -281,6 +299,7 @@ fn eats_key(event: &KeyEvent, composing: bool, translating: bool) -> bool {
     if composing {
         return is_edit(vk) || is_nav(vk) || event.character.is_some_and(|c| !c.is_control());
     }
+    // 英文模式但**给**候选（Caps 亮着同理，见上一条）：标点 / 数字照旧先测吃转全角。
     event
         .character
         .is_some_and(|c| c.is_ascii_punctuation() || c.is_ascii_digit())
@@ -323,26 +342,104 @@ mod tests {
             shift: true,
             ..KeyModifiers::default()
         };
-        assert!(eats_key(&with_modifiers(0x41, 'A', shifted), false, false));
+        assert!(eats_key(
+            &with_modifiers(0x41, 'A', shifted),
+            false,
+            false,
+            true
+        ));
         // 不带 Shift 的字母本来就吃
         assert!(eats_key(
             &with_modifiers(0x41, 'a', KeyModifiers::default()),
             false,
-            false
+            false,
+            true
         ));
-        // Caps 亮着（直通大写）与英文模式下也吃，由我们插入
+        // Caps 亮着（直通大写）与英文模式下也吃，由我们插入（前提：这次给英文候选）
         let caps = KeyModifiers {
             caps: true,
             ..KeyModifiers::default()
         };
-        assert!(eats_key(&with_modifiers(0x41, 'A', caps), false, false));
+        assert!(eats_key(
+            &with_modifiers(0x41, 'A', caps),
+            false,
+            false,
+            true
+        ));
         // 带 Ctrl 的组合键归应用，翻译评审中一律吃
         let ctrl_c = KeyModifiers {
             ctrl: true,
             ..KeyModifiers::default()
         };
-        assert!(!eats_key(&with_modifiers(0x43, 'c', ctrl_c), false, false));
-        assert!(eats_key(&with_modifiers(0x43, 'c', ctrl_c), false, true));
+        assert!(!eats_key(
+            &with_modifiers(0x43, 'c', ctrl_c),
+            false,
+            false,
+            true
+        ));
+        assert!(eats_key(
+            &with_modifiers(0x43, 'c', ctrl_c),
+            false,
+            true,
+            true
+        ));
+    }
+
+    /// **英文模式 + 不给英文候选：一个键都不吃**（用户 2026-09-18：「改为直通输入，可以打游戏那种」）。
+    /// 这种状态下输入法没活可干，吃掉再自己插一遍会把游戏 / 自绘控件要的原始按键吞掉。
+    /// **中英切换键不在此列**：单击判定走 `key_tap`，与吃不吃键无关（在 `mode.rs` 里点一下照样切）。
+    #[test]
+    fn english_mode_without_candidates_lets_every_key_through() {
+        let plain = KeyModifiers {
+            english_mode: true,
+            ..KeyModifiers::default()
+        };
+        for (vk, c) in [(0x41u32, 'a'), (0x32, '2'), (0xBD, '-')] {
+            assert!(
+                !eats_key(&with_modifiers(vk, c, plain), false, false, false),
+                "英文模式 + 不开候选时 vk={vk} 该原样进应用"
+            );
+        }
+        // Caps 亮着 + 英文模式（直通大写）同样放行
+        let caps_english = KeyModifiers {
+            caps: true,
+            english_mode: true,
+            ..KeyModifiers::default()
+        };
+        assert!(!eats_key(
+            &with_modifiers(0x41, 'A', caps_english),
+            false,
+            false,
+            false
+        ));
+        // **给候选时照旧吃**（要拿字母组出英文候选）
+        assert!(eats_key(
+            &with_modifiers(0x41, 'a', plain),
+            false,
+            false,
+            true
+        ));
+        // **组句中仍然吃**：先把缓冲区里的东西收尾，别把半截字母留在文档里
+        assert!(eats_key(
+            &with_modifiers(0x41, 'a', plain),
+            true,
+            false,
+            false
+        ));
+        // **翻译评审中仍然吃**（模态状态，键归评审）
+        assert!(eats_key(
+            &with_modifiers(0x41, 'a', plain),
+            false,
+            true,
+            false
+        ));
+        // 中文模式不受影响
+        assert!(eats_key(
+            &with_modifiers(0x41, 'a', KeyModifiers::default()),
+            false,
+            false,
+            false
+        ));
     }
 
     #[test]

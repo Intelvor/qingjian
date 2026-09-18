@@ -188,6 +188,8 @@ impl Router {
             shift_letter_compose: self.config.shift_letter_compose,
             // 任务栏只有一格 16px 位图：按优先级挑一个字发下去（五笔 > 注音 > 双拼 > 全拼）。
             glyph: ModeGlyph::for_scheme(self.config.scheme, self.config.wubi),
+            // 按**当前应用**算：关着时 DLL 在英文模式下一个键都不吃，字母原样进应用（打游戏用）。
+            english_candidates: self.config.english_candidates_in(self.focused_app()),
         }
     }
 

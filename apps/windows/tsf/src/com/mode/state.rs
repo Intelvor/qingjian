@@ -19,6 +19,11 @@ pub(crate) struct ModeState {
     /// 任务栏那张图标画哪个字（拼音侧方案 + 五笔，由 Server 按优先级挑一个下发，见 [`ModeGlyph`]）。
     glyph: Cell<ModeGlyph>,
 
+    /// 这次（这个应用）给不给英文候选（`[general] english_candidates` + `[apps] english_candidates_off`）。
+    /// 关着时英文模式**一个键都不吃**，字母 / 数字 / 标点原样进应用（打游戏那种），
+    /// 判定见 `service::key_sink::eats_key`；中英切换键不受影响（走 `key_tap` 那条独立路径）。
+    english_candidates: Cell<bool>,
+
     /// 中英切换键（`[shortcut] switch_mode`），单击判定与语言栏提示用。
     switch_key: Cell<SwitchKey>,
 
@@ -32,6 +37,7 @@ impl ModeState {
             english: Cell::new(false),
             enabled: Cell::new(true),
             glyph: Cell::new(ModeGlyph::default()),
+            english_candidates: Cell::new(true),
             switch_key: Cell::new(SwitchKey::default()),
             sink: RefCell::new(None),
         })
@@ -55,6 +61,11 @@ impl ModeState {
         self.glyph.get()
     }
 
+    /// 这次（这个应用）给不给英文候选。关着时英文模式直接放行所有键。
+    pub(crate) fn english_candidates(&self) -> bool {
+        self.english_candidates.get()
+    }
+
     pub(crate) fn switch_key(&self) -> SwitchKey {
         self.switch_key.get()
     }
@@ -66,9 +77,11 @@ impl ModeState {
         enabled: bool,
         switch_key: SwitchKey,
         glyph: ModeGlyph,
+        english_candidates: bool,
     ) -> bool {
         self.enabled.set(enabled);
         self.switch_key.set(switch_key);
+        self.english_candidates.set(english_candidates);
         let changed = self.glyph.get() != glyph;
         self.glyph.set(glyph);
         changed
@@ -93,16 +106,16 @@ mod tests {
         let state = ModeState::new();
         assert_eq!(state.glyph(), ModeGlyph::Pinyin, "缺省是全拼的「拼」");
         assert!(
-            state.set_settings(true, SwitchKey::Shift, ModeGlyph::Zhuyin),
+            state.set_settings(true, SwitchKey::Shift, ModeGlyph::Zhuyin, true),
             "换方案要刷新图标"
         );
         assert_eq!(state.glyph(), ModeGlyph::Zhuyin);
         assert!(
-            !state.set_settings(true, SwitchKey::Shift, ModeGlyph::Zhuyin),
+            !state.set_settings(true, SwitchKey::Shift, ModeGlyph::Zhuyin, true),
             "值没变不用刷新"
         );
         assert!(
-            state.set_settings(true, SwitchKey::Shift, ModeGlyph::Wubi),
+            state.set_settings(true, SwitchKey::Shift, ModeGlyph::Wubi, false),
             "开五笔也要刷新"
         );
         assert_eq!(state.glyph(), ModeGlyph::Wubi);
