@@ -3,7 +3,46 @@ use serde::{Deserialize, Serialize};
 use super::frame::Frame;
 use super::key::KeyOutcome;
 use super::session::SessionId;
-use crate::config::{DefaultMode, SwitchKey};
+use crate::config::{DefaultMode, Scheme, SwitchKey};
+
+/// 任务栏那张模式图标画哪个字（Caps 的「A」与英文模式的「英」由 DLL 自己定，不看这一项）。
+///
+/// DLL 端只有**一格 16px 位图**，混输（`拼五`）放不下两个字，所以由 Server 按优先级挑一个发下来：
+/// 五笔 > 注音 > 双拼 > 全拼 —— 五笔开着时出「五」更能说明形码这一轴是活的。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModeGlyph {
+    /// 全拼。
+    #[default]
+    Pinyin,
+
+    /// 双拼（哪一套不影响这张图）。
+    Shuangpin,
+
+    /// 大千注音。
+    Zhuyin,
+
+    /// 五笔（与拼音同时开着时也出它）。
+    Wubi,
+
+    /// 两条轴都关着（配置写成了 `scheme = "none"` 又没开五笔）：与状态条一样退回「中」。
+    Chinese,
+}
+
+impl ModeGlyph {
+    /// 按 `[general] scheme` 与 `[general] wubi` 挑一个字。
+    pub fn for_scheme(scheme: Scheme, wubi: bool) -> Self {
+        if wubi {
+            return Self::Wubi;
+        }
+        match scheme {
+            Scheme::Pinyin => Self::Pinyin,
+            Scheme::Shuangpin(_) => Self::Shuangpin,
+            Scheme::Zhuyin => Self::Zhuyin,
+            Scheme::Off => Self::Chinese,
+        }
+    }
+}
 
 /// Server 下发给 DLL 的「按键行为」设置。
 ///
@@ -33,6 +72,12 @@ pub struct InputSettings {
     /// 按住 Shift 敲的字母吃不吃：缺省交给应用，开着时送 Server 起一段组句（`⇧C` 接 `pan` 出「C盘」）。
     #[serde(default)]
     pub shift_letter_compose: bool,
+
+    /// 任务栏模式图标画哪个字（`拼` / `双` / `注` / `五` / `中`）：任务栏只有一格位图，放不下两个字母，
+    /// 所以由 Server 按优先级挑一个（见 [`ModeGlyph::for_scheme`]）。Caps 亮着时 DLL 出「A」、英文模式出
+    /// 「英」，都不看这一项。**加字段向后兼容**：老 DLL 忽略它，新 DLL 对老 Server 拿到的缺省是全拼的「拼」。
+    #[serde(default)]
+    pub glyph: ModeGlyph,
 }
 
 impl Default for InputSettings {
@@ -43,6 +88,7 @@ impl Default for InputSettings {
             default_mode: DefaultMode::default(),
             zhuyin: false,
             shift_letter_compose: false,
+            glyph: ModeGlyph::default(),
         }
     }
 }
@@ -134,7 +180,7 @@ mod tests {
     use super::*;
 
     /// 线上格式是 JSON（[`super::codec`]），所以缺字段能靠 `serde(default)` 兜住：
-    /// 老 Server 的 JSON 里没有 `zhuyin` / `default_mode`，新 DLL 读出来是缺省值而不是报错。
+    /// 老 Server 的 JSON 里没有 `zhuyin` / `default_mode` / `glyph`，新 DLL 读出来是缺省值而不是报错。
     #[test]
     fn missing_fields_fall_back_to_defaults() {
         let old = r#"{"switch_mode":"shift","english_mode":true}"#;
@@ -147,18 +193,49 @@ mod tests {
             }
         );
         assert!(!input.zhuyin);
+        assert_eq!(input.glyph, ModeGlyph::Pinyin);
     }
 
     #[test]
     fn round_trips_through_json() {
         let input = InputSettings {
             zhuyin: true,
+            glyph: ModeGlyph::Wubi,
             ..InputSettings::default()
         };
         let text = serde_json::to_string(&input).expect("写得出来");
         assert_eq!(
             serde_json::from_str::<InputSettings>(&text).expect("读得回来"),
             input
+        );
+    }
+
+    /// 任务栏那张图一个字：五笔开着优先出「五」，否则按拼音侧的方案；两条轴都关退回「中」。
+    #[test]
+    fn mode_glyph_picks_one_letter_per_priority() {
+        use qingjian_core::ShuangpinScheme;
+        assert_eq!(
+            ModeGlyph::for_scheme(Scheme::Pinyin, false),
+            ModeGlyph::Pinyin
+        );
+        assert_eq!(
+            ModeGlyph::for_scheme(Scheme::Shuangpin(ShuangpinScheme::Xiaohe), false),
+            ModeGlyph::Shuangpin
+        );
+        assert_eq!(
+            ModeGlyph::for_scheme(Scheme::Zhuyin, false),
+            ModeGlyph::Zhuyin
+        );
+        // 五笔与拼音同时开着：出「五」
+        assert_eq!(ModeGlyph::for_scheme(Scheme::Pinyin, true), ModeGlyph::Wubi);
+        assert_eq!(
+            ModeGlyph::for_scheme(Scheme::Shuangpin(ShuangpinScheme::Xiaolang), true),
+            ModeGlyph::Wubi
+        );
+        // 两条轴都关
+        assert_eq!(
+            ModeGlyph::for_scheme(Scheme::Off, false),
+            ModeGlyph::Chinese
         );
     }
 }

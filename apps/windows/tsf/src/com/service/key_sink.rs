@@ -291,16 +291,22 @@ mod tests {
     use qingjian_platform::protocol::{KeyEvent, KeyModifiers};
 
     use super::{eats_key, eats_without_server};
-    use crate::com::key::event::to_key_event;
 
     /// 中文模式（`caps` / `english_mode` 都灭）。
     const CHINESE: (bool, bool) = (false, false);
 
     fn key(vk: u32, caps: bool, english_mode: bool) -> qingjian_platform::protocol::KeyEvent {
-        let mut event = to_key_event(vk, english_mode);
-        event.modifiers.caps = caps;
-        event.modifiers.english_mode = english_mode;
-        event
+        // **别用 `to_key_event`**：它按**当前键盘状态**填 ctrl / alt / win —— 跑测试时正好按着修饰键
+        // （2026-09-18 实测按着 Ctrl），`has_command_key()` 就成了 true，断言随机翻车。
+        KeyEvent::new(
+            vk,
+            None,
+            KeyModifiers {
+                caps,
+                english_mode,
+                ..KeyModifiers::default()
+            },
+        )
     }
 
     fn with_modifiers(vk: u32, character: char, modifiers: KeyModifiers) -> KeyEvent {

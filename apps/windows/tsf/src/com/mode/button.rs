@@ -13,6 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::HICON;
 use windows::core::{BOOL, BSTR, GUID, IUnknown, Interface, Ref, Result, implement};
 
 use qingjian_platform::SwitchKey;
+use qingjian_platform::protocol::ModeGlyph;
 
 use super::ModeState;
 use super::icon::{self, Glyph};
@@ -86,32 +87,40 @@ impl ITfLangBarItemButton_Impl for ModeButton_Impl {
 
     fn GetText(&self) -> Result<BSTR> {
         Ok(BSTR::from(match self.glyph() {
+            Glyph::Pinyin => "拼",
+            Glyph::Shuangpin => "双",
+            Glyph::Wubi => "五",
+            Glyph::Zhuyin => "注",
             Glyph::Chinese => "中",
             Glyph::English => "英",
-            Glyph::Zhuyin => "注",
             Glyph::CapsLock => "A",
         }))
     }
 }
 
 impl ModeButton_Impl {
-    /// Caps 亮着无论中英模式都直接出大写英文，所以它优先。
+    /// Caps > 英 > 方案那一个字（Server 挑好的，见 [`ModeGlyph`]）。
     fn glyph(&self) -> Glyph {
-        glyph_for(caps_lock_on(), self.state.english(), self.state.zhuyin())
+        glyph_for(caps_lock_on(), self.state.english(), self.state.glyph())
     }
 }
 
-/// 图标选哪个：Caps > 英 > 注 > 中，与状态条模式格的文字同一套优先级
-/// （状态条把 Caps 并进文字写成「A 中」，任务栏一格放不下两个字，Caps 亮着就只出「A」）。
-fn glyph_for(caps: bool, english: bool, zhuyin: bool) -> Glyph {
+/// 图标选哪个：Caps > 英 > 方案（拼 / 双 / 五 / 注 / 中），与状态条模式格同一套口径 ——
+/// 状态条一格能并排放两个字母（`拼五`），任务栏只有一格 16px 位图，所以只画 Server 挑出来的那一个
+/// （[`ModeGlyph::for_scheme`]：五笔 > 注音 > 双拼 > 全拼）。
+fn glyph_for(caps: bool, english: bool, mode: ModeGlyph) -> Glyph {
     if caps {
-        Glyph::CapsLock
-    } else if english {
-        Glyph::English
-    } else if zhuyin {
-        Glyph::Zhuyin
-    } else {
-        Glyph::Chinese
+        return Glyph::CapsLock;
+    }
+    if english {
+        return Glyph::English;
+    }
+    match mode {
+        ModeGlyph::Pinyin => Glyph::Pinyin,
+        ModeGlyph::Shuangpin => Glyph::Shuangpin,
+        ModeGlyph::Wubi => Glyph::Wubi,
+        ModeGlyph::Zhuyin => Glyph::Zhuyin,
+        ModeGlyph::Chinese => Glyph::Chinese,
     }
 }
 
@@ -135,13 +144,27 @@ impl ITfSource_Impl for ModeButton_Impl {
 mod tests {
     use super::*;
 
-    /// 优先级：Caps 亮着出「A」，其次英文、注音、中文。
+    /// 优先级：Caps 亮着出「A」，其次英文，再才是方案那一个字（由 Server 挑）。
     #[test]
-    fn glyph_priority_is_caps_then_english_then_zhuyin() {
-        assert_eq!(glyph_for(true, true, true), Glyph::CapsLock);
-        assert_eq!(glyph_for(true, false, true), Glyph::CapsLock);
-        assert_eq!(glyph_for(false, true, true), Glyph::English);
-        assert_eq!(glyph_for(false, false, true), Glyph::Zhuyin);
-        assert_eq!(glyph_for(false, false, false), Glyph::Chinese);
+    fn glyph_priority_is_caps_then_english_then_the_scheme_letter() {
+        for mode in [
+            ModeGlyph::Pinyin,
+            ModeGlyph::Shuangpin,
+            ModeGlyph::Wubi,
+            ModeGlyph::Zhuyin,
+            ModeGlyph::Chinese,
+        ] {
+            assert_eq!(glyph_for(true, false, mode), Glyph::CapsLock, "{mode:?}");
+            assert_eq!(glyph_for(true, true, mode), Glyph::CapsLock, "{mode:?}");
+            assert_eq!(glyph_for(false, true, mode), Glyph::English, "{mode:?}");
+        }
+        assert_eq!(glyph_for(false, false, ModeGlyph::Pinyin), Glyph::Pinyin);
+        assert_eq!(
+            glyph_for(false, false, ModeGlyph::Shuangpin),
+            Glyph::Shuangpin
+        );
+        assert_eq!(glyph_for(false, false, ModeGlyph::Wubi), Glyph::Wubi);
+        assert_eq!(glyph_for(false, false, ModeGlyph::Zhuyin), Glyph::Zhuyin);
+        assert_eq!(glyph_for(false, false, ModeGlyph::Chinese), Glyph::Chinese);
     }
 }

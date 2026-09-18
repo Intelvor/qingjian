@@ -1,6 +1,7 @@
-//! 任务栏中 / 英 / 注 / A 图标。SVG 预先栅格化成四档 DPI 的 8 位 alpha 蒙版（`assets/icon/windows/render-mode-icons.sh`；
-//! 「注」那份没有设计稿，由同目录的 `render-mode-icons.ps1` 从字体轮廓生成），这里按系统 DPI 挑一档、
-//! 按任务栏深浅色填白或填黑拼成 HICON；系统取走后负责销毁。
+//! 任务栏模式图标：拼 / 双 / 五 / 注 / 中 / 英 / A。SVG 预先栅格化成四档 DPI 的 8 位 alpha 蒙版
+//! （`assets/icon/windows/render-mode-icons.sh`；拼 / 双 / 五 / 注 没有设计稿，由同目录的
+//! `render-mode-icons.ps1` 从字体轮廓生成），这里按系统 DPI 挑一档、按任务栏深浅色填白或填黑拼成
+//! HICON；系统取走后负责销毁。
 
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateDIBSection, DIB_RGB_COLORS,
@@ -10,13 +11,23 @@ use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::WindowsAndMessaging::{CreateIconIndirect, HICON, ICONINFO};
 use windows::core::Result;
 
-/// 四个图标。
+/// 任务栏那张图标画哪个字：一格 16px 位图，所以一个状态一个字。方案类由 Server 按优先级挑一个下发
+/// （`ModeGlyph`：五笔 > 注音 > 双拼 > 全拼），Caps 与英文模式 DLL 自己定。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Glyph {
-    Chinese,
-    English,
-    /// 注音模式（`[general] zhuyin`）：状态条那格显示「注」，任务栏跟着一起。
+    /// 全拼（`[general] scheme = "pinyin"`）。
+    Pinyin,
+    /// 双拼（哪一套不影响这张图）。
+    Shuangpin,
+    /// 五笔（`[general] wubi = "wubi86"`；与拼音同时开着时也出它）。
+    Wubi,
+    /// 大千注音。
     Zhuyin,
+    /// 两条轴都关着时的兜底。
+    Chinese,
+    /// 英文模式。
+    English,
+    /// Caps Lock 亮着（大写锁定）。
     CapsLock,
 }
 
@@ -34,21 +45,35 @@ macro_rules! masks {
     };
 }
 
+const PINYIN: [&[u8]; 4] = masks!("pinyin");
+const SHUANGPIN: [&[u8]; 4] = masks!("shuangpin");
+const WUBI: [&[u8]; 4] = masks!("wubi");
+const ZHUYIN: [&[u8]; 4] = masks!("zhuyin");
 const CHINESE: [&[u8]; 4] = masks!("zh");
 const ENGLISH: [&[u8]; 4] = masks!("en");
-const ZHUYIN: [&[u8]; 4] = masks!("zhuyin");
 const CAPS_LOCK: [&[u8]; 4] = masks!("caps");
 
 impl Glyph {
-    /// 四个图标各一档，测试遍历用。
+    /// 七个图标各一档，测试遍历用。
     #[cfg(test)]
-    pub(super) const ALL: [Self; 4] = [Self::Chinese, Self::English, Self::Zhuyin, Self::CapsLock];
+    pub(super) const ALL: [Self; 7] = [
+        Self::Pinyin,
+        Self::Shuangpin,
+        Self::Wubi,
+        Self::Zhuyin,
+        Self::Chinese,
+        Self::English,
+        Self::CapsLock,
+    ];
 
     fn masks(self) -> &'static [&'static [u8]; 4] {
         match self {
+            Self::Pinyin => &PINYIN,
+            Self::Shuangpin => &SHUANGPIN,
+            Self::Wubi => &WUBI,
+            Self::Zhuyin => &ZHUYIN,
             Self::Chinese => &CHINESE,
             Self::English => &ENGLISH,
-            Self::Zhuyin => &ZHUYIN,
             Self::CapsLock => &CAPS_LOCK,
         }
     }
@@ -57,9 +82,12 @@ impl Glyph {
     #[cfg(test)]
     pub(super) fn source(self) -> &'static str {
         match self {
+            Self::Pinyin => "mode-pinyin.svg",
+            Self::Shuangpin => "mode-shuangpin.svg",
+            Self::Wubi => "mode-wubi.svg",
+            Self::Zhuyin => "mode-zhuyin.svg",
             Self::Chinese => "mode-zh.svg",
             Self::English => "mode-en.svg",
-            Self::Zhuyin => "mode-zhuyin.svg",
             Self::CapsLock => "mode-caps.svg",
         }
     }
@@ -178,6 +206,25 @@ mod tests {
                 Glyph::Chinese.masks()[index],
                 "zhuyin 的 {index} 档蒙版和中文那份一样"
             );
+        }
+    }
+
+    /// 拼 / 双 / 五 / 注 四张必须两两不同（都是从字体轮廓生成的，抄错就白改了）。
+    #[test]
+    fn the_scheme_glyphs_are_all_different() {
+        let glyphs = [Glyph::Pinyin, Glyph::Shuangpin, Glyph::Wubi, Glyph::Zhuyin];
+        for (index, _) in SIZES.iter().enumerate() {
+            for (i, a) in glyphs.iter().enumerate() {
+                for b in &glyphs[i + 1..] {
+                    assert_ne!(
+                        a.masks()[index],
+                        b.masks()[index],
+                        "{index} 档蒙版：{} 与 {} 一模一样",
+                        a.source(),
+                        b.source()
+                    );
+                }
+            }
         }
     }
 
