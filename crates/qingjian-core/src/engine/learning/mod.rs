@@ -166,6 +166,7 @@ impl Engine {
                 learning: false,
             },
             CandidateKind::Sentence
+            | CandidateKind::Mixed
             | CandidateKind::Shortcut
             | CandidateKind::Custom(_)
             | CandidateKind::Emoji => Forgotten::default(),

@@ -25,6 +25,42 @@ fn english_candidate(text: &str, syllables: Vec<String>) -> Candidate {
     }
 }
 
+/// 大写段 / 小写段拆分结果。
+struct TypedSeg {
+    text: String,
+    is_upper: bool,
+}
+
+/// 按「连续大写 / 连续非大写」拆 `typed_scope`。
+fn split_upper_lower(typed: &str) -> Vec<TypedSeg> {
+    let mut segs = Vec::new();
+    let mut buf = String::new();
+    let mut is_upper = false;
+    for c in typed.chars() {
+        let up = c.is_ascii_uppercase();
+        if buf.is_empty() {
+            is_upper = up;
+            buf.push(c);
+        } else if up == is_upper {
+            buf.push(c);
+        } else {
+            segs.push(TypedSeg {
+                text: std::mem::take(&mut buf),
+                is_upper,
+            });
+            is_upper = up;
+            buf.push(c);
+        }
+    }
+    if !buf.is_empty() {
+        segs.push(TypedSeg {
+            text: buf,
+            is_upper,
+        });
+    }
+    segs
+}
+
 impl Engine {
     /// 按 Shift 原样拆英文侧信息：`typed` 是 [`Composition::typed_scope`]。
     pub(super) fn shifted_split(&self, typed: &str) -> ShiftedSplit {
@@ -155,6 +191,10 @@ impl Engine {
         if stripped != lower && !stripped.is_empty() && stripped != after_upper {
             self.lookup_pinyin_words(&stripped, &mut extra);
         }
+        // 多段大写：中英混排候选（C语言和AI编程）
+        if let Some(mixed) = self.build_mixed_candidate(typed) {
+            extra.push(mixed);
+        }
         for cand in extra {
             if !items.iter().any(|c| c.text == cand.text) {
                 items.push(cand);
@@ -165,6 +205,105 @@ impl Engine {
                 items.push(cand);
             }
         }
+        // 中英混排候选排到最前（用户敲了大写，意图就是混排）
+        if let Some(pos) = items.iter().position(|c| c.kind == CandidateKind::Mixed) {
+            let mixed = items.remove(pos);
+            items.insert(0, mixed);
+        }
+    }
+
+    /// 把 `typed_scope` 按大写段 / 小写拼音段拆开，拼成中英混排候选。
+    ///
+    /// `CyuyanheAIbiancheng` → `C` + `语言和` + `AI` + `编程` = `C语言和AI编程`
+    /// syllables 逐段覆盖整段 scope（大写段用小写音节），上屏一次吃完整段。
+    ///
+    /// 只在**至少两段大写**（或大写段 ≥2 字母，如 `AI`）时生成，
+    /// 单字母开头且剩余是合法拼音（`Nihao`）不走这条路，避免误触 Caps 出 `N你好`。
+    fn build_mixed_candidate(&self, typed: &str) -> Option<Candidate> {
+        let segments = split_upper_lower(typed);
+        // 至少两段大写，或有一段 ≥2 字母的大写（AI / API），才算混排意图
+        let upper_runs = segments.iter().filter(|s| s.is_upper).count();
+        let has_long_upper = segments
+            .iter()
+            .any(|s| s.is_upper && s.text.chars().count() >= 2);
+        if upper_runs < 2 && !has_long_upper {
+            return None;
+        }
+        let mut text = String::new();
+        let mut syllables = Vec::new();
+        let mut has_chinese = false;
+        for seg in &segments {
+            if seg.is_upper {
+                text.push_str(&seg.text);
+                syllables.push(seg.text.to_ascii_lowercase());
+            } else {
+                let lower = seg.text.to_ascii_lowercase();
+                if lower.is_empty() {
+                    continue;
+                }
+                let mut words = Vec::new();
+                self.lookup_pinyin_words(&lower, &mut words);
+                let word_best = words
+                    .into_iter()
+                    .filter(|c| c.kind == CandidateKind::Chinese)
+                    .max_by_key(|c| c.syllables.len());
+                // 整句转换：小写段可能需要多词拼接（yuyanhe → 语言和）
+                let sentence_best = self.sentence_for_pinyin(&lower);
+                // 优先覆盖音节更多的；词级与整句同音节数时优先词级（更稳）
+                let best = match (word_best, sentence_best) {
+                    (Some(w), Some(s)) => {
+                        if s.1.len() > w.syllables.len() {
+                            Some(s)
+                        } else {
+                            Some((w.text, w.syllables))
+                        }
+                    }
+                    (Some(w), None) => Some((w.text, w.syllables)),
+                    (None, Some(s)) => Some(s),
+                    (None, None) => None,
+                };
+                match best {
+                    Some((hit_text, hit_syllables)) => {
+                        text.push_str(&hit_text);
+                        syllables.extend(hit_syllables.iter().cloned());
+                        has_chinese = true;
+                    }
+                    None => {
+                        text.push_str(&seg.text);
+                        syllables.push(lower);
+                    }
+                }
+            }
+        }
+        if !has_chinese || text.is_empty() {
+            return None;
+        }
+        Some(Candidate {
+            text,
+            kind: CandidateKind::Mixed,
+            syllables,
+            reading: None,
+            translation: None,
+        })
+    }
+
+    /// 对一段独立拼音跑整句转换，返回 (文字, 音节数)。
+    fn sentence_for_pinyin(&self, pinyin: &str) -> Option<(String, Vec<String>)> {
+        let (segmentations, _tail) = segment_longest_prefix(pinyin).ok()?;
+        let best = segmentations.first()?;
+        if best.syllables.len() < 2 {
+            return None;
+        }
+        let patterns = best.patterns();
+        let conversion = self.convert_sentence(&patterns, false)?;
+        if conversion.has_placeholder() {
+            return None;
+        }
+        // 音节数要贴住切分，否则不算这段拼音的整句
+        if conversion.syllables.len() != best.syllables.len() {
+            return None;
+        }
+        Some((conversion.text, conversion.syllables))
     }
 
     /// 词级候选（含前缀词）：给大写路径补查拼音用。

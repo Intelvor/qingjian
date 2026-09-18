@@ -392,9 +392,11 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     );
 
     // 用户实测串：CyuyanheAIbiancheng（注意有 y，不是 Cyuanhe…）
+    // 词典含 语言/和/编程，验证中英混排候选 C语言和AI编程
     let dictionary = Dictionary::parse(
-        "很大\then da\t40000\n编程\tbian cheng\t30000\n很\then\t70000\n大\tda\t60000\n\
-         爱\tai\t20000\n于\tyu\t30000\n呀\tya\t20000\n那\tna\t50000\n远\tyuan\t20000\n",
+        "语言\tyu yan\t50000\n和\the\t80000\n编程\tbian cheng\t30000\n\
+         于\tyu\t30000\n呀\tya\t20000\n很\then\t70000\n\
+         爱\tai\t20000\n远\tyuan\t20000\n",
     )
     .unwrap();
     let words = WordList::parse("AI\tai\t5000\n").unwrap();
@@ -417,6 +419,11 @@ fn shift_letters_join_the_buffer_only_when_configured() {
         !texts.is_empty(),
         "CyuyanheAIbiancheng 不得空候选，marked={:?}",
         q.marked_text()
+    );
+    // 中英混排候选应出现（C…AI…）
+    assert!(
+        texts.iter().any(|t| t.starts_with('C') && t.contains("AI")),
+        "应有中英混排候选（C…AI…），实际 {texts:?}"
     );
 }
 

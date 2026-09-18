@@ -128,6 +128,11 @@ impl Engine {
                 typos = self.accepted_typos(candidate);
                 self.consumed_by(candidate)
             }
+            // 中英混排候选（C语言和AI编程）：带全部音节，按音节消耗拼音
+            CandidateKind::Mixed => {
+                typos = self.accepted_typos(candidate);
+                self.consumed_by(candidate)
+            }
             // emoji 按它对应词的音节消耗拼音，不记学习
             CandidateKind::Emoji => self.consumed_by(candidate),
             // 云端词是针对整段作用域要的（拼音可能有错，按音节对不上），上屏吃掉整段；词库里没有的记成用户词
@@ -236,6 +241,8 @@ impl Engine {
                 }
                 None => self.chain.reset(),
             },
+            // 中英混排候选：不记单个词，链重置
+            CandidateKind::Mixed => self.chain.reset(),
             CandidateKind::English
             | CandidateKind::Shortcut
             | CandidateKind::Custom(_)
@@ -255,6 +262,7 @@ impl Engine {
                 | CandidateKind::Code
                 | CandidateKind::Cloud
                 | CandidateKind::Sentence
+                | CandidateKind::Mixed
         );
         let commit = if learned {
             LastCommit {
