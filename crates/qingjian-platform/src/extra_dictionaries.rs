@@ -24,6 +24,14 @@ pub fn snapshot(dir: &Path) -> Vec<(PathBuf, Option<SystemTime>, u64)> {
         .collect()
 }
 
+/// 隐藏文件 / macOS 的 AppleDouble 元数据（`._animals.qj`，163 字节）不当词库看。
+///
+/// 产品数据的 tar 包里常跟着一批 `._*`（macOS 打包时给每个文件配的资源叉），它们**后缀正好是 `.qj`**，
+/// 不排掉就会出现在设置页的词库列表里、显示成「读不了：文件损坏或格式不对」（2026-09-18 用户截图反馈）。
+pub fn is_metadata_file(name: &str) -> bool {
+    name.starts_with('.')
+}
+
 /// 列出目录里的词库文件（按文件名排序，同名只留优先扩展名的那个），返回 (文件名不含扩展名, 路径)。目录不存在就是空。
 pub fn list(dir: &Path) -> Vec<(String, PathBuf)> {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -34,6 +42,9 @@ pub fn list(dir: &Path) -> Vec<(String, PathBuf)> {
         .map(|e| e.path())
         .filter_map(|p| {
             let name = p.file_name()?.to_str()?;
+            if is_metadata_file(name) {
+                return None;
+            }
             let extension = p.extension()?.to_str()?;
             let rank = EXTENSIONS.iter().position(|e| *e == extension)?;
             // 用导入那边同一套去后缀：`law.dict.yaml` 与 `law.qj` 要算同一本词库。
@@ -103,6 +114,7 @@ mod tests {
 
     /// 目录认的后缀与「导入词库」必须是同一批：`.qj` / `.tsv` / Rime `.dict.yaml` / `.txt` 都算，
     /// 不认识的（`.md`）不进列表；`.dict.yaml` 与 `.qj` 算同一个名字（同名取 `.qj`）。
+    /// 隐藏 / 元数据文件（`._animals.qj`）一律不进列表。
     #[test]
     fn list_takes_the_same_formats_as_import() {
         let dir = std::env::temp_dir().join(format!("qingjian-extra-dicts-{}", std::process::id()));
@@ -115,6 +127,10 @@ mod tests {
             "notes.txt",
             "vibe.dict.yaml",
             "readme.md",
+            // macOS 的 AppleDouble：后缀也是 `.qj`，但这不是词库
+            "._idioms.qj",
+            "._food.qj",
+            ".hidden.qj",
         ] {
             std::fs::write(dir.join(name), b"").unwrap();
         }

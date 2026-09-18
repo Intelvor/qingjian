@@ -133,6 +133,7 @@ fn user_list(settings: &Settings, context: &mut ViewContext<Settings>) -> View {
 
 /// 目录里**没被认出来**的文件（后缀不在支持列表里）：列出来并指路，别静默忽略 ——
 /// 2026-09-18 的 bug 就是 `.dict.yaml` 放进去了、界面里一个字都不显示。
+/// 隐藏 / 元数据文件（`._animals.qj`）不算：它们不是词库，列出来只会让人以为词库坏了。
 /// 没有这类文件时返回 `None`（这一节就不出现）。
 fn ignored_list(settings: &Settings) -> Option<View> {
     let dir = user_dir(settings);
@@ -147,6 +148,7 @@ fn ignored_list(settings: &Settings) -> Option<View> {
         .map(|entry| entry.path())
         .filter(|path| path.is_file() && !known.contains(path))
         .filter_map(|path| path.file_name()?.to_str().map(str::to_owned))
+        .filter(|name| !extra_dictionaries::is_metadata_file(name))
         .collect();
     if names.is_empty() {
         return None;

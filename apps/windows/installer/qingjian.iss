@@ -1,4 +1,4 @@
-﻿; 青简 Windows 输入法安装脚本（Inno Setup）。
+; 青简 Windows 输入法安装脚本（Inno Setup）。
 ;
 ; 装到 Program Files\Qingjian（64 位），把 TSF DLL（64 位与 32 位各一份，见 README「安装布局」）、Server、设置程序与随包数据装在一起，
 ; 然后：① 给安装目录加 ALL APPLICATION PACKAGES 读+执行权限（UWP/AppContainer 应用——任务栏搜索、
@@ -82,7 +82,7 @@ Source: "{#Repo}\data\generated\glossary-ja.qj"; DestDir: "{app}\data\generated"
 Source: "{#Repo}\data\generated\glossary-zh.qj"; DestDir: "{app}\data\generated";       Flags: ignoreversion
 Source: "{#Repo}\data\generated\glossary-es.qj"; DestDir: "{app}\data\generated";       Flags: ignoreversion
 Source: "{#Repo}\data\generated\english.tsv";    DestDir: "{app}\data\generated";       Flags: ignoreversion
-Source: "{#Repo}\data\generated\dicts\*.qj";     DestDir: "{app}\data\generated\dicts";  Flags: ignoreversion
+Source: "{#Repo}\data\generated\dicts\*.qj";     DestDir: "{app}\data\generated\dicts";  Flags: ignoreversion; Excludes: "._*"
 ; —— 本地整句模型（tools/release/pack-model.sh 打成的单文件 data\model\model.qjm；没有就不装，Server 不重排）——
 Source: "{#Repo}\data\model\model.qjm"; DestDir: "{app}\data\model"; Flags: ignoreversion skipifsourcedoesntexist
 ; —— 随 git 的资源 ——
@@ -140,6 +140,9 @@ Type: files; Name: "{userstartup}\Qingjian Server.lnk"
 Type: files; Name: "{app}\data\model\model.safetensors"
 Type: files; Name: "{app}\data\model\config.json"
 Type: files; Name: "{app}\data\model\vocab.json"
+; macOS 打包的产品数据里跟着的 AppleDouble（`._animals.qj`，163 字节）：早先某次装机带进来了，
+; 它们后缀是 `.qj`，会出现在设置页的词库列表里显示成「读不了：文件损坏或格式不对」。升级时清掉。
+Type: files; Name: "{app}\data\generated\dicts\._*"
 
 [UninstallDelete]
 ; 历次升级留下的旧版本 DLL（正常在升级时就删了；仍被占用的会留到这里）。
