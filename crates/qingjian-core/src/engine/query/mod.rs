@@ -11,6 +11,7 @@ mod snapshot;
 pub(crate) use english_tail::EnglishTail;
 pub use result::Query;
 pub(super) use result::join_marked;
+pub(super) use result::join_marked_typed;
 pub(super) use snapshot::QuerySnapshot;
 
 impl Engine {
@@ -362,12 +363,25 @@ impl Engine {
             .as_ref()
             .filter(|_| head_wins)
             .map_or(tail, |t| &keys[t.head_len..]);
-        let typed_display = decoded.as_ref().map(|d| d.marked()).or_else(|| {
-            // Shift 大写：preedit 按敲的原样显示，避免 join_marked 在中途大写上拼出乱切分
-            self.composition
-                .has_shifted()
-                .then(|| self.composition.typed_scope())
-        });
+        let typed_display = if decoded.is_none() && self.composition.has_shifted() {
+            // Shift 大写：拼音行按切分加 `'`，字母按敲的原样（`Cyu'yan'hao'xue'ma`）
+            let corrected = correction
+                .as_ref()
+                .map(|c| vec![c.segmentation.clone()])
+                .unwrap_or_default();
+            let segs: &[Segmentation] = if corrected.is_empty() {
+                &segmentations
+            } else {
+                &corrected
+            };
+            Some(join_marked_typed(
+                &self.composition.typed_scope(),
+                segs,
+                if corrected.is_empty() { tail } else { "" },
+            ))
+        } else {
+            decoded.as_ref().map(|d| d.marked())
+        };
         Ok(Query {
             segmentations,
             candidates: CandidateList { items },

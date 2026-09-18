@@ -429,7 +429,6 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     }
     let q = engine.query().unwrap();
     let texts: Vec<&str> = q.candidates.items.iter().map(|c| c.text.as_str()).collect();
-    eprintln!("Cyuyanhaoxuema items={texts:?}");
     assert!(
         texts.iter().any(|t| t.contains("语言")),
         "至少应出「C语言…」，实际 {texts:?}"
@@ -443,6 +442,13 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     assert!(
         !texts.iter().any(|t| t.contains('从')),
         "大写 C 不参与拼音，不该出「从」，实际 {texts:?}"
+    );
+    // 候选框的拼音行要有切分反馈（按音节加 `'`），并保留大写原样
+    let marked = q.marked_text();
+    assert!(marked.starts_with('C'), "拼音行应保留大写，实际 {marked:?}");
+    assert!(
+        marked.contains('\'') && marked.contains("hao") && marked.contains("xue"),
+        "拼音行应显示切分，实际 {marked:?}"
     );
 }
 

@@ -17,29 +17,51 @@ pub(crate) fn join_marked(segmentations: &[Segmentation], tail: &str) -> String 
     text
 }
 
-/// 与 [`join_marked`] 相同的分段，但用原样大小写的输入（`Cpan`）：切分是按小写算的，
-/// 大小写只影响显示，逐段按同样的字节长度取回原样文本。
-#[allow(dead_code)]
+/// 与 [`join_marked`] 相同的分段，但用原样大小写的输入（`Cpan`、`Cyuyanhaoxuema`）：
+/// 切分按小写算，显示时**逐音节从原样串里取字母**（大写保留），并按边界插 `'`。
+/// 音节字母与输入不完全对齐时（切分是从中间起的），多出来的字母归到当前那一组，不丢字。
 pub(crate) fn join_marked_typed(typed: &str, segmentations: &[Segmentation], tail: &str) -> String {
-    let mut text = String::new();
-    let mut offset = 0;
-    if let Some(first) = segmentations.first() {
-        for (index, syllable) in first.syllables.iter().enumerate() {
-            if index > 0 {
-                text.push('\'');
+    let Some(first) = segmentations.first() else {
+        return typed.to_owned();
+    };
+    let chars: Vec<char> = typed.chars().collect();
+    let mut out = String::new();
+    let mut pos = 0usize;
+    for (index, syllable) in first.syllables.iter().enumerate() {
+        if index > 0 {
+            out.push('\'');
+        }
+        let target: Vec<char> = syllable.text.to_lowercase().chars().collect();
+        let mut matched = 0usize;
+        while pos < chars.len() {
+            let current = chars[pos].to_ascii_lowercase();
+            if matched < target.len() && current == target[matched] {
+                matched += 1;
             }
-            let end = (offset + syllable.text.len()).min(typed.len());
-            text.push_str(&typed[offset..end]);
-            offset = end;
+            out.push(chars[pos]);
+            pos += 1;
+            if matched >= target.len() {
+                break;
+            }
         }
     }
-    if !tail.is_empty() {
-        if !text.is_empty() {
-            text.push('\'');
+    let rest = if tail.is_empty() {
+        String::new()
+    } else {
+        chars[pos.min(chars.len())..].iter().collect()
+    };
+    if !rest.is_empty() {
+        if !out.is_empty() {
+            out.push('\'');
         }
-        text.push_str(&typed[offset.min(typed.len())..]);
+        out.push_str(&rest);
+    } else if pos < chars.len() {
+        if !out.is_empty() {
+            out.push('\'');
+        }
+        out.extend(&chars[pos..]);
     }
-    text
+    out
 }
 
 use crate::engine::timings::Timings;
@@ -110,16 +132,28 @@ impl Query {
     /// [`Self::marked_text`] 的分段形式：敲的拼音一段（`Typed`），光标后剩下的拼音连同前面的 `'` 一段（`Rest`）。
     /// 壳按段画样式；[`Self::marked_cursor`] 的位置按各段拼接后的字符数算。
     pub fn marked_segments(&self) -> Vec<MarkedSegment> {
+        // Shift 大写的原样显示（带切分）优先：纠正的逐段标记让位，避免把大写字母显示成小写
+        if let Some(display) = &self.typed_display {
+            let mut segments = Vec::with_capacity(2);
+            if !display.is_empty() {
+                segments.push(MarkedSegment::new(display.clone(), MarkedKind::Typed));
+            }
+            if !self.rest.is_empty() {
+                let rest = if segments.is_empty() {
+                    self.rest.clone()
+                } else {
+                    format!("'{}", self.rest)
+                };
+                segments.push(MarkedSegment::new(rest, MarkedKind::Rest));
+            }
+            return segments;
+        }
         let mut segments = match &self.correction {
             Some(correction) => correction.marked_segments(),
             None => Vec::with_capacity(2),
         };
         if self.correction.is_none() {
-            let typed = if let Some(display) = &self.typed_display {
-                display.clone()
-            } else {
-                join_marked(&self.segmentations, &self.tail)
-            };
+            let typed = join_marked(&self.segmentations, &self.tail);
             if !typed.is_empty() {
                 segments.push(MarkedSegment::new(typed, MarkedKind::Typed));
             }
