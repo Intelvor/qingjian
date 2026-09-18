@@ -296,7 +296,6 @@ impl Engine {
         // 快捷候选按敲的键认（`rq` 日期），双拼下也是
         self.insert_shortcuts(&mut items, keys);
         self.insert_emoji(&mut items);
-        self.insert_media_formats(&mut items, keys);
         let rank = start.elapsed();
 
         // 按头段算时英文尾段不参与拼音候选，显示上跟在切分后面：`wo'xiang'xue'hao'rust`

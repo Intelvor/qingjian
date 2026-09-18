@@ -275,26 +275,6 @@ fn shift_letters_join_the_buffer_only_when_configured() {
 }
 
 #[test]
-fn media_format_shortcuts_sit_at_third_and_fourth() {
-    let dict = Dictionary::parse(concat!(
-        "门票\tmen piao\t5000\n",
-        "买票\tmai piao\t3000\n",
-        "马匹\tma pi\t2000\n",
-    ))
-    .unwrap();
-    let mut engine = Engine::new(dict);
-    engine.set_input("mp");
-    let all = engine.query().unwrap().candidates.items;
-    assert!(all.len() >= 4, "{all:?}");
-    assert_eq!(all[0].kind, CandidateKind::Chinese);
-    assert_eq!(all[1].kind, CandidateKind::Chinese);
-    assert_eq!(all[2].text, "mp3");
-    assert_eq!(all[2].kind, CandidateKind::Shortcut);
-    assert_eq!(all[3].text, "mp4");
-    assert_eq!(all[3].kind, CandidateKind::Shortcut);
-}
-
-#[test]
 fn expression_mode_skips_pinyin_and_evaluates() {
     let mut engine = self::engine();
     assert!(!engine.expression_mode());

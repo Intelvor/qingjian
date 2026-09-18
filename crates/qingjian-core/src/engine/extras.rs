@@ -53,16 +53,6 @@ impl Engine {
         items.splice(position..position, shortcuts);
     }
 
-    /// `mp` → 第 3、4 项固定 mp3 / mp4。放在 emoji 之后调，免得词的 emoji 把位置挤掉。
-    pub(super) fn insert_media_formats(&self, items: &mut Vec<Candidate>, scope: &str) {
-        let formats = shortcut::media_format_forms(scope);
-        if formats.is_empty() {
-            return;
-        }
-        let position = items.len().min(shortcut::MEDIA_FORMAT_INSERT_AT);
-        items.splice(position..position, formats);
-    }
-
     /// 中英混输：整段输入是英文词就把它加进候选。
     /// 缺省作为拼音「不像话」（切不动、或除末尾外还有声母缩写 / 残缺音节）时排第一，否则排第二；
     /// 开了中文优先（`chinese_first`）整句 / 首个中文候选已经在前，英文词排第二。没有中文候选时总在第一。
