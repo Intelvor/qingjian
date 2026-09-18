@@ -767,20 +767,8 @@ impl RecordingStatus {
 
 impl StatusSink for RecordingStatus {
     fn show_status(&self, view: StatusView) {
-        // 状态条模式格的实际写法：中 / 英 / 注，Caps 亮着时前面加「A」。
-        let base = if view.english {
-            "英"
-        } else if view.zhuyin {
-            "注"
-        } else {
-            "中"
-        };
-        let label = if view.caps {
-            format!("A {base}")
-        } else {
-            base.to_owned()
-        };
-        self.0.lock().unwrap().push(Some(label));
+        // 状态条模式格的实际写法（`StatusView::mode_text`，与 Server 画的是同一份实现）。
+        self.0.lock().unwrap().push(Some(view.mode_text()));
     }
 
     fn hide_status(&self) {
@@ -864,11 +852,11 @@ fn status_bar_mode_click_is_ignored_when_builtin_english_is_off() {
         english: false,
         caps: false,
     });
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("拼".to_owned())));
 
     // 关掉内置英文模式：点「中」不翻成「英」，也不给 DLL 递目标模式（DLL 那边同样会拦）
     router.handle_status_event(StatusEvent::ToggleMode);
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("拼".to_owned())));
     assert_eq!(
         router.handle(ClientMessage::SyncMode { session: SESSION }),
         Some(ServerMessage::ModeSync {
@@ -1008,7 +996,7 @@ fn status_bar_follows_mode_when_enabled() {
     router.handle(ClientMessage::CloseSession { session: SESSION });
     assert_eq!(
         recorder.calls(),
-        vec![Some("中".to_owned()), Some("英".to_owned()), None]
+        vec![Some("拼".to_owned()), Some("英".to_owned()), None]
     );
 }
 
@@ -1017,7 +1005,7 @@ fn status_bar_hides_when_the_foreground_session_switches_to_another_ime() {
     let (mut router, recorder) = status_router();
 
     mode_changed(&mut router, SESSION, false);
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("拼".to_owned())));
 
     router.handle(ClientMessage::ImeSwitched { session: SESSION });
     assert_eq!(recorder.calls().last(), Some(&None));
@@ -1033,7 +1021,7 @@ fn status_bar_follows_the_foreground_app() {
     // 编辑器中文、记事本英文。还没有前台线索时报模式的这个先当上前台，所以显示编辑器的「中」。
     mode_changed(&mut router, SESSION, false);
     mode_changed(&mut router, notepad, true);
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("拼".to_owned())));
 
     // 切到记事本：翻成「英」——记事本没再报过模式，Server 记着它激活时那一份。
     focus_window(&mut router, notepad);
@@ -1041,9 +1029,9 @@ fn status_bar_follows_the_foreground_app() {
 
     // 切回来还是「中」；这时后台的记事本报模式（配置改了之类）也不许把状态条带跑。
     focus_window(&mut router, SESSION);
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("拼".to_owned())));
     mode_changed(&mut router, notepad, false);
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("拼".to_owned())));
 }
 
 /// 前台窗口不属于任何会话（那个应用没装青简 / 用的是别的输入法）：收起，别接着显示上一个应用的模式。
@@ -1052,7 +1040,7 @@ fn status_bar_hides_when_the_foreground_window_has_no_session() {
     let (mut router, recorder) = status_router();
 
     mode_changed(&mut router, SESSION, false);
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("拼".to_owned())));
 
     router.handle_foreground(vec![(9999, 8888)]);
     assert_eq!(recorder.calls().last(), Some(&None));
@@ -1070,7 +1058,7 @@ fn foreground_window_falls_back_to_the_process_id() {
 
     let (pid, _) = host_of(SESSION);
     router.handle_foreground(vec![(9999, 8888), (7, pid)]);
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("拼".to_owned())));
 }
 
 /// 线程号会被系统回收：只有进程号也对得上才算同一个会话，否则会认到早已退出的那个。
@@ -1088,7 +1076,7 @@ fn foreground_match_needs_both_the_thread_and_the_process() {
     assert_eq!(recorder.calls().last(), Some(&None));
     // 两个都对上才认。
     router.handle_foreground(vec![(tid, pid)]);
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("拼".to_owned())));
 }
 
 /// 状态条上点出的目标模式只交给前台会话：所有装了青简的应用都在轮询，谁先来给谁就切进别的应用里去了。
@@ -1152,13 +1140,14 @@ fn pending_mode_is_dropped_when_the_foreground_changes() {
     }
 }
 
-/// 状态条模式格只显示中 / 英 / 注 —— **双拼方案名不进状态条**（它会随配置变长变短、
-/// 把整条撑得很宽，而且只在换方案时才变；要看方案去设置页「通用」）。
+/// 状态条模式格按「拼音侧一个字 + 形码的『五』」显示：双拼是 `双`、五笔开着再跟一个 `五` ——
+/// **方案全名不进状态条**（`中 · 小浪双拼` 那种写法会随配置变长变短、把整条撑宽，全名去设置页「通用」看）。
 #[test]
-fn status_bar_mode_cell_has_no_scheme_name() {
+fn status_bar_mode_cell_shows_the_scheme_letter() {
     let config = RouterConfig {
         status_enabled: true,
         scheme: Scheme::Shuangpin(ShuangpinScheme::Xiaohe),
+        wubi: true,
         ..RouterConfig::default()
     };
     let mut router = router_with(config);
@@ -1167,21 +1156,21 @@ fn status_bar_mode_cell_has_no_scheme_name() {
 
     mode_changed(&mut router, SESSION, false);
 
-    assert_eq!(recorder.calls(), vec![Some("中".to_owned())]);
+    assert_eq!(recorder.calls(), vec![Some("双五".to_owned())]);
 }
 
-/// Caps Lock 亮着时模式格前面多一个「A」；灭了就回到原样。
+/// Caps Lock 亮着时模式格只出「A」（不跟汉字挤一格）；灭了就回到方案那串。
 #[test]
 fn status_bar_shows_caps_lock_in_the_mode_cell() {
     let (mut router, recorder) = status_router();
     mode_changed_with(&mut router, SESSION, false, true);
-    assert_eq!(recorder.calls().last(), Some(&Some("A 中".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("A".to_owned())));
 
     mode_changed_with(&mut router, SESSION, true, true);
-    assert_eq!(recorder.calls().last(), Some(&Some("A 英".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("A".to_owned())));
 
     mode_changed_with(&mut router, SESSION, false, false);
-    assert_eq!(recorder.calls().last(), Some(&Some("中".to_owned())));
+    assert_eq!(recorder.calls().last(), Some(&Some("拼".to_owned())));
 }
 
 #[test]

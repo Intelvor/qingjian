@@ -11,8 +11,8 @@ mod event;
 mod sink;
 mod view;
 
+use qingjian_platform::Config;
 use qingjian_platform::protocol::SessionId;
-use qingjian_platform::{Config, Scheme};
 
 pub use self::event::StatusEvent;
 pub use self::sink::{NoopStatusSink, StatusSink};
@@ -183,10 +183,9 @@ impl Router {
             Some(english) if self.config.status_enabled => {
                 self.status.show_status(StatusView {
                     english,
-                    // 状态条**不显示方案名**（2026-09-18 定）：它随配置变长、把整条撑宽，而只在换方案时才变；
-                    // 要知道当前是双拼 / 注音 / 五笔，看「设置 → 通用」的输入方案。上游那版把
-                    // `scheme_label` 现算进 StatusView，本仓库不接这条。
-                    zhuyin: self.config.scheme == Scheme::Zhuyin,
+                    // 模式格按「拼音侧一个字（拼 / 双 / 注）+ 形码的『五』」显示，见 `StatusView::mode_text`。
+                    scheme: self.config.scheme,
+                    wubi: self.config.wubi,
                     caps: self.status_caps(),
                     full_width: self.full_width_for(english),
                     cloud: self.predict.enabled,

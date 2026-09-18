@@ -211,36 +211,14 @@ impl Bar {
         }
     }
 
-    /// 模式格的文字：中 / 英 / 注；Caps Lock 亮着时前面加一个「A」（跟任务栏图标一个意思）。
-    ///
-    /// **方案名不进状态条**（2026-09-18 定）：它会随配置变长变短、把整条撑得很宽，而它只在换方案时
-    /// 才变；要让用户看方案，设置页「通用」里就有。去掉之后模式格只剩单个汉字，宽度也更稳。
-    fn mode_text(view: &StatusView) -> String {
-        let base = if view.english {
-            "英"
-        } else if view.zhuyin {
-            "注"
-        } else {
-            "中"
-        };
-        if view.caps {
-            format!("A {base}")
-        } else {
-            base.to_owned()
-        }
-    }
-
-    /// 模式格的**宽度基准**：三种模式字同宽，所以取带「A」的那一种就够 ——
-    /// 切中英、Caps 亮灭都不改变整条状态条的长度（只有配置变化才可能变）。
-    const MODE_WIDTH: &'static str = "A 中";
-
     /// 标点格的宽度基准：全角那两个比半角宽，按它量宽，切全 / 半角时长度不变。
     const PUNCT_WIDTH: &'static str = "，。";
 
-    /// 渲染器要的四格，顺序同 [`ACTIONS`]：模式（品牌色）、标点（生效时品牌色）、☁（开着品牌色）、齿轮。
+    /// 模式格的文字与**宽度基准**都在 [`StatusView`] 上（纯函数，好写单测）：
+    /// 文字是「拼音侧一个字 + 形码的『五』」或英文模式的「英」；宽度基准按这份配置里最宽的写法量。
     fn status_cells(view: &StatusView) -> Vec<StatusCell> {
         [
-            StatusCell::text_with_width(Self::mode_text(view), true, Self::MODE_WIDTH),
+            StatusCell::text_with_width(view.mode_text(), true, view.mode_width()),
             StatusCell::text_with_width(
                 if view.full_width { "，。" } else { ",." },
                 view.full_width,
@@ -261,8 +239,8 @@ impl Bar {
         };
         [
             CellSpec {
-                text: Self::mode_text(view),
-                width_of: Some(Self::MODE_WIDTH.to_owned()),
+                text: view.mode_text(),
+                width_of: Some(view.mode_width()),
                 font: theme.text_font,
                 color: theme.accent_color,
                 action: StatusAction::ToggleMode,
