@@ -51,6 +51,10 @@ pub(crate) struct Settings {
 
     /// 「个人词」列表当前第几页（0 起）；换筛选串回第 0 页，删词后由组件夹回有效范围。
     word_page: usize,
+
+    /// 最近一次「请青简删掉某个个人词」的回执：词 + 一句话，画在**那一行**的「删除」右边
+    /// （放页面底部离按钮太远，列表一长就看不到）。
+    word_status: Option<(String, String)>,
 }
 
 impl Settings {

@@ -77,6 +77,7 @@ impl Component for Settings {
             font_query: None,
             word_query: None,
             word_page: 0,
+            word_status: None,
         }
     }
 

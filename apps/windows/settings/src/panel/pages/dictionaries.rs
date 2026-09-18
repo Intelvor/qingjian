@@ -325,15 +325,26 @@ fn learned_list(settings: &Settings, context: &mut ViewContext<Settings>) -> Vie
             .text(format!("{word} · {pinyin}"))
             .text_wrapping(TextWrapping::Wrap)
             .into();
-        let row = StackPanel::new()
-            .orientation(Orientation::Horizontal)
-            .spacing(12.0)
-            .children((
-                label,
-                Button::new()
-                    .on_click(context.message(Message::ForgetWord(word.clone())))
-                    .content("删除"),
-            ));
+        let delete: View = Button::new()
+            .on_click(context.message(Message::ForgetWord(word.clone())))
+            .content("删除");
+        // 「已请青简删掉」这种回执挂在**点过的那一行**的按钮右边：页面底部的提示离按钮太远，
+        // 列表一长（或翻到了某一页）根本看不到（2026-09-18 用户反馈）。
+        let receipt = settings
+            .word_status
+            .as_ref()
+            .filter(|(requested, _)| requested == word)
+            .map(|(_, text)| text.clone());
+        let row = match receipt {
+            Some(text) => StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(12.0)
+                .children((label, delete, note(&text))),
+            None => StackPanel::new()
+                .orientation(Orientation::Horizontal)
+                .spacing(12.0)
+                .children((label, delete)),
+        };
         // 按词本身做 key：翻页 / 删词之后同一个位置的词变了就是另一行，新行不会被复用成旧的点击回调。
         rows.push(KeyedView::new(word.clone(), row));
     }
@@ -341,20 +352,23 @@ fn learned_list(settings: &Settings, context: &mut ViewContext<Settings>) -> Vie
 }
 
 /// 把「删掉这个词」写进请求文件（一行一个，去重），等 Server 来处理。
+///
+/// 回执写进 [`Settings::word_status`]（词 + 一句话），由列表把这句话画在**那一行**的「删除」右边。
 pub(crate) fn request_forget(settings: &mut Settings, word: &str) {
     let path = qingjian_platform::dirs::forget_requests_path(settings.data_dir());
     let old = std::fs::read_to_string(&path).unwrap_or_default();
-    if old.lines().any(|line| line.trim() == word) {
-        settings.dictionary_status = format!("「{word}」已经请过了，等青简处理。");
-        return;
-    }
-    let mut text = old;
-    text.push_str(word);
-    text.push('\n');
-    settings.dictionary_status = match std::fs::write(&path, text) {
-        Ok(()) => format!("已请青简删掉「{word}」——一秒内生效，刷新这一页就看不到它了。"),
-        Err(error) => format!("请求删除「{word}」失败：{error}"),
+    let text = if old.lines().any(|line| line.trim() == word) {
+        "已经请过了，等青简处理".to_owned()
+    } else {
+        let mut requests = old;
+        requests.push_str(word);
+        requests.push('\n');
+        match std::fs::write(&path, requests) {
+            Ok(()) => "已请青简删掉，一秒内生效".to_owned(),
+            Err(error) => format!("请求失败：{error}"),
+        }
     };
+    settings.word_status = Some((word.to_owned(), text));
 }
 
 /// 挪进 `dicts\removed`，不真删（与 macOS 一致）。
