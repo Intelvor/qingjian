@@ -67,9 +67,11 @@ impl Engine {
             None => (String::new(), String::new()),
         };
         let scope = self.composition.scope();
+        // 模式键按敲的原样大小写比：Shift 大写 `I` 不是全拼下的续写键 `i`
+        let typed_scope = self.composition.typed_scope();
         // 续写模式：敲了续写键（缺省 `i`）再按 Tab。前缀不进拼音，模型只按光标前后文往下写；
         // 应用给不出光标前后文就没得续，不发。
-        let continuing = self.modes().is_continue(scope, self.zhuyin);
+        let continuing = self.modes().is_continue(&typed_scope, self.zhuyin);
         if continuing && before.is_empty() && after.is_empty() {
             return None;
         }
@@ -79,15 +81,16 @@ impl Engine {
         }
         if !continuing
             && (self.english_mode
-                || self.modes().is_expression(scope, self.zhuyin)
+                || self.modes().is_expression(&typed_scope, self.zhuyin)
                 || is_raw(scope, self.modes(), self.shuangpin, self.zhuyin))
         {
             return None;
         }
         // 问字模式：问题本身就是全部上下文，不带应用文本、不要整句、本地没有候选可提示
-        let question = self.modes().is_question(scope, self.zhuyin);
+        let question = self.modes().is_question(&typed_scope, self.zhuyin);
         if question
-            && shortcut::unicode_form(self.modes().question_body(scope, self.zhuyin)).is_some()
+            && shortcut::unicode_form(self.modes().question_body(&typed_scope, self.zhuyin))
+                .is_some()
         {
             // 码点输入本地就能答，不问云端
             return None;
@@ -95,7 +98,7 @@ impl Engine {
         let (kind, pinyin_source, before, after) = if question {
             (
                 PredictionKind::Question,
-                self.modes().question_body(scope, self.zhuyin),
+                self.modes().question_body(&typed_scope, self.zhuyin),
                 String::new(),
                 String::new(),
             )
@@ -129,7 +132,6 @@ impl Engine {
         }
         // letters 发「用户敲的原样」：全拼/五笔走缓冲区原样（Shift 大写还原，模型可据此判专有名词）；
         // 双拼/注音仍是解出来的全拼（键位本身不携带内容大小写）。
-        let typed_scope = self.composition.typed_scope();
         let letters = if continuing {
             String::new()
         } else if let Some(decoded) = decoded.as_ref() {

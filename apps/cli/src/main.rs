@@ -238,6 +238,7 @@ fn build_engine(args: &Args) -> Result<Engine, CliError> {
     engine.set_traditional_mode(config.general.traditional);
     engine.set_fuzzy(config.fuzzy);
     engine.set_mode_keys(config.shortcut.mode);
+    engine.set_shift_letter_compose(config.general.shift_letter.compose());
     // `--shuangpin` 现在写的是 [general] scheme（同一个维度的旧键已经并进去），off 就是全拼
     if let Some(scheme) = &args.shuangpin {
         config.general.scheme = if scheme == "off" {

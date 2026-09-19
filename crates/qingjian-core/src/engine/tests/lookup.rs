@@ -452,6 +452,70 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     );
 }
 
+/// `shift_letter = "compose"` 时 Shift+U/I/V 是大写字母（混排/英文），不是全拼下的模式键 u/i/v。
+#[test]
+fn shift_uiv_are_uppercase_letters_not_mode_keys() {
+    let dictionary = Dictionary::parse("盘\tpan\t9000\n你好\tni hao\t90000\n").unwrap();
+    let words = WordList::parse("I\t1\t5000\nU\t1\t4000\n").unwrap();
+    let mut engine = Engine::new(dictionary).with_english(words);
+    engine.set_shift_letter_compose(true);
+
+    // Shift+U 不是问字：Upan 应出「U盘」这类混排，而不是进 u 模式
+    engine.push('U');
+    for c in "pan".chars() {
+        engine.push(c);
+    }
+    assert!(
+        !engine.question_mode(),
+        "Shift+U 不得进问字模式，typed={:?}",
+        engine.composition().typed_text()
+    );
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t.starts_with('U') && t.contains("盘")),
+        "Upan 应出「U盘」，实际 {texts:?}"
+    );
+    engine.clear();
+
+    // 单独 Shift+I 不是续写：出英文 I，不进 i 模式
+    engine.push('I');
+    assert!(
+        !engine.question_mode() && !engine.expression_mode() && !engine.raw_mode(),
+        "单独 Shift+I 不得进任何前缀模式"
+    );
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t == "I"),
+        "Shift+I 应出英文 I，实际 {texts:?}"
+    );
+    engine.clear();
+
+    // Shift+V 不是表达式：不进 v 模式
+    engine.push('V');
+    for c in "1+2".chars() {
+        engine.push(c);
+    }
+    assert!(
+        !engine.expression_mode(),
+        "Shift+V 不得进表达式模式，typed={:?}",
+        engine.composition().typed_text()
+    );
+    engine.clear();
+
+    // 小写模式键照旧
+    engine.push('u');
+    assert!(engine.question_mode(), "小写 u 仍是问字入口");
+    engine.clear();
+    engine.push('v');
+    for c in "1+2".chars() {
+        engine.push(c);
+    }
+    assert!(engine.expression_mode(), "小写 v 仍是表达式入口");
+    engine.clear();
+    engine.push('i');
+    assert!(engine.modes().is_continue("i", false), "小写 i 仍是续写键");
+}
+
 #[test]
 fn expression_mode_skips_pinyin_and_evaluates() {
     let mut engine = self::engine();

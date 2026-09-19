@@ -255,11 +255,12 @@ impl Engine {
     }
 
     /// 是否处在表达式模式（缓冲区以表达式键、缺省 `v` 开头）。此时壳应把数字和运算符也交给 [`Self::push`]，而不是当选词键。
+    /// 模式键按**敲的原样大小写**比：Shift 敲的大写 `V` 不是全拼下的小写 `v` 模式键（`shift_letter = "compose"` 时进组句）。
     pub fn expression_mode(&self) -> bool {
         !self.has_custom_phrase()
             && self
                 .modes()
-                .is_expression(self.composition.text(), self.zhuyin)
+                .is_expression(&self.composition.typed_text(), self.zhuyin)
     }
 
     /// 英文直输段：缓冲区里有拼音以外的字符（`no-way`），整段原样上屏、不解析拼音。
@@ -274,19 +275,20 @@ impl Engine {
     }
 
     /// 是否处在问字模式（缓冲区以问字键、缺省 `u`，或 `?` 开头）：拼音问题由云端答，十六进制码点本地答。
+    /// 模式键按**敲的原样大小写**比：Shift 敲的大写 `U` 不是全拼下的小写 `u` 模式键。
     pub fn question_mode(&self) -> bool {
         !self.has_custom_phrase()
             && self
                 .modes()
-                .is_question(self.composition.text(), self.zhuyin)
+                .is_question(&self.composition.typed_text(), self.zhuyin)
     }
 
     /// 问字模式下正在敲的还可能是 Unicode 码点（前缀后为空，或到目前为止全是十六进制 / 开头 `+`）：
     /// 此时壳应把数字交给 [`Self::push`] 而不是当选词键。
     pub fn unicode_entry(&self) -> bool {
-        let text = self.composition.text();
-        self.modes().is_question(text, self.zhuyin)
-            && shortcut::could_be_unicode(self.modes().question_body(text, self.zhuyin))
+        let text = self.composition.typed_text();
+        self.modes().is_question(&text, self.zhuyin)
+            && shortcut::could_be_unicode(self.modes().question_body(&text, self.zhuyin))
     }
 
     /// 缓冲区里只有一个 `?`：还没决定是问字还是标点。壳在确认标点时调用 [`Self::restore_bare_question`]。

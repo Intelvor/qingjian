@@ -2048,6 +2048,40 @@ fn shift_letters_follow_the_configuration() {
     assert_eq!(preedit(&frame), "cP", "大写收进组句，拼音行按敲的样子显示");
 }
 
+/// `shift_letter = "compose"` 下 Shift+U/I/V 是大写字母，不得进全拼的 u/i/v 模式。
+#[test]
+fn shift_uiv_compose_are_letters_not_mode_keys() {
+    let config = RouterConfig {
+        shift_letter_compose: true,
+        ..RouterConfig::default()
+    };
+    let mut router = router_with(config);
+
+    // Shift+U：不进问字，字母进组句
+    let (outcome, commit, frame) = press(&mut router, letter_with('U', SHIFT));
+    assert_eq!(outcome, KeyOutcome::Consumed);
+    assert_eq!(commit, None);
+    assert_eq!(preedit(&frame), "U", "Shift+U 进组句，不进问字模式");
+    assert!(!router.engine_mut().question_mode());
+    press(&mut router, function_key(0x1B));
+
+    // 小写 u 仍是问字入口
+    type_letters(&mut router, "u");
+    assert!(router.engine_mut().question_mode(), "小写 u 仍是问字");
+    press(&mut router, function_key(0x1B));
+
+    // Shift+I：不进续写
+    let (_, _, frame) = press(&mut router, letter_with('I', SHIFT));
+    assert_eq!(preedit(&frame), "I");
+    press(&mut router, function_key(0x1B));
+
+    // Shift+V：不进表达式
+    let (_, _, frame) = press(&mut router, letter_with('V', SHIFT));
+    assert_eq!(preedit(&frame), "V");
+    assert!(!router.engine_mut().expression_mode());
+    press(&mut router, function_key(0x1B));
+}
+
 /// 中文模式没在组句时按 `-`：不放行、由壳插入——放行的键在部分宿主里到不了应用。
 #[test]
 fn minus_is_inserted_instead_of_passed_through() {

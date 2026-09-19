@@ -83,15 +83,18 @@ impl Engine {
     pub(super) fn query_inner(&self) -> Result<Query, ParseError> {
         let start = Instant::now();
         let keys = self.composition.scope();
+        // 模式键按敲的原样大小写比（Shift 大写 `U`/`I`/`V` 不是全拼下的小写模式键）；
+        // 直输段仍看小写匹配形态——大写字母在拼音路径里由 shifted 合并处理，不因此变成 raw。
+        let typed_keys = self.composition.typed_scope();
         let rest = self.marked_rest(self.composition.rest());
         if self.english_mode {
             return Ok(self.query_english(keys, rest, start));
         }
-        if self.modes().is_expression(keys, self.zhuyin) {
-            return Ok(self.query_expression(keys, rest, start));
+        if self.modes().is_expression(&typed_keys, self.zhuyin) {
+            return Ok(self.query_expression(&typed_keys, rest, start));
         }
-        if self.modes().is_question(keys, self.zhuyin) {
-            return Ok(self.query_question(keys, rest, start));
+        if self.modes().is_question(&typed_keys, self.zhuyin) {
+            return Ok(self.query_question(&typed_keys, rest, start));
         }
         if is_raw(keys, self.modes(), self.shuangpin, self.zhuyin) {
             return Ok(self.query_raw(keys, rest, start));
@@ -141,12 +144,17 @@ impl Engine {
             _ => segment_longest_prefix(keys),
         };
         // 连第一个字母都切不动（`impor`）：拼音这边没戏，但英文词 / 补全、快捷候选还可以有
+        // Shift 大写（`U` / `Upan`）也走这里：大写不参与拼音，切不动时仍要合并英文与大写字面
         let (segmentations, tail) = match parsed {
             Ok(parsed) => parsed,
             Err(error) => {
                 let mut items = Vec::new();
                 self.insert_english(&mut items, true);
                 self.insert_shortcuts(&mut items, keys);
+                let shifted = decoded.is_none() && self.composition.has_shifted();
+                if shifted {
+                    self.merge_shifted_extras(&mut items, &self.composition.typed_scope());
+                }
                 if items.is_empty() {
                     return Err(error);
                 }
@@ -158,7 +166,11 @@ impl Engine {
                     cursor: self.composition.cursor(),
                     rest,
                     decoded_keys: self.shuangpin.is_some() || self.zhuyin,
-                    typed_display: decoded.as_ref().map(|d| d.marked()),
+                    typed_display: if shifted {
+                        Some(self.composition.typed_scope())
+                    } else {
+                        decoded.as_ref().map(|d| d.marked())
+                    },
                     correction: None,
                     timings: Timings {
                         parse: start.elapsed(),

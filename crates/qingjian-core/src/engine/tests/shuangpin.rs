@@ -112,6 +112,39 @@ fn shuangpin_moves_mode_keys_to_shifted_letters() {
     assert_eq!(engine.query().unwrap().marked_text(), "?ni'hao");
 }
 
+/// 双拼 + `shift_letter = "compose"`：Shift+U 进组句后缓冲区是小写 u，
+/// 模式判定仍要按原样大写 U 命中 shifted 的模式键，不能掉回音节/拼音路径。
+#[test]
+fn shuangpin_mode_keys_still_match_when_shift_letters_compose() {
+    let mut engine = xiaohe();
+    engine.set_shift_letter_compose(true);
+    // Router 走 takes_mode_letter → push('U')；compose 下 push_shifted 存小写、记 shifted
+    assert!(engine.takes_mode_letter('U'));
+    engine.push('U');
+    engine.push('4');
+    engine.push('e');
+    engine.push('0');
+    engine.push('0');
+    assert_eq!(engine.composition().text(), "u4e00");
+    assert_eq!(engine.composition().typed_text(), "U4e00");
+    assert!(
+        engine.question_mode() && engine.unicode_entry(),
+        "compose 下 Shift+U 仍是问字入口"
+    );
+    assert_eq!(engine.query().unwrap().candidates.items[0].text, "一");
+    engine.clear();
+
+    engine.push('V');
+    for c in "1+2".chars() {
+        engine.push(c);
+    }
+    assert!(
+        engine.expression_mode(),
+        "compose 下 Shift+V 仍是表达式入口"
+    );
+    assert_eq!(engine.query().unwrap().candidates.items[0].text, "3");
+}
+
 #[test]
 fn microsoft_semicolon_is_a_final_only_after_a_lone_initial() {
     let mut engine = engine();
