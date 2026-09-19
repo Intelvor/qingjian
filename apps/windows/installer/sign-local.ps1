@@ -54,8 +54,9 @@ foreach ($store in @('Root', 'TrustedPublisher')) {
     }
 }
 
-# 3) 找 signtool（Windows SDK 里，取版本最新的一个）。
-$signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' -ErrorAction SilentlyContinue |
+# 3) 找 signtool（Windows SDK 里，取版本最新的一个）。开发机 SDK 不总装默认路径，遍历各盘查找。
+$signtool = [System.IO.DriveInfo]::GetDrives() |
+    ForEach-Object { Get-ChildItem "$($_.RootDirectory.FullName)Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue } |
     Sort-Object FullName -Descending | Select-Object -First 1
 if (-not $signtool) { throw '在 Windows SDK 里找不到 signtool.exe' }
 

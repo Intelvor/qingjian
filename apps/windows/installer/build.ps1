@@ -125,12 +125,20 @@ if (-not $iscc) {
     )
     $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 }
+# 兜底：开发机 Inno 可能装在非默认盘，遍历各盘找 Inno Setup 的 ISCC.exe。顺序保持在 PATH / 6 之后、
+# 只在默认位置都没有时才启用，避免 CI 镜像上的 Chocolatey Inno 6 被别的安装抢先。
+if (-not $iscc) {
+    $iscc = [System.IO.DriveInfo]::GetDrives() |
+        ForEach-Object { Get-ChildItem "$($_.RootDirectory.FullName)*inno setup*\ISCC.exe" -ErrorAction SilentlyContinue } |
+        Sort-Object FullName -Descending | Select-Object -First 1
+}
 if (-not $iscc) { throw '找不到 ISCC.exe：装 Inno Setup 7 或用 QINGJIAN_ISCC 指定' }
 Write-Host "用 $iscc" -ForegroundColor Cyan
 
-# 4) 编安装包。
-& $iscc "/DAppVersion=$Version" "/DAppVersionNumeric=$VersionNumeric" $Iss
+# 4) 编安装包。已签名(-Sign)的包文件名加 -Signed 后缀，便于区分签没签。
+$suffix = if ($Sign) { '-Signed' } else { '' }
+& $iscc "/DAppVersion=$Version" "/DAppVersionNumeric=$VersionNumeric" "/DAppSuffix=$suffix" $Iss
 if ($LASTEXITCODE -ne 0) { throw "iscc 失败（退出码 $LASTEXITCODE）" }
 
-$out = Join-Path $Repo "target\installer\Qingjian-$Version-Setup.exe"
+$out = Join-Path $Repo "target\installer\Qingjian-$Version$suffix-Setup.exe"
 Write-Host "完成：$out" -ForegroundColor Green

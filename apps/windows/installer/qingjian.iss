@@ -21,6 +21,10 @@
 #ifndef AppVersionNumeric
   #define AppVersionNumeric AppVersion
 #endif
+; 安装包文件名后缀：已签名的包（打包脚本传 /DAppSuffix=-Signed）加 -Signed，便于一眼区分。
+#ifndef AppSuffix
+  #define AppSuffix ""
+#endif
 #define AppName "青简"
 #define Publisher "青简"
 #define WebsiteUrl "https://qingjian.im"
@@ -48,7 +52,7 @@ PrivilegesRequired=admin
 ; 别让 Restart Manager 去关所有加载了 DLL 的应用（那是每一个有文本框的应用）。
 CloseApplications=no
 OutputDir={#Repo}\target\installer
-OutputBaseFilename=Qingjian-{#AppVersion}-Setup
+OutputBaseFilename=Qingjian-{#AppVersion}{#AppSuffix}-Setup
 SetupIconFile={#Repo}\apps\windows\tsf\resources\qingjian.ico
 UninstallDisplayIcon={app}\qingjian.ico
 Compression=lzma2
