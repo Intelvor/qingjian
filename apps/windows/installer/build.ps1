@@ -22,6 +22,10 @@ param([switch]$SkipBuild, [switch]$Sign)
 
 $ErrorActionPreference = 'Stop'
 
+# 本机默认自签：设了环境变量 QINGJIAN_SIGN=1 时，无显式 -Sign 也按自签处理；
+# 不设则走对外分发的默认（不自签、uiAccess=0），CI / 其他机器行为不变。
+if (-not $Sign -and $env:QINGJIAN_SIGN -eq '1') { $Sign = $true }
+
 # 仓库根：本脚本在 apps\windows\installer 下，往上三层是 ime\。
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $Iss  = Join-Path $PSScriptRoot 'qingjian.iss'
