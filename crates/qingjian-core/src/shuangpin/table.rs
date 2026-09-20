@@ -23,6 +23,9 @@ pub const XIAOLANG_DIGRAPH_INITIALS: [(char, &str); 3] = [('e', "zh"), ('i', "ch
 /// 智能 ABC 的翘舌声母：a 为 zh，e 为 ch，v 为 sh。
 pub const ABC_DIGRAPH_INITIALS: [(char, &str); 3] = [('a', "zh"), ('e', "ch"), ('v', "sh")];
 
+/// 首道双拼的翘舌声母：v 为 zh，i 为 ch，e 为 sh。
+pub const SHOUDAO_DIGRAPH_INITIALS: [(char, &str); 3] = [('v', "zh"), ('i', "ch"), ('e', "sh")];
+
 /// 小鹤双拼。
 pub const XIAOHE: Table = Table {
     digraph_initials: &DIGRAPH_INITIALS,
@@ -302,5 +305,58 @@ pub const XIAOLANG: Table = Table {
         ("o", &["oo"]),
         ("ou", &["ou"]),
     ],
+    semicolon: false,
+};
+
+/// 首道双拼的零声母写法：a / o 开头的双写首字母或照全拼敲（ang 是 `ay`），`e` 键让给了 sh，
+/// 所以 e / ei / eng 改用 `u` 引导；`en` `er` 仍照全拼敲（sh 配不出 ian / ie，不撞）。
+const SHOUDAO_ZERO_INITIALS: &[(&str, &[&str])] = &[
+    ("a", &["aa"]),
+    ("ai", &["ai"]),
+    ("an", &["an"]),
+    ("ang", &["ay"]),
+    ("ao", &["ao"]),
+    ("e", &["ue"]),
+    ("ei", &["ui"]),
+    ("en", &["en"]),
+    ("eng", &["uf"]),
+    ("er", &["er"]),
+    ("o", &["oo"]),
+    ("ou", &["ou"]),
+];
+
+/// 首道双拼：键位按作者公布的键位图（shoudaoshuangpin/shoudaoshouyouplus 的 `shoudao_layout.jpg`）。
+/// ue（jue / que / xue / yue）在 `l`，üe（lve / nve）单独在 `b`。
+pub const SHOUDAO: Table = Table {
+    digraph_initials: &SHOUDAO_DIGRAPH_INITIALS,
+    finals: &[
+        ('q', &["iu"]),
+        ('w', &["ua"]),
+        ('e', &["e"]),
+        ('r', &["ie"]),
+        ('t', &["uan"]),
+        ('y', &["ang"]),
+        ('u', &["u"]),
+        ('i', &["i"]),
+        ('o', &["uo", "o"]),
+        ('p', &["iao"]),
+        ('a', &["a"]),
+        ('s', &["ou"]),
+        ('d', &["ao"]),
+        ('f', &["eng"]),
+        ('g', &["uai", "ing"]),
+        ('h', &["ong", "iong"]),
+        ('j', &["an"]),
+        ('k', &["en", "ia"]),
+        ('l', &["ai", "ue"]),
+        ('z', &["un"]),
+        ('x', &["iang", "uang"]),
+        ('c', &["in"]),
+        ('v', &["ui", "v"]),
+        ('b', &["ve"]),
+        ('n', &["ian"]),
+        ('m', &["ei"]),
+    ],
+    zero_initials: SHOUDAO_ZERO_INITIALS,
     semicolon: false,
 };

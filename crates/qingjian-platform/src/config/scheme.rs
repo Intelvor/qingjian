@@ -1,4 +1,4 @@
-//! 拼音侧方案：全拼 / 双拼六套 / 大千注音 / 关。配置项 `[general] scheme` 的值。
+//! 拼音侧方案：全拼 / 双拼七套 / 大千注音 / 关。配置项 `[general] scheme` 的值。
 //!
 //! 「输入方案是配置项，不是模式」：中英切换始终是布尔，换方案不改变别的方案的既定按键行为。
 //!
@@ -18,7 +18,7 @@ pub enum Scheme {
     #[default]
     Pinyin,
 
-    /// 双拼，六套键位见 [`ShuangpinScheme`]。
+    /// 双拼，七套键位见 [`ShuangpinScheme`]。
     Shuangpin(ShuangpinScheme),
 
     /// 大千注音。
@@ -30,7 +30,7 @@ pub enum Scheme {
 
 impl Scheme {
     /// 全部方案，设置界面与状态条按这个顺序列。
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Pinyin,
         Self::Shuangpin(ShuangpinScheme::Xiaohe),
         Self::Shuangpin(ShuangpinScheme::Ziranma),
@@ -38,6 +38,7 @@ impl Scheme {
         Self::Shuangpin(ShuangpinScheme::Sogou),
         Self::Shuangpin(ShuangpinScheme::Abc),
         Self::Shuangpin(ShuangpinScheme::Xiaolang),
+        Self::Shuangpin(ShuangpinScheme::Shoudao),
         Self::Zhuyin,
         Self::Off,
     ];

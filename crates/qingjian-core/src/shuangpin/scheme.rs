@@ -28,17 +28,21 @@ pub enum Scheme {
 
     /// 小浪双拼。
     Xiaolang,
+
+    /// 首道双拼。
+    Shoudao,
 }
 
 impl Scheme {
     /// 全部方案，设置界面按这个顺序列出。
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Xiaohe,
         Self::Ziranma,
         Self::Microsoft,
         Self::Sogou,
         Self::Abc,
         Self::Xiaolang,
+        Self::Shoudao,
     ];
 
     /// 配置文件里的写法。`const`：设置界面要按方案列表建常量表（见 `qingjian_platform::Scheme`）。
@@ -50,6 +54,7 @@ impl Scheme {
             Self::Sogou => "sogou",
             Self::Abc => "abc",
             Self::Xiaolang => "xiaolang",
+            Self::Shoudao => "shoudao",
         }
     }
 
@@ -62,6 +67,7 @@ impl Scheme {
             Self::Sogou => "搜狗双拼",
             Self::Abc => "智能ABC",
             Self::Xiaolang => "小浪双拼",
+            Self::Shoudao => "首道双拼",
         }
     }
 
@@ -73,6 +79,7 @@ impl Scheme {
             Self::Sogou => &table::SOGOU,
             Self::Abc => &table::ABC,
             Self::Xiaolang => &table::XIAOLANG,
+            Self::Shoudao => &table::SHOUDAO,
         }
     }
 
@@ -193,7 +200,8 @@ impl Scheme {
             return Some(initial.to_owned());
         }
         match self {
-            Self::Xiaolang => match key {
+            // 小浪与首道的 `e` 键是翘舌声母，零声母 e 一族改用 `u` 引导
+            Self::Xiaolang | Self::Shoudao => match key {
                 'a' => Some("a".to_owned()),
                 'o' => Some("o".to_owned()),
                 'u' => Some("e".to_owned()),
@@ -238,6 +246,11 @@ mod tests {
                     .syllable(keys[0], keys[1])
                     .unwrap_or_else(|| panic!("{scheme}: {syllable} → {keys:?} 解不回"));
                 let expected = match *syllable {
+                    // 首道的 ue 与 üe 分在两个键：lue / nue 按 ue 键编出来撞上 lai / nai
+                    "lue" if scheme == Scheme::Shoudao => "lai",
+                    "nue" if scheme == Scheme::Shoudao => "nai",
+                    // 方案自带的同码：`dk` 是 den / dia，取键位图上排在前面的 en
+                    "dia" if scheme == Scheme::Shoudao => "den",
                     "lue" => "lve",
                     "nue" => "nve",
                     "lo" => "luo",
@@ -279,9 +292,16 @@ mod tests {
                         "{scheme}: {first}{second} 对应多个零声母音节"
                     );
                     if zero >= 1 {
+                        // 首道的 `en` `er` 以 sh 键开头，但 sh 配不出 ian / ie，仍然不撞
+                        let clash = scheme.initial(*first).is_some_and(|initial| {
+                            scheme
+                                .finals(*second)
+                                .iter()
+                                .any(|final_| parser::is_syllable(&format!("{initial}{final_}")))
+                        });
                         assert!(
-                            scheme.initial(*first).is_none(),
-                            "{scheme}: {first}{second} 既是零声母写法又能当声母开头"
+                            !clash,
+                            "{scheme}: {first}{second} 既是零声母写法又能拼成声母 + 韵母"
                         );
                     }
                 }
@@ -323,6 +343,15 @@ mod tests {
             (Scheme::Abc, "orqx", "er'qie"),
             (Scheme::Abc, "nvhl", "nv'hai"),
             (Scheme::Abc, "ohnv", "ang'nv"),
+            (Scheme::Shoudao, "nihd", "ni'hao"),
+            (Scheme::Shoudao, "vhgo", "zhong'guo"),
+            (Scheme::Shoudao, "expc", "shuang'pin"),
+            (Scheme::Shoudao, "xlxi", "xue'xi"),
+            (Scheme::Shoudao, "eiei", "shi'shi"),
+            (Scheme::Shoudao, "wlgo", "wai'guo"),
+            (Scheme::Shoudao, "erqr", "er'qie"),
+            (Scheme::Shoudao, "nvhl", "nv'hai"),
+            (Scheme::Shoudao, "lbjl", "lve'jue"),
             (Scheme::Xiaolang, "nihs", "ni'hao"),
             (Scheme::Xiaolang, "elgo", "zhong'guo"),
             (Scheme::Xiaolang, "vzpd", "shuang'pin"),
@@ -350,6 +379,17 @@ mod tests {
         assert_eq!(Scheme::Abc.decode("oe").pinyin(), "e");
         assert_eq!(Scheme::Abc.decode("aa").pinyin(), "zha");
         assert_eq!(Scheme::Abc.decode("ee").pinyin(), "che");
+        // 首道的 sh 在 e：e / ei / eng 用 u 引导，en / er 照全拼敲，ang 是 ay
+        assert_eq!(Scheme::Shoudao.decode("ue").pinyin(), "e");
+        assert_eq!(Scheme::Shoudao.decode("ui").pinyin(), "ei");
+        assert_eq!(Scheme::Shoudao.decode("uf").pinyin(), "eng");
+        assert_eq!(Scheme::Shoudao.decode("en").pinyin(), "en");
+        assert_eq!(Scheme::Shoudao.decode("er").pinyin(), "er");
+        assert_eq!(Scheme::Shoudao.decode("ay").pinyin(), "ang");
+        assert_eq!(Scheme::Shoudao.decode("ek").pinyin(), "shen");
+        assert_eq!(Scheme::Shoudao.decode("jl").pinyin(), "jue");
+        assert_eq!(Scheme::Shoudao.decode("ll").pinyin(), "lai");
+        assert_eq!(Scheme::Shoudao.decode("lb").pinyin(), "lve");
     }
 
     #[test]
@@ -367,6 +407,8 @@ mod tests {
         assert_eq!(Scheme::Abc.decode("e").pinyin(), "ch");
         assert_eq!(Scheme::Abc.decode("v").pinyin(), "sh");
         assert_eq!(Scheme::Abc.decode("o").pinyin(), "o");
+        assert_eq!(Scheme::Shoudao.decode("e").pinyin(), "sh");
+        assert_eq!(Scheme::Shoudao.decode("u").pinyin(), "e");
         // `;` 落单不是任何东西
         assert_eq!(Scheme::Microsoft.decode(";").pinyin(), "");
         assert_eq!(Scheme::Microsoft.decode(";").tail(), ";");

@@ -27,6 +27,7 @@ pub(crate) const SCHEMES: [(&str, &str); Scheme::ALL.len()] = [
     (Scheme::ALL[6].label(), Scheme::ALL[6].key()),
     (Scheme::ALL[7].label(), Scheme::ALL[7].key()),
     (Scheme::ALL[8].label(), Scheme::ALL[8].key()),
+    (Scheme::ALL[9].label(), Scheme::ALL[9].key()),
 ];
 
 pub(crate) fn string_combo(

@@ -84,7 +84,7 @@ pub struct GeneralConfig {
     /// 英文模式下的同一件事，中英各记一份；缺省半角。只有 Windows 用（macOS 英文模式一律半角）。
     pub english_full_width_punctuation: bool,
 
-    /// 拼音侧方案：`pinyin`（全拼，缺省）/ `xiaohe` / `ziranma` / `microsoft` / `sogou` / `xiaolang` / `zhuyin`
+    /// 拼音侧方案：`pinyin`（全拼，缺省）/ `xiaohe` / `ziranma` / `microsoft` / `sogou` / `abc` / `xiaolang` / `shoudao` / `zhuyin`
     /// / `none`（关，只用形码），见 [`Scheme`]。用不认识的写法时按全拼并警告。
     /// 缺省是空串：文件里没写这一项时要去看旧键，见 [`Self::scheme`]。
     pub scheme: String,
