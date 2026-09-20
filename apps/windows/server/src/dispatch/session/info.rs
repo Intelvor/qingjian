@@ -30,4 +30,8 @@ pub(crate) struct SessionInfo {
     /// 该会话最近报来的 Caps Lock 状态（`ModeChanged` 一起带过来）：状态条的模式格前面加个「A」。
     /// 老 DLL 不带这个字段（升级后没重启的应用），按灭处理。
     pub(crate) caps: bool,
+
+    /// DLL 报来的协议版本。比 Server 低的（应用还没重启、加载着旧 DLL）要按老协议发帧，
+    /// 见 composed 里的 downgrade_for_old_dll。
+    pub(crate) protocol: u32,
 }

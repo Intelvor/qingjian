@@ -8,7 +8,7 @@ use qingjian_dictionary::{Dictionary, import};
 use qingjian_platform::Config;
 
 use super::CONFIG_POLL_INTERVAL;
-use crate::dispatch::{Router, RouterConfig};
+use crate::dispatch::{DataDirs, Router, RouterConfig};
 
 fn poll(router: &mut Router) {
     router.reload.as_mut().unwrap().last_check = Instant::now() - CONFIG_POLL_INTERVAL;
@@ -33,7 +33,10 @@ fn import_replace_and_remove_without_config_changes() {
     let config = Config::load(&config_path).unwrap();
     let original_config = std::fs::read(&config_path).unwrap();
     let mut router = Router::new(Engine::new(Dictionary::default()), RouterConfig::default());
-    router.watch_config(&config, config_path.clone(), dir.clone(), Some(dir.clone()));
+    router.watch_config(&config, config_path.clone(), dir.clone(), DataDirs {
+            user_root: Some(dir.clone()),
+            ..DataDirs::default()
+        },);
 
     let source = dir.join("law.dict.yaml");
     std::fs::write(&source, "---\nname: law\n...\n合同法\the tong fa\t120\n").unwrap();
@@ -104,7 +107,10 @@ fn dictionary_changes_do_not_retry_broken_config() {
         Engine::new(Dictionary::default()),
         RouterConfig::from(&config),
     );
-    router.watch_config(&config, config_path.clone(), dir.clone(), Some(dir.clone()));
+    router.watch_config(&config, config_path.clone(), dir.clone(), DataDirs {
+            user_root: Some(dir.clone()),
+            ..DataDirs::default()
+        },);
 
     std::fs::write(&config_path, "[broken").unwrap();
     modified_at(&config_path, 200);
@@ -155,7 +161,10 @@ fn forget_requests_drop_personal_words() {
     let learner = qingjian_learning::FrequencyLearner::from_path(dir.join("user.tsv")).unwrap();
     let engine = Engine::new(Dictionary::default()).with_learner(Box::new(learner));
     let mut router = Router::new(engine, RouterConfig::default());
-    router.watch_config(&config, config_path, dir.clone(), Some(dir.clone()));
+    router.watch_config(&config, config_path, dir.clone(), DataDirs {
+            user_root: Some(dir.clone()),
+            ..DataDirs::default()
+        },);
 
     let requests = qingjian_platform::dirs::forget_requests_path(&dir);
     // 首行带 UTF-8 BOM（别的工具写这个文件时会加）：BOM 不能把第一个词带歪，否则「删不掉但文件被清掉」。
@@ -187,7 +196,10 @@ fn forget_requests_drop_personal_english_words() {
     let learner = qingjian_learning::FrequencyLearner::from_path(dir.join("user.tsv")).unwrap();
     let engine = Engine::new(Dictionary::default()).with_learner(Box::new(learner));
     let mut router = Router::new(engine, RouterConfig::default());
-    router.watch_config(&config, config_path, dir.clone(), Some(dir.clone()));
+    router.watch_config(&config, config_path, dir.clone(), DataDirs {
+            user_root: Some(dir.clone()),
+            ..DataDirs::default()
+        },);
 
     let requests = qingjian_platform::dirs::forget_requests_path(&dir);
     std::fs::write(&requests, "javashiyimenbianchengyuyan\n").unwrap();

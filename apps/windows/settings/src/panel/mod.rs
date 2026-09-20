@@ -6,7 +6,9 @@ mod cloud_status;
 mod component;
 mod controls;
 mod message;
+mod notice;
 mod pages;
+mod recorder;
 
 use std::path::{Path, PathBuf};
 
@@ -15,10 +17,12 @@ use windows_reactor::*;
 
 use self::cloud_status::CloudStatus;
 pub(crate) use self::message::Message;
+use self::notice::Notice;
 use self::pages::{
-    about, advanced, candidates, cloud, dictionaries, fuzzy, general, guide, shortcut, typing,
-    usage,
+    about, advanced, aux_code, candidates, cloud, dictionaries, fuzzy, general, guide, shortcut,
+    typing, usage,
 };
+use self::recorder::Recorder;
 
 /// 左侧标签固定宽度，让各行控件对齐。
 const LABEL_WIDTH: f64 = 140.0;
@@ -36,6 +40,16 @@ pub(crate) struct Settings {
 
     /// 云服务「测试连接」的状态。
     cloud_status: CloudStatus,
+
+    /// 「辅码」页的触发键录制状态。
+    recorder: Recorder,
+
+    /// 触发键录制框（密码框：不走输入法，按 A–Z 直接进字符、不弹输入法候选窗）：
+    /// 进了录制态把焦点交给它，用户不用再点一下。
+    record_box: ElementRef<PasswordBox>,
+
+    /// 页面底部的临时提示（导入统计 / 失败原因）。
+    notice: Notice,
 
     /// 最近一次词库操作的结果，显示在词库页。
     dictionary_status: String,
@@ -107,6 +121,7 @@ impl Settings {
             "cloud" => cloud::view(self, context),
             "fuzzy" => fuzzy::view(self, context),
             "dictionaries" => dictionaries::view(self, context),
+            "aux_code" => aux_code::view(self, context),
             "usage" => usage::view(self, context),
             "guide" => guide::view(self, context),
             "advanced" => advanced::view(self, context),

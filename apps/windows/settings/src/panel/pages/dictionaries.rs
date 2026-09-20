@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use qingjian_platform::extra_dictionaries;
 use windows_reactor::*;
 
-use crate::panel::controls::{note, page, repo_resource};
+use crate::panel::controls::{check_row, entry_title, note, page, repo_resource};
 use crate::panel::{Message, Settings};
 
 /// 个人词文件名（`%APPDATA%\Qingjian\user-words.tsv`），与 `qingjian-learning` 里那个常量一致。
@@ -97,7 +97,7 @@ fn bundled_list(settings: &Settings, context: &mut ViewContext<Settings>) -> Vie
         let (label, broken) = row_label(&path, &stem, true);
         let enabled = settings.config.dictionaries.is_domain_enabled(&stem);
         let for_msg = stem.clone();
-        rows.push(dict_row(
+        rows.push(check_row(
             &stem,
             label,
             enabled,
@@ -124,7 +124,7 @@ fn user_list(settings: &Settings, context: &mut ViewContext<Settings>) -> View {
         let enabled = settings.config.dictionaries.is_enabled(&stem);
         let for_msg = stem.clone();
         let remove = Message::RemoveUserDict(stem.clone());
-        rows.push(dict_row(
+        rows.push(check_row(
             &stem,
             label,
             enabled,

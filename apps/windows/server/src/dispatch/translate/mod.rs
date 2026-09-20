@@ -49,7 +49,7 @@ impl Router {
         self.translation = Some(Translation { result: None });
         self.engine.request_translation(text);
         tracing::debug!(chars = text.chars().count(), "翻译选中文字：已发翻译请求");
-        let frame = self.current_frame();
+        let frame = self.self_drawn_frame();
         self.reconcile_candidates(&frame);
         empty
     }
@@ -109,7 +109,7 @@ impl Router {
             page_count: 1,
             layout: self.config.layout,
             theme: self.config.theme,
-            aux_code_show: false,
+            aux_code_show: self.config.aux_code_show,
             sentence: None,
             // 翻译自己用「翻译中…」那条候选表示进度，不用整句那个占位。
             sentence_pending: false,
@@ -126,7 +126,6 @@ fn translate_candidate(text: String) -> Candidate {
         syllables: Vec::new(),
         reading: None,
         translation: None,
-        // 编译臂：译文候选没有辅码
         aux_code: None,
     }
 }

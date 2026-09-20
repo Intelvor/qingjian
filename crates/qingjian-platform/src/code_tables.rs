@@ -30,6 +30,18 @@ pub fn list(dir: &Path) -> Vec<(String, PathBuf)> {
     files
 }
 
+/// 可加载码表的快照：用于发现新增、移除与同名更新，不读取码表正文。
+/// 逐文件比 (mtime, 长度)：半拷进来的 `.qj`（写完长度才稳定）与就地改写都能被发现。
+pub fn snapshot(dir: &Path) -> Vec<(PathBuf, Option<std::time::SystemTime>, u64)> {
+    list(dir)
+        .into_iter()
+        .filter_map(|(_, path)| {
+            let metadata = std::fs::metadata(&path).ok()?;
+            Some((path, metadata.modified().ok(), metadata.len()))
+        })
+        .collect()
+}
+
 /// 加载没被关掉的码表：先随包，再用户目录。坏文件只记日志、跳过：一张码表坏了不能拖垮输入法。
 pub fn load(
     bundled_dir: Option<&Path>,

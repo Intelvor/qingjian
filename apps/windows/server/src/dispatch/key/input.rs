@@ -105,7 +105,12 @@ impl Router {
                 Effect::Changed(None)
             }
             codes::ESCAPE => {
-                self.engine.clear();
+                // 辅码态里 Esc 只清码段、拼音留着（与 Core 的 clear_aux 语义一致）
+                if self.engine.in_aux() {
+                    self.engine.clear_aux();
+                } else {
+                    self.engine.clear();
+                }
                 Effect::Changed(None)
             }
             codes::RETURN => {
@@ -169,7 +174,22 @@ impl Router {
     /// 配 `[general] shift_letter = "compose"` 时大写也收进缓冲区（Core 按小写匹配、原样上屏时还原大小写）。
     /// 没在组句时的其他字符走全角标点（与 macOS 壳一致，组句中的标点仍进英文直输段）。
     fn apply_chinese(&mut self, c: char, event: &KeyEvent) -> Effect {
-        if c.is_ascii_lowercase() || (c.is_ascii_uppercase() && self.config.shift_letter_compose) {
+        // 注音模式下数字与 `- ; , . /` 就是键盘上的音节键，跟着进缓冲区。
+        let is_zhuyin_key = self.engine.is_zhuyin_mode()
+            && (c.is_ascii_digit() || matches!(c, '-' | ';' | ',' | '.' | '/'));
+        if c.is_ascii_lowercase()
+            || is_zhuyin_key
+            || (c.is_ascii_uppercase() && self.config.shift_letter_compose)
+        {
+            // 辅码态：字母进码段（逐键即筛），不进拼音缓冲区
+            if c.is_ascii_lowercase() && self.engine.push_aux_code(c) {
+                return Effect::Changed(None);
+            }
+            // 大写（shift_letter_compose）落在辅码态：先清码段回拼音态（与 Esc 同语义）再收进缓冲区；
+            // 码段不清会挂在已变化的缓冲区上继续筛
+            if c.is_ascii_uppercase() && self.engine.in_aux() {
+                self.engine.clear_aux();
+            }
             self.engine.push(c);
             return Effect::Changed(None);
         }
@@ -279,6 +299,20 @@ impl Router {
                 return Effect::Changed(None);
             }
         }
+        // 辅码触发键：拼音打完整了、这个键也没被键盘方案吃掉 → 进辅码态（触发键不进缓冲区）
+        if self.engine.aux_trigger(c) {
+            self.engine.enter_aux();
+            return Effect::Changed(None);
+        }
+        // 边界 14：已经在辅码态里再敲触发键是幂等的，既不上屏候选也不当标点
+        if self.engine.in_aux() && c == self.config.aux_code_key {
+            return Effect::Changed(None);
+        }
+        // 码段筛空（例如码敲错一个字母）：空格 / 标点 / 数字都不上屏原始拼音，吞掉停在辅码态等退格
+        if self.engine.in_aux() && !self.engine.aux_code().is_empty() && self.candidate_count() == 0
+        {
+            return Effect::Changed(None);
+        }
         if let Some(digit) = codes::digit(event)
             && (!self.engine.is_zhuyin_mode() || self.navigated)
         {
@@ -301,8 +335,9 @@ impl Router {
             }
             return Effect::Changed(Some(self.commit_highlighted()));
         }
-        // 表达式 / 问字模式下的其他字符不进缓冲区（与 macOS 壳一致）：先把高亮候选上屏，再按没在组句处理这个键。
-        if c != '\'' && (expression || self.engine.question_mode()) {
+        // 表达式 / 问字模式下的其他字符不进缓冲区（与 macOS 壳一致），辅码态里敲标点同理（码段随之清空）：
+        // 都是先把高亮候选上屏，再按没在组句处理这个键、标点按组句外语义转全角
+        if (c != '\'' && (expression || self.engine.question_mode())) || self.engine.in_aux() {
             let committed = self.commit_highlighted();
             let effect = self.apply_punctuation(c, event);
             return with_prefix(Some(committed), effect, c);

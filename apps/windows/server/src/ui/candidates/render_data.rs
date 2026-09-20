@@ -43,6 +43,9 @@ pub(crate) struct RenderData {
 
     /// 外观模式；`System` 由窗口按系统主题解析。
     pub(super) theme_mode: ThemeMode,
+
+    /// 候选上是否显示辅码（随帧下发的 `[general] aux_code_show`）。
+    pub(super) show_code: bool,
 }
 
 impl RenderData {
@@ -59,12 +62,14 @@ impl RenderData {
             notice: None,
             layout: LayoutMode::default(),
             theme_mode: ThemeMode::default(),
+            show_code: false,
         }
     }
 
     pub(super) fn set(&mut self, frame: &Frame) {
         self.layout = frame.layout;
         self.theme_mode = frame.theme;
+        self.show_code = frame.aux_code_show;
         self.preedit = window_preedit(frame);
         self.cursor = frame.cursor;
         self.rows = frame
@@ -72,7 +77,7 @@ impl RenderData {
             .items
             .iter()
             .enumerate()
-            .map(|(i, candidate)| row::from_candidate(i, candidate))
+            .map(|(i, candidate)| row::from_candidate(i, candidate, self.show_code))
             .collect();
         self.highlight = frame.highlight;
         self.footer =
@@ -95,7 +100,6 @@ impl RenderData {
                         PreeditKind::Typed => PreeditStyle::Typed,
                         PreeditKind::Rest => PreeditStyle::Rest,
                         PreeditKind::Corrected => PreeditStyle::Struck,
-                        // 编译臂：码段淡色 + 下划线（渲染器已带该样式；壳的完整接线随后）
                         PreeditKind::AuxCode => PreeditStyle::AuxCode,
                     },
                 })

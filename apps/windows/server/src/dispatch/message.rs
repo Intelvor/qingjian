@@ -48,6 +48,7 @@ impl Router {
                         surrounding_after: None,
                         // Caps 等 DLL 激活时那条 ModeChanged 报来。
                         caps: false,
+                        protocol,
                     },
                 );
                 // 按键行为设置回一次，让 DLL 不必自己读配置文件。**只回给会读这条回包的 DLL**：
@@ -173,13 +174,14 @@ impl Router {
             KeyOutcome::Passthrough => commit,
         };
         self.poll_prediction();
-        let frame = self.current_frame();
-        self.reconcile_candidates(&frame);
+        // 自绘窗吃未降级的帧；发给 DLL 的那份按老协议降级（见 composed 的 current_frame）
+        let shown = self.self_drawn_frame();
+        self.reconcile_candidates(&shown);
         ServerMessage::KeyResult {
             session,
             outcome,
             commit,
-            frame,
+            frame: self.current_frame(),
         }
     }
 
@@ -192,9 +194,9 @@ impl Router {
         }
         let frame = if self.focused == Some(session) {
             self.poll_prediction();
-            let frame = self.current_frame();
-            self.reconcile_candidates(&frame);
-            frame
+            let shown = self.self_drawn_frame();
+            self.reconcile_candidates(&shown);
+            self.current_frame()
         } else {
             Frame::default()
         };

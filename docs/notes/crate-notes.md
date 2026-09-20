@@ -219,7 +219,7 @@ IMK 输入法，源码按 `app / host / imk / candidates / menubar / preferences
 外加 `settings`（WinUI 3 设置程序，含「辅码」页）与 `installer`（Inno Setup）。
 Server 侧辅码接线：`RouterConfig.aux_code_key` / `aux_code_show`（`apply_config` 热加载）、`assembly` 从随包 `codes/` 与用户 `codes/` 装码表
 （`[aux_code] disabled` 过滤，`code_tables::load`）、按键在 `dispatch/key/input.rs` 分流（触发键进辅码态、辅码态里字母进码段、
-标点先上屏高亮候选再转全角）、候选窗 `ui/candidates/row.rs` 的 `Tone::Code` 把码拼在译文之前，拼音行 `view.rs` 给码段加下划线。
+大写（`shift_letter = "compose"`）先清码段回拼音态再进缓冲区、标点先上屏高亮候选再转全角）、候选窗 `ui/candidates/row.rs` 的 `Tone::Code` 把码拼在译文之前，拼音行 `view.rs` 给码段加下划线。
 热加载的 `dicts/` 与 `codes/` 目录与启动同款（修过一处传基础目录的错）。不合成一个 crate，因为 DLL 不能带 Engine 的依赖树，见 `apps/windows/README.md`；
 协议类型在 `qingjian-platform::protocol`，设计见 `docs/design/architecture.md`「Windows：TSF」。
 输入方案由 `[general] scheme` 一处决定，Server 启动与热加载各装配一次；形码的码表用 `dispatch::code::find_code_table` 找

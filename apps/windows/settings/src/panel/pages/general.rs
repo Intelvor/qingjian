@@ -4,7 +4,7 @@
 use qingjian_platform::{MAX_PAGE_SIZE, Scheme};
 use windows_reactor::*;
 
-use crate::panel::controls::{field, index_of, page};
+use crate::panel::controls::{feedback, field, index_of, page};
 use crate::panel::{Message, Settings};
 
 /// 学习语言：界面名 + 配置写法。

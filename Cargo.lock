@@ -2726,6 +2726,7 @@ version = "1.1.1-dev"
 dependencies = [
  "jiff",
  "qingjian-core",
+ "qingjian-dictionary",
  "qingjian-learning",
  "qingjian-platform",
  "qingjian-predict",
