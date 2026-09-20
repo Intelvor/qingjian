@@ -44,7 +44,7 @@ impl ConnectionTest {
                         reply = %report.reply,
                         "云服务连通性测试成功"
                     ),
-                    Err(error) => tracing::warn!(%error, "云服务连通性测试失败"),
+                    Err(error) => tracing::warn!(error = ?error, "云服务连通性测试失败"),
                 }
                 // 收的一方不在了（窗口关了、又点了一次）就算了
                 let _ = sender.send(outcome);

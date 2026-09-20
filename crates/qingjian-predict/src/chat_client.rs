@@ -5,8 +5,8 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use async_openai::types::chat::{
     ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
-    ChatCompletionRequestUserMessage, CreateChatCompletionRequestArgs, ReasoningEffort,
-    ResponseFormat,
+    ChatCompletionRequestUserMessage, CreateChatCompletionRequestArgs,
+    CreateChatCompletionResponse, FinishReason, ReasoningEffort, ResponseFormat,
 };
 use qingjian_core::PredictionRequest;
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -41,6 +41,9 @@ pub struct ChatClient {
 
     /// 推理强度；`None` 表示不发这个参数。
     reasoning_effort: Option<ReasoningEffort>,
+
+    /// 接口关思考用的是哪种参数（按接口地址定）。
+    thinking_switch: ThinkingSwitch,
 }
 
 impl ChatClient {
@@ -53,6 +56,7 @@ impl ChatClient {
             model: config.model.clone(),
             timeout: Duration::from_millis(config.timeout_ms),
             reasoning_effort: parse_reasoning_effort(&config.reasoning_effort),
+            thinking_switch: ThinkingSwitch::for_url(&config.base_url),
         }
     }
 
@@ -85,10 +89,19 @@ impl ChatClient {
         if let Some(effort) = self.reasoning_effort.clone() {
             args.reasoning_effort(effort);
         }
-        let body = args.build()?;
-        let response = tokio::time::timeout(self.timeout, self.client.chat().create(body))
-            .await
-            .map_err(|_| PredictError::Timeout(self.timeout.as_millis() as u64))??;
+        let mut body = serde_json::to_value(args.build()?)?;
+        if matches!(self.reasoning_effort, Some(ReasoningEffort::None)) {
+            self.thinking_switch.disable(&mut body);
+        }
+        let raw: serde_json::Value =
+            tokio::time::timeout(self.timeout, self.client.chat().create_byot(body))
+                .await
+                .map_err(|_| PredictError::Timeout(self.timeout.as_millis() as u64))??;
+        let response: CreateChatCompletionResponse = serde_json::from_value(raw.clone())?;
+        let cut_off = response
+            .choices
+            .iter()
+            .any(|choice| choice.finish_reason == Some(FinishReason::Length));
         let content = response
             .choices
             .into_iter()
@@ -96,10 +109,71 @@ impl ChatClient {
                 |choice| tracing::debug!(finish_reason = ?choice.finish_reason, "联想回复结束原因"),
             )
             .find_map(|choice| choice.message.content.filter(|c| !c.trim().is_empty()))
-            .ok_or(PredictError::EmptyReply)?;
+            .ok_or_else(|| {
+                // 正文为空时原因五花八门（思考占满额度、模型名不对、接口字段不标准），留下原始响应才查得了
+                tracing::warn!(model = %self.model, response = %truncated(&raw), "接口回复里没有正文");
+                if cut_off {
+                    PredictError::BudgetExhausted
+                } else {
+                    PredictError::EmptyReply
+                }
+            })?;
         tracing::debug!(%content, "模型回复");
         Ok(content)
     }
+}
+
+/// 日志里的原始响应最多留这么多字符。
+const LOGGED_RESPONSE_CHARS: usize = 2000;
+
+fn truncated(response: &serde_json::Value) -> String {
+    let text = response.to_string();
+    match text.char_indices().nth(LOGGED_RESPONSE_CHARS) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text,
+    }
+}
+
+/// 各家关思考的参数不一样，严格的接口遇到不认识的参数会报 400，所以按接口地址只发对的那个。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThinkingSwitch {
+    /// OpenAI 一系：`reasoning_effort: "none"`，请求里已经带了。
+    ReasoningEffort,
+
+    /// 智谱（`bigmodel.cn` / `z.ai`）：`thinking: {"type": "disabled"}`，不认 `reasoning_effort`。
+    ThinkingType,
+}
+
+impl ThinkingSwitch {
+    fn for_url(base_url: &str) -> Self {
+        let host = host_of(base_url).unwrap_or_default();
+        let zhipu = ["bigmodel.cn", "z.ai"]
+            .iter()
+            .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")));
+        if zhipu {
+            Self::ThinkingType
+        } else {
+            Self::ReasoningEffort
+        }
+    }
+
+    /// 把请求体改成这家接口关思考的写法。
+    fn disable(self, body: &mut serde_json::Value) {
+        let (Self::ThinkingType, Some(fields)) = (self, body.as_object_mut()) else {
+            return;
+        };
+        fields.remove("reasoning_effort");
+        fields.insert(
+            "thinking".to_owned(),
+            serde_json::json!({ "type": "disabled" }),
+        );
+    }
+}
+
+fn host_of(base_url: &str) -> Option<String> {
+    reqwest::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
 }
 
 /// 按接口地址决定 HTTP 客户端：OpenCode 带上它要求的会话头，其他服务用默认客户端。
@@ -121,10 +195,7 @@ fn http_client(base_url: &str) -> reqwest::Client {
 
 /// 接口地址是否指向 OpenCode（`opencode.ai` 及其子域）。
 fn is_opencode(base_url: &str) -> bool {
-    reqwest::Url::parse(base_url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
-        .is_some_and(|host| host == "opencode.ai" || host.ends_with(".opencode.ai"))
+    host_of(base_url).is_some_and(|host| host == "opencode.ai" || host.ends_with(".opencode.ai"))
 }
 
 /// 配置里的推理强度字符串转成接口枚举；留空不发，认不得的值当留空并记一条警告。
@@ -160,6 +231,27 @@ mod tests {
         ));
         assert!(parse_reasoning_effort("").is_none());
         assert!(parse_reasoning_effort("maximum").is_none());
+    }
+
+    #[test]
+    fn zhipu_hosts_disable_thinking_with_their_own_field() {
+        let mut body = serde_json::json!({ "model": "glm", "reasoning_effort": "none" });
+        ThinkingSwitch::for_url("https://open.bigmodel.cn/api/paas/v4").disable(&mut body);
+        assert_eq!(body["thinking"]["type"], "disabled");
+        assert!(body.get("reasoning_effort").is_none());
+        assert_eq!(
+            ThinkingSwitch::for_url("https://api.z.ai/api/paas/v4"),
+            ThinkingSwitch::ThinkingType
+        );
+
+        let mut body = serde_json::json!({ "model": "x", "reasoning_effort": "none" });
+        ThinkingSwitch::for_url("https://api.deepseek.com").disable(&mut body);
+        assert_eq!(body["reasoning_effort"], "none");
+        assert!(body.get("thinking").is_none());
+        assert_eq!(
+            ThinkingSwitch::for_url("https://example.com/bigmodel.cn"),
+            ThinkingSwitch::ReasoningEffort
+        );
     }
 
     #[test]

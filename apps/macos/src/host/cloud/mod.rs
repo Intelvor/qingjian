@@ -156,6 +156,10 @@ pub(super) fn describe_predict_error(error: &PredictError) -> String {
             format!("{ms} ms 内没有回复。检查网络或代理：输入法进程不读终端里的代理变量")
         }
         PredictError::EmptyReply => "接口通了但没有返回正文，检查模型名是否正确".to_owned(),
+        PredictError::BudgetExhausted => {
+            "接口通了但正文是空的：模型开着思考，把输出额度用光了".to_owned()
+        }
+        PredictError::Encode(error) => format!("请求编码失败：{error}"),
         PredictError::Runtime(error) => format!("起不了后台线程：{error}"),
         PredictError::Api(error) => format!("请求失败：{error}"),
     }
