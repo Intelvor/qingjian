@@ -104,7 +104,9 @@ fn init_logging(config: &Config) -> Option<tracing_appender::non_blocking::Worke
                 .max_log_files(7)
                 .build(&dir)
                 .expect("构建滚动日志文件");
-            let (writer, guard) = tracing_appender::non_blocking(appender);
+            let (writer, guard) = tracing_appender::non_blocking(
+                qingjian_platform::logs::secrets::MaskingWriter::new(appender),
+            );
             tracing_subscriber::fmt()
                 .with_env_filter(filter)
                 .with_ansi(false)

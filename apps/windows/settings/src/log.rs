@@ -45,8 +45,9 @@ fn write(level: &str, message: &str) {
     };
     let _ = writeln!(
         file,
-        "{} {level} [pid {}] {message}",
+        "{} {level} [pid {}] {}",
         now.strftime("%Y-%m-%d %H:%M:%S%.3f"),
-        std::process::id()
+        std::process::id(),
+        qingjian_platform::logs::secrets::mask(message)
     );
 }

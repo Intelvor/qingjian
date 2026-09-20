@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use qingjian_platform::LogLevel;
+use qingjian_platform::logs::secrets::MaskingWriter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -34,7 +35,7 @@ pub fn init() -> Option<WorkerGuard> {
     let dir = log_dir()?;
     std::fs::create_dir_all(&dir).ok()?;
     prune(&dir, jiff::Zoned::now().date());
-    let (writer, guard) = tracing_appender::non_blocking(LogFile::new(dir));
+    let (writer, guard) = tracing_appender::non_blocking(MaskingWriter::new(LogFile::new(dir)));
     let from_env = EnvFilter::try_from_default_env().ok();
     ENV_OVERRIDE.store(from_env.is_some(), Ordering::Relaxed);
     let (filter, handle) =

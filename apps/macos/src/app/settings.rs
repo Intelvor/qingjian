@@ -112,6 +112,8 @@ impl Settings {
             tracing::warn!("没有配置目录，密钥无处可存");
             return false;
         };
+        // 先登记再动文件：后面哪一步失败，日志里都不会出现这个值
+        qingjian_platform::logs::secrets::register(value);
         let env_file = path.with_file_name(".env");
         let existing = std::fs::read_to_string(&env_file).unwrap_or_default();
         let prefix = format!("{name}=");

@@ -422,10 +422,15 @@ impl Config {
                 });
             }
         };
-        toml::from_str(&source).map_err(|source| ConfigError::Parse {
+        let config: Self = toml::from_str(&source).map_err(|source| ConfigError::Parse {
             path: path.to_owned(),
             source: Box::new(source),
-        })
+        })?;
+        // 配置或环境变量里的密钥登记给日志掩码；各进程都从这里加载配置，登记在这一处就够
+        if let Some(key) = config.predict.resolve_api_key() {
+            crate::logs::secrets::register(&key);
+        }
+        Ok(config)
     }
 
     /// 原地改一个布尔键，见 [`Self::set_value`]。
