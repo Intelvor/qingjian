@@ -244,6 +244,8 @@ impl Router {
                 layout: self.config.layout,
                 theme: self.config.theme,
                 // 敲了续写键再按 Tab 时也走这里：没有候选可显示，但整句那一段要有地方摆。
+                // aux_code_show：随帧下发的「候选上显示码」开关，配置接线在后续 PR。
+                aux_code_show: false,
                 sentence: self.sentence.clone(),
                 sentence_pending: sentence_pending && self.sentence.is_none(),
                 notice: self.notice.clone(),
@@ -273,6 +275,7 @@ impl Router {
                     page_count: layout.pages().max(1),
                     layout: self.config.layout,
                     theme: self.config.theme,
+                    aux_code_show: false,
                     sentence: self.sentence.clone(),
                     sentence_pending: sentence_pending && self.sentence.is_none(),
                     notice: self.notice.clone(),

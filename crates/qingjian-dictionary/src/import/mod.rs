@@ -80,7 +80,7 @@ fn stem_of(source: &Path) -> Result<String, DictionaryError> {
 }
 
 /// `law.dict.yaml` → `law`，`dict.tsv` → `dict`。
-fn strip_extensions(file_name: &str) -> String {
+pub(crate) fn strip_extensions(file_name: &str) -> String {
     let mut stem = file_name;
     for suffix in [".dict.yaml", ".yaml", ".yml", ".tsv", ".txt", ".qj"] {
         if let Some(s) = stem.strip_suffix(suffix) {

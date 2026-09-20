@@ -23,6 +23,7 @@ fn english_candidate(text: &str, syllables: Vec<String>) -> Candidate {
         syllables,
         reading: None,
         translation: None,
+        aux_code: None,
     }
 }
 
@@ -214,6 +215,7 @@ impl Engine {
                         syllables,
                         reading: None,
                         translation: None,
+                        aux_code: None,
                     });
                 }
                 self.lookup_pinyin_words(&after_lower, &mut extra);
@@ -327,6 +329,7 @@ impl Engine {
             syllables,
             reading: None,
             translation: None,
+            aux_code: None,
         })
     }
 
@@ -432,6 +435,7 @@ impl Engine {
             syllables: s.hit.syllables().map(str::to_owned).collect(),
             reading: None,
             translation: None,
+            aux_code: None,
         }));
     }
 }
