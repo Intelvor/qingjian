@@ -240,7 +240,7 @@ english_full_width_punctuation = false
 # 辅码触发键：拼音打完之后敲它进辅码态，之后敲的字母按码表缩小候选范围；缺省是分号
 # 单个可见字符，字母、数字与翻页键不能当触发键；微软 / 搜狗双拼里分号先当 ing 的韵母键
 aux_code_key = ";"
-# 候选上是否显示码（与译文拼成一条注记，如「鹤 rbm · crane」）。缺省关
+# 候选上是否显示码（方括号紧跟在候选词后面，如「鹤[rbm] crane」）。缺省关
 aux_code_show = false
 # 码段删空后是否留在辅码状态：true 删空后 ; 仍在、候选全部回来，再按一次退格才退出辅码；false 删空即回拼音状态
 aux_code_keep_empty = true

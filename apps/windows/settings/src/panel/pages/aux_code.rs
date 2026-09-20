@@ -134,7 +134,7 @@ pub(crate) fn view(settings: &Settings, context: &mut ViewContext<Settings>) -> 
         ),
         field(
             "候选上显示码",
-            "码与译文拼成一条注记，显示成「鹤 rbm · crane」。开着时不用进辅码：纯拼音打字候选也带词的码（首条），方便边打边记。",
+            "码用方括号紧跟在候选词后面，显示成「鹤[rbm] crane」。开着时不用进辅码：纯拼音打字候选也带词的码（首条），方便边打边记。",
             ToggleSwitch::new()
                 .is_on(settings.config.general.aux_code_show)
                 .on_toggled(context.callback(Message::AuxCodeShow)),
