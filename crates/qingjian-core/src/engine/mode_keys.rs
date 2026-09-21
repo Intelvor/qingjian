@@ -100,27 +100,28 @@ impl ModeKeys {
         }
     }
 
+    /// 是否以表达式键为**第一个字母**。只看首字母：`Cu` / `Cui` 里的 `u` 不是模式入口。
     pub fn is_expression(&self, input: &str, zhuyin: bool) -> bool {
-        input.starts_with(self.expression)
+        input.chars().next() == Some(self.expression)
             && (!zhuyin || crate::zhuyin::layout::map_key(self.expression).is_none())
     }
 
+    /// 是否以问字键为**第一个字母**（或开着时的 `?`）。只看首字母。
     pub fn is_question(&self, input: &str, zhuyin: bool) -> bool {
-        (input.starts_with(self.question)
+        (input.chars().next() == Some(self.question)
             && (!zhuyin || crate::zhuyin::layout::map_key(self.question).is_none()))
             || self.is_question_mark(input)
     }
 
-    /// 是否以续写键开头：敲它之后按 Tab 请云端按光标前后文续写，前缀不进拼音。
-    /// 跟表达式 / 问字一样，双拼与注音下那几个字母都是音节键，不让位。
+    /// 是否以续写键为**第一个字母**。只看首字母：`Cui` 里的 `i` 不是续写入口。
     pub fn is_continue(&self, input: &str, zhuyin: bool) -> bool {
-        input.starts_with(self.continue_key)
+        input.chars().next() == Some(self.continue_key)
             && (!zhuyin || crate::zhuyin::layout::map_key(self.continue_key).is_none())
     }
 
     /// 是否以 `?` 进的问字模式：开关关着时 `?` 不是入口。
     fn is_question_mark(&self, input: &str) -> bool {
-        self.question_mark && input.starts_with(QUESTION_PREFIX)
+        self.question_mark && input.chars().next() == Some(QUESTION_PREFIX)
     }
 
     /// 问字模式下前缀之后的部分。不在问字模式时原样返回。

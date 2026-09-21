@@ -160,54 +160,29 @@ impl Engine {
         }
     }
 
-    /// 普通拼音查询跑完后，合并 Shift 大写带来的英文与大写字面。
+    /// 普通拼音查询跑完后，合并 Shift 大写带来的英文候选（以及单段开头大写的「字母+拼音」写法）。
     ///
-    /// **多段大写（`CyuyanheAIbiancheng`）**：大写字母是英文，不参与拼音 ——
-    /// 普通路径查出来的中文 / 整句全部丢掉（否则 `c` 会读成「从」、整句还会脑补长句），
-    /// 只留英文与中英混排候选。
+    /// **模式键只看整段输入的第一个字母**；第二个及以后的字母按普通拼音处理，
+    /// **不再**因为前面有大写就把中文候选清掉（`Cui` / `Niu` 仍出催/牛）。
+    /// 大写字母本身仍可作英文候选；`Cpan` 这类「首字母大写 + 剩余拼音」额外拼出 `C盘`。
     pub(super) fn merge_shifted_extras(&self, items: &mut Vec<Candidate>, typed: &str) {
         let split = self.shifted_split(typed);
-        // 大写字母永不参与拼音：普通路径里**消耗到大写位置**的中文/整句一律丢掉
-        //（`Nihao` 的「你好」、`Cyuyanhe…` 的「从语言」都在这里被清掉）。
-        let scope = self.composition.scope();
-        let shifted: Vec<bool> = typed
-            .chars()
-            .zip(scope.chars())
-            .map(|(t, _)| t.is_ascii_uppercase())
-            .collect();
-        items.retain(|c| {
-            if !matches!(c.kind, CandidateKind::Chinese | CandidateKind::Sentence) {
-                return true;
-            }
-            let (consumed, _) = self.consumed_by(c);
-            let limit = scope[..consumed.min(scope.len())].chars().count();
-            !shifted.iter().take(limit).any(|s| *s)
-        });
-        let mixed = self.build_mixed_candidate(typed);
         if let Some(leading) = split.leading
             && !items.iter().any(|c| c.text == leading.text)
         {
             items.insert(0, leading);
         }
-        // 开头是单段大写、且剩余能切拼音（Cpan）：丢掉吃不掉前面大写字母的裸词
-        if !split.leading_upper.is_empty() {
-            let head = split.leading_upper.to_ascii_lowercase();
-            items.retain(|c| {
-                c.kind != CandidateKind::Chinese
-                    || c.syllables.first().map(String::as_str) == Some(head.as_str())
-            });
-        }
         let mut extra = Vec::new();
-        // 单段开头大写 + 剩余拼音：拼上大写字面（Cpan → C盘；Cyuyanhaoxuema → C语言好学吗）。
-        // 多段大写交给混排候选；剩余切不开（Nihao）则不出中文 —— 大写不参与拼音。
+        // 单段开头大写 + 剩余能切拼音：额外拼上大写字面（Cpan → C盘）。
+        // 多段大写交给混排候选；其余情况中文走普通拼音路径，不再按大写位置过滤。
+        let mixed = self.build_mixed_candidate(typed);
         if mixed.is_none() && !split.leading_upper.is_empty() {
             let after_lower: String = typed
                 .chars()
                 .skip_while(|c| c.is_ascii_uppercase())
                 .collect::<String>()
                 .to_ascii_lowercase();
-            if !after_lower.is_empty() {
-                // 整句读法（覆盖整段剩余拼音）排在前：`Cyuyanhaoxuema` → `C语言好学吗`
+            if !after_lower.is_empty() && parser::segment(&after_lower).is_ok() {
                 if let Some((text, syllables)) = self.sentence_for_pinyin(&after_lower) {
                     extra.push(Candidate {
                         text,
@@ -244,7 +219,6 @@ impl Engine {
                 items.push(cand);
             }
         }
-        // 中英混排候选排到最前（用户敲了大写，意图就是混排）
         if let Some(pos) = items.iter().position(|c| c.kind == CandidateKind::Mixed) {
             let mixed = items.remove(pos);
             items.insert(0, mixed);

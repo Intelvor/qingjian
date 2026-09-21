@@ -301,7 +301,7 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     assert_eq!(engine.take_raw(), "Cpan");
     assert!(engine.composition().is_empty());
 
-    // 句首大写不参与拼音：Nihao → 只出英文 N，不出「你好」
+    // 首字母做模式匹配；第二字母起按普通拼音（Nihao → 你好 + 英文 N）
     let dictionary = Dictionary::parse("你好\tni hao\t90000\n盘\tpan\t9000\n").unwrap();
     let mut engine = Engine::new(dictionary);
     engine.set_shift_letter_compose(true);
@@ -311,13 +311,14 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     }
     let texts = texts_of(&engine);
     assert!(
-        !texts.iter().any(|t| t == "你好"),
-        "句首大写不得参与拼音，Nihao 不该出你好，实际 {texts:?}"
+        texts.iter().any(|t| t == "你好"),
+        "第二字母起不做大写特殊处理，Nihao 应出你好，实际 {texts:?}"
     );
     assert!(
         texts.iter().any(|t| t == "N"),
         "应出大写字母本身作为英文候选，实际 {texts:?}"
     );
+    assert!(!engine.question_mode() && !engine.expression_mode());
     let n = engine
         .query()
         .unwrap()
@@ -327,7 +328,6 @@ fn shift_letters_join_the_buffer_only_when_configured() {
         .find(|c| c.text == "N")
         .expect("N")
         .clone();
-    // 只吃掉大写那一段，剩下的留给下一拍
     assert_eq!(engine.commit(&n), "N");
     assert_eq!(engine.composition().text(), "ihao");
 
@@ -388,8 +388,7 @@ fn shift_letters_join_the_buffer_only_when_configured() {
         "AI 之后的 biancheng 仍应参与切分（混排候选「我和AI编程」），实际 {texts:?}"
     );
 
-    // 用户实测串：CyuyanheAIbiancheng（注意有 y，不是 Cyuanhe…）
-    // 词典含 从/边城 干扰词：大写 C/AI 不参与拼音，这些都不该出现
+    // 混排候选仍可在前，但第二字母起的拼音中文不再被清掉
     let dictionary = Dictionary::parse(
         "语言\tyu yan\t50000\n和\the\t80000\n编程\tbian cheng\t30000\n\
          从\tcong\t90000\n边城\tbian cheng\t20000\n变成\tbian cheng\t15000\n\
@@ -411,13 +410,10 @@ fn shift_letters_join_the_buffer_only_when_configured() {
         q.marked_text()
     );
     assert!(
-        texts
-            .first()
-            .is_some_and(|t| t.starts_with('C') && t.contains("AI")),
-        "首选应是中英混排 C…AI…，实际 {texts:?}"
+        texts.iter().any(|t| t.starts_with('C') && t.contains("AI")),
+        "应保留中英混排 C…AI…，实际 {texts:?}"
     );
-    // 大写字母不参与拼音：不得出现「从语言」「边城」这类把 C/AI 读成拼音的结果
-    // 单段开头大写 + 长拼音：整句也要拼上大写字面（Cyuyanhaoxuema → C语言好学吗）
+    // 单段开头大写 + 长拼音：额外拼上大写字面；普通拼音中文也应还在
     let dictionary = Dictionary::parse(
         "语言\tyu yan\t90000\n好学\thao xue\t50000\n吗\tma\t80000\n好\thao\t90000\n学\txue\t70000\n",
     )
@@ -431,17 +427,13 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     let texts: Vec<&str> = q.candidates.items.iter().map(|c| c.text.as_str()).collect();
     assert!(
         texts.iter().any(|t| t.contains("语言")),
-        "至少应出「C语言…」，实际 {texts:?}"
+        "至少应出「C语言…」或拼音中文，实际 {texts:?}"
     );
     assert!(
         texts
             .iter()
             .any(|t| t.starts_with('C') && t.contains("好学")),
         "整句应拼上大写字面「C语言好学吗」，实际 {texts:?}"
-    );
-    assert!(
-        !texts.iter().any(|t| t.contains('从')),
-        "大写 C 不参与拼音，不该出「从」，实际 {texts:?}"
     );
     // 候选框的拼音行要有切分反馈（按音节加 `'`），并保留大写原样
     let marked = q.marked_text();
@@ -452,22 +444,24 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     );
 }
 
-/// `shift_letter = "compose"` 时 Shift+U/I/V 是大写字母（混排/英文），不是全拼下的模式键 u/i/v。
+/// `shift_letter = "compose"`：模式键只看首字母；第二字母起的 u/i/v 是普通拼音。
 #[test]
 fn shift_uiv_are_uppercase_letters_not_mode_keys() {
-    let dictionary = Dictionary::parse("盘\tpan\t9000\n你好\tni hao\t90000\n").unwrap();
+    let dictionary =
+        Dictionary::parse("盘\tpan\t9000\n你好\tni hao\t90000\n催\tcui\t8000\n牛\tniu\t9000\n")
+            .unwrap();
     let words = WordList::parse("I\t1\t5000\nU\t1\t4000\n").unwrap();
     let mut engine = Engine::new(dictionary).with_english(words);
     engine.set_shift_letter_compose(true);
 
-    // Shift+U 不是问字：Upan 应出「U盘」这类混排，而不是进 u 模式
+    // 首字母大写 U + 小写 pan：不进问字；第二字母起按拼音
     engine.push('U');
     for c in "pan".chars() {
         engine.push(c);
     }
     assert!(
         !engine.question_mode(),
-        "Shift+U 不得进问字模式，typed={:?}",
+        "首字母不是模式键就不得进问字，typed={:?}",
         engine.composition().typed_text()
     );
     let texts = texts_of(&engine);
@@ -477,43 +471,66 @@ fn shift_uiv_are_uppercase_letters_not_mode_keys() {
     );
     engine.clear();
 
-    // 单独 Shift+I 不是续写：出英文 I，不进 i 模式
-    engine.push('I');
+    // Cui：首字母 C 不是模式键，第二字母起 u/i 普通拼音 → 出「催」
+    engine.push('C');
+    for c in "ui".chars() {
+        engine.push(c);
+    }
     assert!(
-        !engine.question_mode() && !engine.expression_mode() && !engine.raw_mode(),
-        "单独 Shift+I 不得进任何前缀模式"
+        !engine.question_mode() && !engine.expression_mode(),
+        "Cui 不得进 u 模式"
     );
     let texts = texts_of(&engine);
     assert!(
-        texts.iter().any(|t| t == "I"),
-        "Shift+I 应出英文 I，实际 {texts:?}"
+        texts.iter().any(|t| t == "催"),
+        "Cui 应出拼音「催」，实际 {texts:?}"
     );
     engine.clear();
 
-    // Shift+V 不是表达式：不进 v 模式
+    // Niu：第二字母起是普通拼音 → 牛
+    engine.push('N');
+    for c in "iu".chars() {
+        engine.push(c);
+    }
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t == "牛"),
+        "Niu 应出拼音「牛」，实际 {texts:?}"
+    );
+    engine.clear();
+
+    // 单独 Shift+I / Shift+V：首字母模式匹配——全拼下大写 I/V 不是小写 i/v 模式键
+    engine.push('I');
+    assert!(
+        !engine.question_mode() && !engine.expression_mode(),
+        "Shift+I 首字母不得进模式"
+    );
+    let texts = texts_of(&engine);
+    assert!(texts.iter().any(|t| t == "I"), "应出英文 I，实际 {texts:?}");
+    engine.clear();
+
     engine.push('V');
     for c in "1+2".chars() {
         engine.push(c);
     }
-    assert!(
-        !engine.expression_mode(),
-        "Shift+V 不得进表达式模式，typed={:?}",
-        engine.composition().typed_text()
-    );
+    assert!(!engine.expression_mode(), "Shift+V 不得进表达式模式");
     engine.clear();
 
-    // 小写模式键照旧
+    // 小写模式键只在首字母生效
     engine.push('u');
-    assert!(engine.question_mode(), "小写 u 仍是问字入口");
+    assert!(engine.question_mode(), "首字母小写 u 仍是问字入口");
     engine.clear();
     engine.push('v');
     for c in "1+2".chars() {
         engine.push(c);
     }
-    assert!(engine.expression_mode(), "小写 v 仍是表达式入口");
+    assert!(engine.expression_mode(), "首字母小写 v 仍是表达式入口");
     engine.clear();
     engine.push('i');
-    assert!(engine.modes().is_continue("i", false), "小写 i 仍是续写键");
+    assert!(
+        engine.modes().is_continue("i", false),
+        "首字母小写 i 仍是续写键"
+    );
 }
 
 #[test]
