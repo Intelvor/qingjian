@@ -360,9 +360,12 @@ impl Engine {
             if rest.is_empty() {
                 continue;
             }
+            // 个人英文词表在前，次数往往很小（AI 选过 7 次）；门槛要按**各表里的最高词频**判，
+            // 否则产品表里 Zipf 4230 的 AI 会被个人表的 7 挡掉，`Aihenhaoyong` 拼不出「AI很好用」。
             let freq = lists
                 .iter()
-                .find_map(|words| words.frequency(&lower[..len]));
+                .filter_map(|words| words.frequency(&lower[..len]))
+                .max();
             if freq.is_none_or(|f| f < ENGLISH_FIRST_MIN_ZIPF) {
                 continue;
             }

@@ -580,6 +580,40 @@ fn single_capital_english_prefix_still_builds_mixed() {
             .any(|t| t.contains("你好") && t.starts_with('N')),
         "词表无 ni 英文前缀时 Nihao 不该出 N你好，实际 {texts:?}"
     );
+
+    // 个人英文词表在前且次数很低时，门槛仍要看产品表的词频（真机上 AI 只被选过 7 次）
+    #[derive(Default)]
+    struct LowFreqUserEnglish {
+        list: Option<WordList>,
+    }
+    impl crate::engine::Learner for LowFreqUserEnglish {
+        fn record(&mut self, _candidate: &Candidate) {}
+        fn weight(&self, _text: &str) -> u32 {
+            0
+        }
+        fn learn_english(&mut self, _word: &str) {}
+        fn user_english(&self) -> Option<&WordList> {
+            self.list.as_ref()
+        }
+    }
+    let dictionary = Dictionary::parse(
+        "很\then\t80000\n好\thao\t90000\n用\tyong\t70000\n很好用\then hao yong\t60000\n",
+    )
+    .unwrap();
+    let product = WordList::parse("AI\tai\t4230\n").unwrap();
+    let user = WordList::parse("AI\tai\t7\n").unwrap();
+    let mut engine = Engine::new(dictionary)
+        .with_english(product)
+        .with_learner(Box::new(LowFreqUserEnglish { list: Some(user) }));
+    engine.set_shift_letter_compose(true);
+    for c in "Aihenhaoyong".chars() {
+        engine.push(c);
+    }
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t == "AI很好用"),
+        "个人英文低词频不得挡住产品表里的 AI，实际 {texts:?}"
+    );
 }
 
 #[test]
