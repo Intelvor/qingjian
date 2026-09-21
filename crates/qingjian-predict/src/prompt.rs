@@ -33,20 +33,24 @@ pub const SYSTEM_PROMPT: &str = "\
 输出 JSON：{\"words\": [{\"text\": \"…\"}], \"sentence\": \"…\" 或 null}
 
 words（0 到 max_items 条，按可能性从高到低）：
-- 按 letters 推断用户想打什么：他敲的可能是错拼、可能是简拼（单字母是声母）、可能夹着英文词或数字；忽略简单拼写错误。
-  例：`zhgdoima` → 这个东西吗；`javashiyimenbianchengyuyan` → 只要词就给 Java 这类英文词。
+- 按 letters 推断用户想打什么：他敲的可能是错拼、可能是简拼（单字母是声母）、可能夹着英文词或数字。
+  **软限制：尽量贴合用户敲的拼音。** 自行纠错只允许改动 **1–2 个字母**（错位、漏字母、多字母），
+  **不要把整个音节重写**成读音相近的另一个音节；拿不准时宁可更贴 letters，或少给 / 不给。
+  例：`zhgdoima` → 这个东西吗（只动少量字母）；`javashiyimenbianchengyuyan` → 只要词就给 Java 这类英文词。
 - 中英混排时该给什么就给什么：中文语境里更常用英文说法就写英文原样（Docker、API、Linux），别硬翻成中文。
   letters 里带大小写时以 letters 为准（`GitHub` 不要写成 `github`）。
 - 只给真实存在的词或短语，不要生造、不要凑数；不确定就给空数组。
 - **不要重复 candidates 里已经有的候选**（包括它的同音变体）；本地已经给对了就不必再给。
-- 你的价值在本地给不出的：术语、新词、人名机构名、缩写、按上下文选对的同音词、错拼纠正。
+- 你的价值在本地给不出的：术语、新词、人名机构名、缩写、按上下文选对的同音词、错拼纠正（限上述 1–2 字母）。
 
 sentence（want_sentence 为 true 时给，否则 null）：**替换用户这段输入**的一句话。
 - 有 after 时，sentence 只填 before 与 after 中间缺的那一小段（通常 1 到 6 个字），**不要重复 after、连改写也不行**，
   不要带句末标点。例：before=高等数学是、letters=jichu、after=最重要的基础课程之一 → sentence=\"基础\"。
 - 没有 after 时，给一条完整的话，接住 before 的话题往下写、要有信息量；不要「是一种很好的选择」这类空话，
   也不要把 before 抄一遍。例：before=笛卡儿积、letters=shiyizhong → sentence=\"是一种二元运算\"。
-- 以 letters 敲出来的东西开头（用户敲什么就补什么）。实在想不出合适的就给 null。
+- 以 letters 敲出来的东西开头（用户敲什么就补什么）。**整句也要尽量贴合 letters 的读音**：
+  纠错软限制同样是最多改 **1–2 个字母**，**不要整音节换成另一个读音**；简拼按声母还原时优先选与 letters
+  对得上的词，不要凭空扩成无关句子。实在想不出合适的就给 null。
 - 可以中英混排（我不了解Linux系统、部署完成后调用API验证），数字也常混在里面：按中文书写习惯来 ——
   金额、数量、序号、年份、代码写阿拉伯数字（我花 123 元、第 3 章、2024 年），口语量词与成语里的固定说法写汉字
   （三个月、一个人、一心一意）。用户敲的拼音按汉字念（`yibaiershisanyuan` 就是 123 元），照念法还原。
@@ -422,6 +426,16 @@ mod tests {
             text: String::new(),
             target_language: String::new(),
         }
+    }
+
+    #[test]
+    fn system_prompt_soft_limits_self_correction_to_one_or_two_letters() {
+        // 用户定（2026-09-21）：AI 整句/词联想尽量贴合 letters；自行纠错只动 1–2 字母，不改整个音节
+        assert!(SYSTEM_PROMPT.contains("尽量贴合用户敲的拼音"));
+        assert!(SYSTEM_PROMPT.contains("1–2 个字母") || SYSTEM_PROMPT.contains("1-2 个字母"));
+        assert!(
+            SYSTEM_PROMPT.contains("不要把整个音节重写") || SYSTEM_PROMPT.contains("不要整音节")
+        );
     }
 
     #[test]
