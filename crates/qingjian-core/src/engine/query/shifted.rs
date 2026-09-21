@@ -200,8 +200,11 @@ impl Engine {
             });
         }
         let mut extra = Vec::new();
-        // 首字母大写 + 剩余拼音：拼上大写字面（Cpan → C盘）。剩余切不开则不出中文。
-        let mixed = self.build_mixed_candidate(typed);
+        // 混排：① 敲了多段/长段大写（AIhenhaoyong）；② 只大写了首字母但整段小写前缀命中英文词
+        // （Aihenhaoyong → 词表里 ai=AI + henhaoyong → AI很好用），避免候选只剩英文甚至空列表。
+        let mixed = self
+            .build_mixed_candidate(typed)
+            .or_else(|| self.mixed_from_english_prefix(typed));
         if mixed.is_none() && !split.leading_upper.is_empty() {
             let after_lower: String = typed
                 .chars()
@@ -325,6 +328,84 @@ impl Engine {
         }
         Some(Candidate {
             text,
+            kind: CandidateKind::Mixed,
+            syllables,
+            reading: None,
+            translation: None,
+            aux_code: None,
+        })
+    }
+
+    /// 只大写了英文词的第一个字母（`Aihenhaoyong`）时：按**整段小写**在英文词表里找最长前缀
+    /// （`ai` → `AI`），后半截仍按拼音出中文，拼成 `AI很好用`。词表里没有对应英文前缀、或后半截
+    /// 切不成拼音时返回 `None`（`Nihao` 不会变成 `N你好`）。
+    fn mixed_from_english_prefix(&self, typed: &str) -> Option<Candidate> {
+        let lower: String = typed
+            .chars()
+            .filter(|c| c.is_ascii_alphabetic())
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if lower.len() < 3 {
+            return None;
+        }
+        let lists = self.english_lists();
+        if lists.is_empty() {
+            return None;
+        }
+        // 从长到短找英文词前缀：须够常见（与英文领衔同一门槛），后半截至少两个音节且能当拼音。
+        // 否则 `Nihao` 会拼出 `NIH奥` 这类生造混排。
+        let mut found: Option<(usize, String)> = None;
+        for len in (2..lower.len()).rev() {
+            let rest = &lower[len..];
+            if rest.is_empty() {
+                continue;
+            }
+            let freq = lists
+                .iter()
+                .find_map(|words| words.frequency(&lower[..len]));
+            if !freq.is_some_and(|f| f >= ENGLISH_FIRST_MIN_ZIPF) {
+                continue;
+            }
+            let Some(word) = lists.iter().find_map(|words| words.get(&lower[..len])) else {
+                continue;
+            };
+            let rest_syllables = segment_longest_prefix(rest)
+                .ok()
+                .and_then(|(segs, _)| segs.first().map(|s| s.syllables.len()))
+                .unwrap_or(0);
+            if rest_syllables < 2 {
+                continue;
+            }
+            if parser::segment(rest).is_err() && self.sentence_for_pinyin(rest).is_none() {
+                continue;
+            }
+            found = Some((len, word.to_owned()));
+            break;
+        }
+        let (en_len, en_text) = found?;
+        let rest = &lower[en_len..];
+        let mut words = Vec::new();
+        self.lookup_pinyin_words(rest, &mut words);
+        let seg_syllables = segment_longest_prefix(rest)
+            .ok()
+            .and_then(|(segs, _)| segs.first().map(|s| s.syllables.len()))
+            .unwrap_or(0);
+        let full_word = words.into_iter().find(|c| {
+            c.kind == CandidateKind::Chinese
+                && seg_syllables > 0
+                && c.syllables.len() == seg_syllables
+        });
+        let (cn_text, cn_syllables) = match full_word {
+            Some(word) => (word.text, word.syllables),
+            None => self.sentence_for_pinyin(rest)?,
+        };
+        let mut syllables = vec![lower[..en_len].to_owned()];
+        syllables.extend(cn_syllables);
+        if syllables.concat() != lower {
+            return None;
+        }
+        Some(Candidate {
+            text: format!("{en_text}{cn_text}"),
             kind: CandidateKind::Mixed,
             syllables,
             reading: None,

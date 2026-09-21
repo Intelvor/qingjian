@@ -537,6 +537,51 @@ fn shift_uiv_are_uppercase_letters_not_mode_keys() {
     );
 }
 
+/// 只大写英文首字母（Aihenhaoyong）也应按词表前缀拼出 AI很好用，而不是空列表。
+#[test]
+fn single_capital_english_prefix_still_builds_mixed() {
+    let dictionary = Dictionary::parse(
+        "很\then\t80000\n好\thao\t90000\n用\tyong\t70000\n很好\then hao\t50000\n好用\thao yong\t40000\n很好用\then hao yong\t60000\n你好\tni hao\t90000\n",
+    )
+    .unwrap();
+    let words = WordList::parse("AI\tai\t5000\n").unwrap();
+    let mut engine = Engine::new(dictionary).with_english(words);
+    engine.set_shift_letter_compose(true);
+
+    for c in "AIhenhaoyong".chars() {
+        engine.push(c);
+    }
+    let texts = texts_of(&engine);
+    assert!(
+        texts.iter().any(|t| t == "AI很好用"),
+        "AIhenhaoyong 应出 AI很好用，实际 {texts:?}"
+    );
+    engine.clear();
+
+    for c in "Aihenhaoyong".chars() {
+        engine.push(c);
+    }
+    assert!(!engine.question_mode() && !engine.expression_mode());
+    let texts = texts_of(&engine);
+    assert!(!texts.is_empty(), "Aihenhaoyong 不得空候选");
+    assert!(
+        texts.iter().any(|t| t == "AI很好用"),
+        "Aihenhaoyong 应按英文词表前缀出 AI很好用，实际 {texts:?}"
+    );
+    engine.clear();
+
+    for c in "Nihao".chars() {
+        engine.push(c);
+    }
+    let texts = texts_of(&engine);
+    assert!(
+        !texts
+            .iter()
+            .any(|t| t.contains("你好") && t.starts_with('N')),
+        "词表无 ni 英文前缀时 Nihao 不该出 N你好，实际 {texts:?}"
+    );
+}
+
 #[test]
 fn expression_mode_skips_pinyin_and_evaluates() {
     let mut engine = self::engine();
