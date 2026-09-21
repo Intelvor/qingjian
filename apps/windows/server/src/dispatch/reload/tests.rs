@@ -173,10 +173,15 @@ fn forget_requests_drop_personal_words() {
     let learner = qingjian_learning::FrequencyLearner::from_path(dir.join("user.tsv")).unwrap();
     let engine = Engine::new(Dictionary::default()).with_learner(Box::new(learner));
     let mut router = Router::new(engine, RouterConfig::default());
-    router.watch_config(&config, config_path, dir.clone(), DataDirs {
+    router.watch_config(
+        &config,
+        config_path,
+        dir.clone(),
+        DataDirs {
             user_root: Some(dir.clone()),
             ..DataDirs::default()
-        },);
+        },
+    );
 
     let requests = qingjian_platform::dirs::forget_requests_path(&dir);
     // 首行带 UTF-8 BOM（别的工具写这个文件时会加）：BOM 不能把第一个词带歪，否则「删不掉但文件被清掉」。
@@ -208,10 +213,15 @@ fn forget_requests_drop_personal_english_words() {
     let learner = qingjian_learning::FrequencyLearner::from_path(dir.join("user.tsv")).unwrap();
     let engine = Engine::new(Dictionary::default()).with_learner(Box::new(learner));
     let mut router = Router::new(engine, RouterConfig::default());
-    router.watch_config(&config, config_path, dir.clone(), DataDirs {
+    router.watch_config(
+        &config,
+        config_path,
+        dir.clone(),
+        DataDirs {
             user_root: Some(dir.clone()),
             ..DataDirs::default()
-        },);
+        },
+    );
 
     let requests = qingjian_platform::dirs::forget_requests_path(&dir);
     std::fs::write(&requests, "javashiyimenbianchengyuyan\n").unwrap();

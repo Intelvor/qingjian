@@ -92,7 +92,8 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
   也不要求模型回 `sentence_pinyin`。**`letters` 区分大小写**（2026-09-18）：全拼 / 五笔走 `Composition::typed_scope()`
   （`shift_letter = "compose"` 时 Shift 大写还原进请求，模型据此判专有名词）；双拼 / 注音仍发 `decode` 后的全拼。
   提示词（`qingjian-predict/src/prompt.rs::SYSTEM_PROMPT`）用一段说明 + 六个示例
-  把行为框住：忽略简单拼写错误、中英混排照写、**不与候选窗第一页重复**、有 after 时只填中间那段、数字按中文习惯写、
+  把行为框住：**尽量贴合 letters、自行纠错只动 1–2 个字母且不改整个音节**（软限制，本地不校验）、中英混排照写、
+  **不与候选窗第一页重复**、有 after 时只填中间那段、数字按中文习惯写、
   `letters` 为空是续写、**letters 带大小写时英文专名照抄**。**五笔 / 混输**时提示词会点明 `letters` 是字根编码不是拼音（`scheme` 字段就是为这个）。
   解析（`parse_reply`）只做组装层面的两件清理：剥掉模型重复写进来的 before / after、**不与候选窗第一页重复**；
   云端词与整句都**不再拿拼音校验**（Core 侧的 `validate_cloud_words` 与 `prediction/fuzzy.rs` 已删）。

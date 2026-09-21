@@ -352,9 +352,7 @@ impl Router {
         if let Some(sentence) = self.sentence.take() {
             return Effect::Changed(Some(self.engine.accept_prediction(&sentence)));
         }
-        if self.config.sentence_on_tab
-            && (self.sentence_waiting() || self.request_sentence_now())
-        {
+        if self.config.sentence_on_tab && (self.sentence_waiting() || self.request_sentence_now()) {
             // 请过一次、结果还在路上：吞掉这个键等它，别重复请、也别让应用收到缩进。
             // 等超了当没在等（`sentence_waiting`）就再请一次。
             return Effect::Waiting;

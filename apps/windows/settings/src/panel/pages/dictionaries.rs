@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use qingjian_platform::extra_dictionaries;
 use windows_reactor::*;
 
-use crate::panel::controls::{check_row, entry_title, note, page, repo_resource};
+use crate::panel::controls::{check_row, note, page, repo_resource};
 use crate::panel::{Message, Settings};
 
 /// 个人词文件名（`%APPDATA%\Qingjian\user-words.tsv`），与 `qingjian-learning` 里那个常量一致。
@@ -52,36 +52,6 @@ fn supported(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| matches!(e, "qj" | "tsv" | "yaml" | "yml" | "txt"))
-}
-
-/// 一本词库一行：复选框 + 可选的「移除」。
-fn dict_row(
-    stem: &str,
-    label: String,
-    enabled: bool,
-    broken: bool,
-    toggle: impl Fn(bool) -> Message + 'static,
-    remove: Option<Message>,
-    context: &mut ViewContext<Settings>,
-) -> KeyedView {
-    let check = CheckBox::new()
-        .is_checked(enabled)
-        .is_enabled(!broken)
-        .on_is_checked_changed(context.callback(toggle))
-        .content(label);
-    let row = match remove {
-        Some(message) => StackPanel::new()
-            .orientation(Orientation::Horizontal)
-            .spacing(12.0)
-            .children((
-                check,
-                Button::new()
-                    .on_click(context.message(message))
-                    .content("移除"),
-            )),
-        None => check,
-    };
-    KeyedView::new(stem.to_owned(), row)
 }
 
 fn bundled_list(settings: &Settings, context: &mut ViewContext<Settings>) -> View {
