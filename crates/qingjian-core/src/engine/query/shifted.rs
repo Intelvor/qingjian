@@ -363,7 +363,7 @@ impl Engine {
             let freq = lists
                 .iter()
                 .find_map(|words| words.frequency(&lower[..len]));
-            if !freq.is_some_and(|f| f >= ENGLISH_FIRST_MIN_ZIPF) {
+            if freq.is_none_or(|f| f < ENGLISH_FIRST_MIN_ZIPF) {
                 continue;
             }
             let Some(word) = lists.iter().find_map(|words| words.get(&lower[..len])) else {
