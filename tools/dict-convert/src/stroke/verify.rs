@@ -4,8 +4,9 @@
 //! 找不到哪张就跳过哪张对照并提示：
 //!
 //! - 笔画数：按 `--stride` 抽样，比对 `--reference`；
-//! - 首笔：字表全量（不抽样），比对 `--first-reference` 的几何类别。几何类别是近似，可接受的近似对见
-//!   [`acceptable`]（竖撇走向近竖、点捺走向与撇 / 竖难分这类），其余不符必须都在 `--first-whitelist` 里。
+//! - 首笔：字表全量（不抽样），比对 `--first-reference` 的几何类别。几何类别是近似（竖撇走向近竖、
+//!   点的走向与撇 / 竖难分），但两岸笔顺的差异也落在这几类里，所以不按类别放行：不符的字都要在
+//!   `--first-whitelist` 里。
 //!
 //! 白名单里是已知且接受的差异：规范裁定后保留的 CNS 结构性差异，与对照源分笔不同的假阳性。
 
@@ -17,10 +18,6 @@ use std::path::Path;
 use crate::error::ConvertError;
 use crate::stroke::options::StrokeOptions;
 use crate::stroke::rules::{malformed, single_char};
-
-/// 首笔对照里可接受的几何近似对：(本表首笔, 对照类别)。竖撇记 p 但走向近竖；点太短，走向可能与
-/// 撇 / 竖难分。其余的类别不一致都算不符。
-const ACCEPTABLE_FIRST: &[(char, char)] = &[('p', 's'), ('n', 'p'), ('n', 's')];
 
 /// 首笔对照的结果计数。
 pub(super) struct FirstOutcome {
@@ -102,7 +99,7 @@ pub(super) fn compare_first(
             outcome.incomparable += 1;
             continue;
         }
-        if *ours == *reference || ACCEPTABLE_FIRST.contains(&(*ours, *reference)) {
+        if *ours == *reference {
             outcome.compared += 1;
             continue;
         }

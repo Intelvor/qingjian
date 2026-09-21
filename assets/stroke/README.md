@@ -37,7 +37,7 @@ t07（数据源查证）/ t09（归一化决议）两张票：**CNS 作字形来
 cargo run --release -p qingjian-dict-convert -- stroke --cns-count data/cns/CNS_stroke.txt --verify
 ```
 
-`--verify` 两路对照（对照表由 `mmh-reference` 生成，**找不到哪张就跳过哪张并提示**）：笔画数按「一级字表每 12 字取 1」（291 字）抽样比对；首笔按一级字表 3,500 字全量比对几何类别（竖撇走向近竖、点捺走向难分这类按近似对接受）。白名单之外一处不符即退出码非 0。
+`--verify` 两路对照（对照表由 `mmh-reference` 生成，**找不到哪张就跳过哪张并提示**）：笔画数按「一级字表每 12 字取 1」（291 字）抽样比对；首笔按一级字表 3,500 字全量比对几何类别。几何类别分不清近竖的撇与点，但两岸笔顺的差异也落在这几类里，所以不按类别放行：不符的字逐字裁定后进首笔白名单。白名单之外一处不符即退出码非 0。对照源把撇也归成竖的字（册、删）对照不出来，靠人工抽查。
 
 随包时再算成码表（缺省读 `data/generated/codes/stroke.tsv` 与 `data/generated/dict.qj`，写 `data/generated/codes/stroke.qj`）：
 
@@ -49,6 +49,19 @@ cargo run --release -p qingjian-dict-convert -- pack codes
 名称「笔画」、许可 `OFL-1.1`、署名「CNS11643 全字庫筆順資料（中華民國數位發展部）」与数据集页来源，
 可用 `--name` / `--license` / `--attribution` / `--source` / `--data-version` 覆盖（数据版本缺省取笔画表日期）。
 产物随包只带生成结果，原始 zip 与对照源都不入库。
+
+### 验收记录（2026-09-21，首笔第二轮）
+
+```
+已读大陆序覆盖表 rules=12 overrides=79
+已生成笔画表 entries=7991 dropped_no_sequence=111 dropped_inconsistent=3
+笔画数对照完成 sampled=291 reference_entries=3500 whitelisted=7 unmatched=0
+首笔对照完成 compared=3092 absent=0 whitelisted=408 unmatched=0
+```
+
+- 去掉首笔对照的三类近似放行后重新裁定：师、归（CNS 记点，应为竖）、非字头 / 非字旁（记撇，应为竖）、册 / 删（记竖，应为撇）、所（被「戶→户」规则误伤）改对；其余 343 字本表首笔是对的，进白名单。
+- 顺带按规范改了两处非首笔的笔顺：忄（点、点、竖）与 必（点、卧钩、点、撇、点）。
+- 一级字之外没有对照数据，只靠部件规则覆盖。
 
 ### 验收记录（2026-09-20，首笔修正后）
 

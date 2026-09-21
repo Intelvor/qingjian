@@ -89,9 +89,9 @@ fn compare_flags_only_unwhitelisted() {
     assert_eq!(used, whitelist);
     assert_eq!(unmatched, 1);
 }
-/// 首笔对照只放真正的类别不符：几何近似对与不可判的 ? 都不算，白名单只接剩下的。
+/// 首笔对照不按几何近似放行：类别不符的都要在白名单里，只有不可判的 ? 不算。
 #[test]
-fn first_compare_accepts_approximations_only() {
+fn first_compare_requires_whitelist_for_every_mismatch() {
     let chars: Vec<char> = "一月主皮".chars().collect();
     let produced: HashMap<char, char> = [('一', 'h'), ('月', 'p'), ('主', 'h'), ('皮', 'p')]
         .into_iter()
@@ -101,10 +101,11 @@ fn first_compare_accepts_approximations_only() {
         .collect();
     let whitelist: HashSet<char> = ['皮'].into_iter().collect();
     let outcome = compare_first(&chars, &produced, &expected, &whitelist);
-    // 一 相等，月 是竖撇的近似对（p 对 s）
-    assert_eq!(outcome.compared, 2);
+    // 只有 一 相等
+    assert_eq!(outcome.compared, 1);
     // 主 的对照不可判
     assert_eq!(outcome.incomparable, 1);
     assert_eq!(outcome.used, whitelist);
-    assert_eq!(outcome.unmatched, 0);
+    // 月 是竖撇（p 对 s），不在白名单里就算不符
+    assert_eq!(outcome.unmatched, 1);
 }
