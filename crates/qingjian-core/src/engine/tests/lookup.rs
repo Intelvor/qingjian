@@ -301,7 +301,7 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     assert_eq!(engine.take_raw(), "Cpan");
     assert!(engine.composition().is_empty());
 
-    // 首字母做模式匹配；第二字母起按普通拼音（Nihao → 你好 + 英文 N）
+    // 大小写坚决分开：Nihao 只出英文 N，不出「你好」；模式仍只看首字母
     let dictionary = Dictionary::parse("你好\tni hao\t90000\n盘\tpan\t9000\n").unwrap();
     let mut engine = Engine::new(dictionary);
     engine.set_shift_letter_compose(true);
@@ -311,8 +311,8 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     }
     let texts = texts_of(&engine);
     assert!(
-        texts.iter().any(|t| t == "你好"),
-        "第二字母起不做大写特殊处理，Nihao 应出你好，实际 {texts:?}"
+        !texts.iter().any(|t| t == "你好"),
+        "大小写分开，Nihao 不该出你好，实际 {texts:?}"
     );
     assert!(
         texts.iter().any(|t| t == "N"),
@@ -413,7 +413,7 @@ fn shift_letters_join_the_buffer_only_when_configured() {
         texts.iter().any(|t| t.starts_with('C') && t.contains("AI")),
         "应保留中英混排 C…AI…，实际 {texts:?}"
     );
-    // 单段开头大写 + 长拼音：额外拼上大写字面；普通拼音中文也应还在
+    // 单段开头大写 + 长拼音：拼上大写字面；大小写分开
     let dictionary = Dictionary::parse(
         "语言\tyu yan\t90000\n好学\thao xue\t50000\n吗\tma\t80000\n好\thao\t90000\n学\txue\t70000\n",
     )
@@ -427,13 +427,17 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     let texts: Vec<&str> = q.candidates.items.iter().map(|c| c.text.as_str()).collect();
     assert!(
         texts.iter().any(|t| t.contains("语言")),
-        "至少应出「C语言…」或拼音中文，实际 {texts:?}"
+        "至少应出「C语言…」，实际 {texts:?}"
     );
     assert!(
         texts
             .iter()
             .any(|t| t.starts_with('C') && t.contains("好学")),
         "整句应拼上大写字面「C语言好学吗」，实际 {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| t.contains('从')),
+        "大小写分开，C 不参与拼音，不该出「从」，实际 {texts:?}"
     );
     // 候选框的拼音行要有切分反馈（按音节加 `'`），并保留大写原样
     let marked = q.marked_text();
@@ -444,7 +448,7 @@ fn shift_letters_join_the_buffer_only_when_configured() {
     );
 }
 
-/// `shift_letter = "compose"`：模式键只看首字母；第二字母起的 u/i/v 是普通拼音。
+/// compose：模式键只看首字母；大小写坚决分开（大写不进拼音）。
 #[test]
 fn shift_uiv_are_uppercase_letters_not_mode_keys() {
     let dictionary =
@@ -454,7 +458,7 @@ fn shift_uiv_are_uppercase_letters_not_mode_keys() {
     let mut engine = Engine::new(dictionary).with_english(words);
     engine.set_shift_letter_compose(true);
 
-    // 首字母大写 U + 小写 pan：不进问字；第二字母起按拼音
+    // 首字母大写 U + 小写 pan：不进问字；U 不进拼音 → U盘
     engine.push('U');
     for c in "pan".chars() {
         engine.push(c);
@@ -471,7 +475,7 @@ fn shift_uiv_are_uppercase_letters_not_mode_keys() {
     );
     engine.clear();
 
-    // Cui：首字母 C 不是模式键，第二字母起 u/i 普通拼音 → 出「催」
+    // Cui：不进 u 模式；大小写分开 → 不出「催」
     engine.push('C');
     for c in "ui".chars() {
         engine.push(c);
@@ -482,20 +486,20 @@ fn shift_uiv_are_uppercase_letters_not_mode_keys() {
     );
     let texts = texts_of(&engine);
     assert!(
-        texts.iter().any(|t| t == "催"),
-        "Cui 应出拼音「催」，实际 {texts:?}"
+        !texts.iter().any(|t| t == "催"),
+        "大小写分开，Cui 不该出「催」，实际 {texts:?}"
     );
     engine.clear();
 
-    // Niu：第二字母起是普通拼音 → 牛
+    // Niu：大小写分开 → 不出「牛」
     engine.push('N');
     for c in "iu".chars() {
         engine.push(c);
     }
     let texts = texts_of(&engine);
     assert!(
-        texts.iter().any(|t| t == "牛"),
-        "Niu 应出拼音「牛」，实际 {texts:?}"
+        !texts.iter().any(|t| t == "牛"),
+        "大小写分开，Niu 不该出「牛」，实际 {texts:?}"
     );
     engine.clear();
 

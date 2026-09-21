@@ -160,21 +160,47 @@ impl Engine {
         }
     }
 
-    /// 普通拼音查询跑完后，合并 Shift 大写带来的英文候选（以及单段开头大写的「字母+拼音」写法）。
+    /// 普通拼音查询跑完后，合并 Shift 大写带来的英文与「首字母大写 + 剩余拼音」候选。
     ///
-    /// **模式键只看整段输入的第一个字母**；第二个及以后的字母按普通拼音处理，
-    /// **不再**因为前面有大写就把中文候选清掉（`Cui` / `Niu` 仍出催/牛）。
-    /// 大写字母本身仍可作英文候选；`Cpan` 这类「首字母大写 + 剩余拼音」额外拼出 `C盘`。
+    /// **大小写坚决分开**：大写字母永不参与拼音（`Nihao` 不出「你好」）——普通路径里
+    /// 消耗到大写位置的中文 / 整句一律丢掉。**模式键只看整段的第一个字母**（`Cui` 不进 u 模式），
+    /// 第二个及以后的字母不做模式匹配，但仍按大小写：小写走拼音，大写只作英文 / 混排字面。
     pub(super) fn merge_shifted_extras(&self, items: &mut Vec<Candidate>, typed: &str) {
         let split = self.shifted_split(typed);
+        // 大写字母不进拼音：消耗到大写位置的中文 / 整句清掉
+        let scope = self.composition.scope();
+        let shifted: Vec<bool> = typed
+            .chars()
+            .zip(scope.chars())
+            .map(|(t, _)| t.is_ascii_uppercase())
+            .collect();
+        items.retain(|c| {
+            // 有大写时 emoji 也按整段小写拼音命中（Nihao→👋你好）：大小写分开，一并丢掉
+            if matches!(c.kind, CandidateKind::Emoji) {
+                return !shifted.iter().any(|s| *s);
+            }
+            if !matches!(c.kind, CandidateKind::Chinese | CandidateKind::Sentence) {
+                return true;
+            }
+            let (consumed, _) = self.consumed_by(c);
+            let limit = scope[..consumed.min(scope.len())].chars().count();
+            !shifted.iter().take(limit).any(|s| *s)
+        });
         if let Some(leading) = split.leading
             && !items.iter().any(|c| c.text == leading.text)
         {
             items.insert(0, leading);
         }
+        // 首字母大写 + 剩余能切拼音（Cpan）：丢掉吃不掉前面大写字母的裸词
+        if !split.leading_upper.is_empty() {
+            let head = split.leading_upper.to_ascii_lowercase();
+            items.retain(|c| {
+                c.kind != CandidateKind::Chinese
+                    || c.syllables.first().map(String::as_str) == Some(head.as_str())
+            });
+        }
         let mut extra = Vec::new();
-        // 单段开头大写 + 剩余能切拼音：额外拼上大写字面（Cpan → C盘）。
-        // 多段大写交给混排候选；其余情况中文走普通拼音路径，不再按大写位置过滤。
+        // 首字母大写 + 剩余拼音：拼上大写字面（Cpan → C盘）。剩余切不开则不出中文。
         let mixed = self.build_mixed_candidate(typed);
         if mixed.is_none() && !split.leading_upper.is_empty() {
             let after_lower: String = typed
