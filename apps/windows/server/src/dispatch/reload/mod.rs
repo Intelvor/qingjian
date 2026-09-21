@@ -143,11 +143,8 @@ impl Router {
         let Some(reload) = &mut self.reload else {
             return;
         };
-        if reload.last_check.elapsed() < CONFIG_POLL_INTERVAL {
-            return;
-        }
-        reload.last_check = Instant::now();
         // 用户 `dicts/` 目录文件增删或更新：与配置改动无关，下一拍就生效
+        // （间隔闸门只在上面那一处，这里不能再设一次 last_check / 再判一次，否则同一拍里词库与码表会被自己挡掉）
         let files = reload.dirs.dict_snapshot();
         if files != reload.dictionary_files {
             // 配置损坏也继续使用上次有效的词库开关；文件变化不触发配置重试。
